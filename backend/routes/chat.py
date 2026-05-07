@@ -52,6 +52,7 @@ router = APIRouter()
 _LLM_TIMEOUT_SECONDS = int(os.getenv("ZOPEDIA_LLM_TIMEOUT_SECONDS", "300"))
 _LLM_MODEL = os.getenv("ZOPEDIA_LLM_MODEL", "").strip()
 _WIKI_TOOL_RETRIEVAL = os.getenv("ZOPEDIA_WIKI_TOOL_RETRIEVAL", "true").strip().lower() in {"1", "true", "yes", "on"}
+_WIKI_MAX_TOOL_TURNS = int(os.getenv("ZOPEDIA_WIKI_MAX_TOOL_TURNS", "8"))
 
 
 def _resolve_model(requested: Optional[str]) -> str:
@@ -124,8 +125,10 @@ async def _resolve_tool_calls_stream(
     messages: list[dict],
     tools: list[dict],
     resolved_model: str,
-    max_turns: int = 5,
+    max_turns: int | None = None,
 ):
+    if max_turns is None:
+        max_turns = _WIKI_MAX_TOOL_TURNS
     """Async generator that yields tool-calling progress events.
 
     Yields events following the original Unsloth protocol:
@@ -200,7 +203,14 @@ async def _resolve_tool_calls_stream(
                     "tool_call_id": tc_id,
                     "arguments": {"path": page_path},
                 }
+                yield {"type": "tool_status", "text": f"Reading {page_path}..."}
                 tool_result = execute_wiki_read(wiki_dir, page_path)
+                try:
+                    result_data = json.loads(tool_result)
+                    size = result_data.get("size_chars", 0)
+                    yield {"type": "tool_status", "text": f"Read {page_path} ({size:,} chars)"}
+                except Exception:
+                    pass
                 yield {
                     "type": "tool_end",
                     "tool_name": "read_wiki_page",
@@ -282,8 +292,10 @@ async def openai_chat_completions(request: Request):
                 "HOW TO USE THE WIKI:\n"
                 "- You already have the full index of entities and concepts below. Do NOT search — just pick relevant pages from the index.\n"
                 "- Call read_wiki_page(path) to read any page. Use the exact path from the index.\n"
-                "- Entity and concept pages are the most curated and up-to-date. They often contain [[wikilinks]] to related analysis and source pages.\n"
-                "- After reading an entity/concept, follow its wikilinks to analysis/* or sources/* pages for deeper detail.\n"
+                "- Entity and concept pages are the most curated and up-to-date. They contain [[wikilinks]] to related analysis and source pages.\n"
+                "- IMPORTANT: Entity/concept pages list analysis backlinks under '## Referenced by Analyses'. "
+                "ALWAYS check this section and read the linked analysis/* pages — they contain detailed historical summaries.\n"
+                "- Follow the chain: read entities/concepts first, then their linked analysis pages, then sources if needed.\n"
                 "- Prefer analysis pages over source pages as sources can be large.\n"
                 "- Analysis pages (analysis/*) are historical summaries. Sources (sources/*) are raw documents.\n\n"
                 "WIKI INDEX (Entities & Concepts):\n\n"

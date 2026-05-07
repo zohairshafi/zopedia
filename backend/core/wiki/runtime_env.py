@@ -132,6 +132,14 @@ WIKI_ENV_SPECS: tuple[WikiEnvSpec, ...] = (
         minimum=1,
         maximum=256,
     ),
+    WikiEnvSpec(
+        name="ZOPEDIA_WIKI_MAX_TOOL_TURNS",
+        kind="int",
+        default="8",
+        description="Max tool-calling turns per chat request (read_wiki_page calls).",
+        minimum=1,
+        maximum=50,
+    ),
 )
 
 _WIKI_ENV_SPECS_BY_NAME = {spec.name: spec for spec in WIKI_ENV_SPECS}
