@@ -222,6 +222,14 @@ async def _resolve_tool_calls_stream(
                 "content": tool_result,
             })
 
+    # Budget exhausted: model was still calling tools. Add a nudge to force synthesis.
+    if turn >= max_turns:
+        yield {"type": "tool_status", "text": "Tool budget used — synthesizing answer from what was read..."}
+        messages.append({
+            "role": "user",
+            "content": "You have used all available tool calls. Synthesize your answer now using ONLY the wiki pages you have already read. Do not request more tools. Provide a complete, thorough answer."
+        })
+
 
 # ── Standard chat/completions ──────────────────────────────────────
 
