@@ -112,8 +112,10 @@ def _inject_rag_context(messages: list[dict], query: str) -> tuple[list[dict], O
     return new_messages, context
 
 
-async def _resolve_tool_calls(messages: list[dict], tools: list[dict], resolved_model: str, max_turns: int = 5) -> list[dict]:
+async def _resolve_tool_calls(messages: list[dict], tools: list[dict], resolved_model: str, max_turns: int | None = None) -> list[dict]:
     """Execute tool-calling loop. Returns messages array (non-streaming path)."""
+    if max_turns is None:
+        max_turns = _WIKI_MAX_TOOL_TURNS
     result = None
     async for _ in _resolve_tool_calls_stream(messages, tools, resolved_model, max_turns):
         pass
@@ -208,14 +210,18 @@ async def _resolve_tool_calls_stream(
                 try:
                     result_data = json.loads(tool_result)
                     size = result_data.get("size_chars", 0)
+                    preview = result_data.get("content", "")[:200]
                     yield {"type": "tool_status", "text": f"Read {page_path} ({size:,} chars)"}
                 except Exception:
-                    pass
+                    size = 0
+                    preview = ""
+                # Send only metadata to the frontend UI, not the full page content.
+                # The full content is already in the tool message the model sees.
                 yield {
                     "type": "tool_end",
                     "tool_name": "read_wiki_page",
                     "tool_call_id": tc_id,
-                    "result": tool_result,
+                    "result": json.dumps({"path": page_path, "size_chars": size, "preview": preview}),
                 }
             else:
                 tool_result = json.dumps({"error": f"Unknown tool: {name}"})
@@ -232,13 +238,6 @@ async def _resolve_tool_calls_stream(
                 "content": tool_result,
             })
 
-    # Budget exhausted: model was still calling tools. Add a nudge to force synthesis.
-    if turn >= max_turns:
-        yield {"type": "tool_status", "text": "Tool budget used — synthesizing answer from what was read..."}
-        messages.append({
-            "role": "user",
-            "content": "You have used all available tool calls. Synthesize your answer now using ONLY the wiki pages you have already read. Do not request more tools. Provide a complete, thorough answer."
-        })
 
 
 # ── Standard chat/completions ──────────────────────────────────────
@@ -298,6 +297,12 @@ async def openai_chat_completions(request: Request):
                 "- Follow the chain: read entities/concepts first, then their linked analysis pages, then sources if needed.\n"
                 "- Prefer analysis pages over source pages as sources can be large.\n"
                 "- Analysis pages (analysis/*) are historical summaries. Sources (sources/*) are raw documents.\n\n"
+                "CRITICAL RULES:\n"
+                "- NEVER invent or shorten page paths. Only use EXACT paths you read via read_wiki_page.\n"
+                "- Analysis page paths contain timestamps (e.g. analysis/2026-05-07-16-06-grasp-...). "
+                "Use the full path exactly as it appears in the wikilink or tool result. "
+                "Do NOT create fake paths like 'analysis/grasp-methodology'.\n"
+                "- When citing a page, use the exact path from the tool call result, not a made-up name.\n\n"
                 "WIKI INDEX (Entities & Concepts):\n\n"
                 f"{index_text}\n"
             ),
@@ -312,7 +317,7 @@ async def openai_chat_completions(request: Request):
 
                 # Phase 1: tool resolution with progress events
                 try:
-                    async for evt in _resolve_tool_calls_stream(list(messages), wiki_tools, resolved_model):
+                    async for evt in _resolve_tool_calls_stream(messages, wiki_tools, resolved_model):
                         etype = evt["type"]
                         if etype == "tool_status":
                             yield f"data: {json.dumps({'type': 'tool_status', 'content': evt['text']})}\n\n"
@@ -321,9 +326,11 @@ async def openai_chat_completions(request: Request):
                         elif etype == "tool_end":
                             yield f"data: {json.dumps({'type': 'tool_end', 'tool_name': evt['tool_name'], 'tool_call_id': evt['tool_call_id'], 'result': evt.get('result', '')})}\n\n"
 
-                    # Pop the final assistant text message so the streaming call regenerates it
+                    # Pop any non-tool-call assistant message (narration/planning text).
                     if messages and messages[-1].get("role") == "assistant" and messages[-1].get("content") and not messages[-1].get("tool_calls"):
                         messages.pop()
+                    # Add instruction to break the model out of tool-calling mode and force synthesis.
+                    messages.append({"role": "user", "content": "Now synthesize a complete, thorough answer using all the wiki pages you just read. Provide the answer directly — do not output JSON or tool-call syntax."})
                 except Exception as exc:
                     logger.warning("Tool-calling retrieval failed, falling back: %s", exc)
                     yield f"data: {json.dumps({'type': 'tool_status', 'content': f'Error: {exc}'})}\n\n"
@@ -332,7 +339,9 @@ async def openai_chat_completions(request: Request):
                         messages.clear()
                         messages.extend(fallback_msgs)
 
-                # Phase 2: stream final answer from API with full CoT
+                # Phase 2: always stream the final answer from the API.
+                # This ensures proper token-by-token output with full CoT visibility
+                # and prevents hallucinated/narration text from being treated as the answer.
                 async for event in chat_completions_stream(messages, model=resolved_model, temperature=temperature, max_tokens=max_tokens, tools=None, tool_choice=None):
                     if event["type"] == "reasoning":
                         yield f"data: {json.dumps({'id': chunk_id, 'object': 'chat.completion.chunk', 'created': created, 'model': resolved_model, 'choices': [{'index': 0, 'delta': {'reasoning_content': event['content']}, 'finish_reason': None}]})}\n\n"
@@ -349,6 +358,7 @@ async def openai_chat_completions(request: Request):
                 messages = await _resolve_tool_calls(list(messages), wiki_tools, resolved_model)
                 if messages and messages[-1].get("role") == "assistant" and messages[-1].get("content") and not messages[-1].get("tool_calls"):
                     messages.pop()
+                messages.append({"role": "user", "content": "Now synthesize a complete, thorough answer using all the wiki pages you just read. Provide the answer directly — do not output JSON or tool-call syntax."})
             except Exception as exc:
                 logger.warning("Tool-calling retrieval failed, falling back: %s", exc)
                 if query:
