@@ -308,7 +308,9 @@ async def openai_chat_completions(request: Request):
                     logger.warning("Tool-calling retrieval failed, falling back: %s", exc)
                     yield f"data: {json.dumps({'type': 'tool_status', 'content': f'Error: {exc}'})}\n\n"
                     if query:
-                        messages, _ = _inject_rag_context(messages, query)
+                        fallback_msgs, _ = _inject_rag_context(messages, query)
+                        messages.clear()
+                        messages.extend(fallback_msgs)
 
                 # Phase 2: stream final answer from API with full CoT
                 async for event in chat_completions_stream(messages, model=resolved_model, temperature=temperature, max_tokens=max_tokens, tools=None, tool_choice=None):
