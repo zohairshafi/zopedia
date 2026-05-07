@@ -1,0 +1,23 @@
+# OS files
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+*.egg-info/
+
+# Node
+node_modules/
+frontend/dist/
+
+# Wiki data (user content)
+backend/wiki_data/
+
+# IDE
+.vscode/
+.idea/
+
+# Env
+.env
