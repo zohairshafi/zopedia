@@ -136,9 +136,17 @@ WIKI_ENV_SPECS: tuple[WikiEnvSpec, ...] = (
         name="ZOPEDIA_WIKI_MAX_TOOL_TURNS",
         kind="int",
         default="8",
-        description="Max tool-calling turns per chat request (read_wiki_page calls).",
+        description="Max tool-calling turns per chat request. Each turn can batch multiple reads (see MAX_READS_PER_TURN).",
         minimum=1,
         maximum=50,
+    ),
+    WikiEnvSpec(
+        name="ZOPEDIA_WIKI_MAX_READS_PER_TURN",
+        kind="int",
+        default="20",
+        description="Max wiki page reads per tool-calling turn. Caps batched reads to prevent context overload.",
+        minimum=1,
+        maximum=100,
     ),
 )
 

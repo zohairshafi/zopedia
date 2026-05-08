@@ -54,6 +54,7 @@ _LLM_TIMEOUT_SECONDS = int(os.getenv("ZOPEDIA_LLM_TIMEOUT_SECONDS", "300"))
 _LLM_MODEL = os.getenv("ZOPEDIA_LLM_MODEL", "").strip()
 _WIKI_TOOL_RETRIEVAL = os.getenv("ZOPEDIA_WIKI_TOOL_RETRIEVAL", "true").strip().lower() in {"1", "true", "yes", "on"}
 _WIKI_MAX_TOOL_TURNS = int(os.getenv("ZOPEDIA_WIKI_MAX_TOOL_TURNS", "8"))
+_WIKI_MAX_READS_PER_TURN = int(os.getenv("ZOPEDIA_WIKI_MAX_READS_PER_TURN", "20"))
 
 
 def _resolve_model(requested: Optional[str]) -> str:
@@ -186,10 +187,17 @@ async def _resolve_tool_calls_stream(
             assistant_msg["reasoning_content"] = reasoning
         messages.append(assistant_msg)
 
+        # Cap reads per turn
+        read_count = 0
         for tc in tool_calls:
             func = tc.get("function") or {}
             name = func.get("name", "")
             args_str = func.get("arguments", "{}")
+
+            if name == "read_wiki_page":
+                read_count += 1
+                if read_count > _WIKI_MAX_READS_PER_TURN:
+                    break
 
             try:
                 args = json.loads(args_str) if isinstance(args_str, str) else args_str
@@ -309,8 +317,9 @@ async def openai_chat_completions(request: Request):
             "role": "system",
             "content": (
                 "You have access to a personal wiki and web search.\n\n"
-                f"BUDGET: You have {_WIKI_MAX_TOOL_TURNS} turns to call tools. Each turn can batch multiple reads. "
-                "Plan your reads: start with the most relevant entities/concepts, then follow their analysis backlinks. "
+                f"BUDGET: You have {_WIKI_MAX_TOOL_TURNS} turns (up to {_WIKI_MAX_READS_PER_TURN} wiki reads per turn, "
+                f"max {_WIKI_MAX_TOOL_TURNS * _WIKI_MAX_READS_PER_TURN} total reads). "
+                "Plan carefully: start with the most relevant entities/concepts, then follow their analysis backlinks. "
                 "Don't try to read everything — prioritize quality over quantity.\n\n"
                 "AVAILABLE TOOLS:\n"
                 "- read_wiki_page(path): Read a wiki page. Use paths from the index below.\n"
