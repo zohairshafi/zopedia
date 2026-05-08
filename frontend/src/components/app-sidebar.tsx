@@ -897,62 +897,6 @@ export function AppSidebar() {
                     {isDark ? <Sun strokeWidth={1.75} className="size-[18px]" /> : <Moon strokeWidth={1.75} className="size-[18px]" />}
                     <span>{isDark ? "Light Mode" : "Dark Mode"}</span>
                   </DropdownMenuItem>
-                  <DropdownMenuItem
-                    disabled={!getTourId(pathname)}
-                    onSelect={() => {
-                      const tourId = getTourId(pathname);
-                      if (!tourId) return;
-                      window.dispatchEvent(
-                        new CustomEvent(TOUR_OPEN_EVENT, {
-                          detail: { id: tourId },
-                        }),
-                      );
-                    }}
-                  >
-                    <HugeiconsIcon icon={CursorInfo02Icon} strokeWidth={1.75} className="size-[18px]" />
-                    <span>Guided Tour</span>
-                  </DropdownMenuItem>
-                </DropdownMenuGroup>
-                <DropdownMenuSeparator className="mx-2.5! my-2.5! h-0! border-t border-border/70 bg-transparent!" />
-                <DropdownMenuGroup>
-                  <DropdownMenuItem asChild>
-                    <a
-                      href="https://unsloth.ai/docs"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      <HugeiconsIcon icon={Book03Icon} strokeWidth={1.75} className="size-[18px]" />
-                      <span>Learn More</span>
-                    </a>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem asChild>
-                    <a
-                      href="https://unsloth.ai/docs/new/changelog"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      <HugeiconsIcon
-                        icon={NewReleasesIcon}
-                        strokeWidth={1.75}
-                        className="size-[18px]"
-                      />
-                      <span>What's New</span>
-                    </a>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem asChild>
-                    <a
-                      href="https://github.com/unslothai/unsloth/issues"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      <HugeiconsIcon
-                        icon={MessageSearch01Icon}
-                        strokeWidth={1.75}
-                        className="size-[18px]"
-                      />
-                      <span>Feedback</span>
-                    </a>
-                  </DropdownMenuItem>
                 </DropdownMenuGroup>
                 <DropdownMenuSeparator className="mx-2.5! my-2.5! h-0! border-t border-border/70 bg-transparent!" />
                 <DropdownMenuItem onSelect={() => setShutdownOpen(true)}>

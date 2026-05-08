@@ -9,7 +9,7 @@ export function ProfileTab() {
       <header className="flex flex-col gap-1">
         <h1 className="text-lg font-semibold font-heading">Profile</h1>
         <p className="text-xs text-muted-foreground">
-          Update how your profile appears in Studio.
+          Update how your profile appears.
         </p>
       </header>
 

@@ -23,7 +23,7 @@ const TABS: { id: Lang; label: string }[] = [
 function buildSnippets(base: string) {
   return {
     curl: `curl ${base}/v1/chat/completions \\
-  -H "Authorization: Bearer sk-unsloth-YOUR_KEY" \\
+  -H "Authorization: Bearer sk-zopedia-YOUR_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{
     "messages": [{"role": "user", "content": "Hello"}],
@@ -33,7 +33,7 @@ function buildSnippets(base: string) {
 
 client = OpenAI(
     base_url="${base}/v1",
-    api_key="sk-unsloth-YOUR_KEY",
+    api_key="sk-zopedia-YOUR_KEY",
 )
 
 response = client.chat.completions.create(
@@ -44,7 +44,7 @@ response = client.chat.completions.create(
 for chunk in response:
     print(chunk.choices[0].delta.content or "", end="")`,
     tools: `curl ${base}/v1/chat/completions \\
-  -H "Authorization: Bearer sk-unsloth-YOUR_KEY" \\
+  -H "Authorization: Bearer sk-zopedia-YOUR_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{
     "messages": [{"role": "user", "content": "Search Python 3.13 features"}],

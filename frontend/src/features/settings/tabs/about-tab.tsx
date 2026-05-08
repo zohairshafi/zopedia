@@ -1,48 +1,28 @@
-// SPDX-License-Identifier: AGPL-3.0-only
-// Copyright 2026-present the Unsloth AI Inc. team. All rights reserved. See /studio/LICENSE.AGPL-3.0
-
 import { Button } from "@/components/ui/button";
 import { ShutdownDialog } from "@/components/shutdown-dialog";
-import { UpdateStudioInstructions } from "../components/update-studio-instructions";
-import { usePlatformStore } from "@/config/env";
 import { apiUrl } from "@/lib/api-base";
 import {
   ArrowUpRight01Icon,
-  Book03Icon,
-  Cancel01Icon,
-  MessageNotification01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useState } from "react";
 import { SettingsRow } from "../components/settings-row";
 import { SettingsSection } from "../components/settings-section";
 
-export function AboutTab() {
-  const deviceType = usePlatformStore((s) => s.deviceType);
-  const defaultShell = deviceType === "windows" ? "windows" : "unix";
-  const [shutdownOpen, setShutdownOpen] = useState(false);
-  const [version, setVersion] = useState("dev");
-
+function useVersion() {
+  const [version, setVersion] = useState<string>("unknown");
   useEffect(() => {
-    let canceled = false;
-
-    (async () => {
-      try {
-        const res = await fetch(apiUrl("/api/health"));
-        if (!res.ok) return;
-        const data = (await res.json()) as { version?: string };
-        if (!canceled && data.version) {
-          setVersion(data.version);
-        }
-      } catch {
-        // fall back to dev label
-      }
-    })();
-
-    return () => {
-      canceled = true;
-    };
+    fetch(apiUrl("/api/health"))
+      .then((r) => r.json())
+      .then((d: any) => setVersion(d.app || "zopedia"))
+      .catch(() => setVersion("zopedia"));
   }, []);
+  return version;
+}
+
+export function AboutTab() {
+  const version = useVersion();
+  const [shutdownOpen, setShutdownOpen] = useState(false);
 
   return (
     <div className="flex flex-col gap-6">
@@ -53,40 +33,22 @@ export function AboutTab() {
         </p>
       </header>
 
-      <SettingsSection title="Studio">
+      <SettingsSection title="Application">
         <SettingsRow label="Version">
           <code className="font-mono text-xs text-muted-foreground">{version}</code>
         </SettingsRow>
-      </SettingsSection>
 
-      <SettingsSection title="Updates">
-        <div className="py-2">
-          <UpdateStudioInstructions defaultShell={defaultShell} showTitle={false} />
-        </div>
-      </SettingsSection>
-
-      <SettingsSection title="Help">
-        <SettingsRow label="Documentation">
+        <SettingsRow
+          label="Documentation"
+          description="Learn how to use Zopedia for your personal wiki and RAG workflows."
+        >
           <a
-            href="https://unsloth.ai/docs"
+            href="https://github.com/zopedia"
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground"
+            className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
           >
-            <HugeiconsIcon icon={Book03Icon} className="size-3.5" />
-            unsloth.ai/docs
-            <HugeiconsIcon icon={ArrowUpRight01Icon} className="size-3" />
-          </a>
-        </SettingsRow>
-        <SettingsRow label="Feedback">
-          <a
-            href="https://github.com/unslothai/unsloth/issues"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground"
-          >
-            <HugeiconsIcon icon={MessageNotification01Icon} className="size-3.5" />
-            Report an issue
+            GitHub
             <HugeiconsIcon icon={ArrowUpRight01Icon} className="size-3" />
           </a>
         </SettingsRow>
@@ -96,7 +58,7 @@ export function AboutTab() {
         <SettingsRow
           destructive
           label="Shut down Zopedia"
-          description="Stops the Studio server process and ends your session."
+          description="Stops the Zopedia server process and ends your session."
         >
           <Button
             variant="outline"
@@ -104,8 +66,7 @@ export function AboutTab() {
             onClick={() => setShutdownOpen(true)}
             className="text-destructive hover:text-destructive hover:border-destructive/60"
           >
-            <HugeiconsIcon icon={Cancel01Icon} className="size-3.5 mr-1.5" />
-            Shut down
+            Shut down now
           </Button>
         </SettingsRow>
       </SettingsSection>

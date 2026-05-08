@@ -167,6 +167,18 @@ from routes.chat import router as chat_router
 app.include_router(chat_router, prefix="/v1")
 
 
+# ── Shutdown ────────────────────────────────────────────────────────
+
+
+@app.post("/api/shutdown")
+async def shutdown():
+    """Shut down the Zopedia server."""
+    logger.info("Shutdown requested via API")
+    import signal
+    os.kill(os.getpid(), signal.SIGTERM)
+    return {"status": "shutting_down"}
+
+
 # ── Health ─────────────────────────────────────────────────────────
 
 
