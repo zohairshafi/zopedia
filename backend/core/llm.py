@@ -375,7 +375,73 @@ WIKI_READ_PAGE_TOOL = {
     },
 }
 
-WIKI_TOOLS = [WIKI_READ_PAGE_TOOL]
+WIKI_WEB_SEARCH_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "web_search",
+        "description": (
+            "Search the web for information not in the wiki. "
+            "Use this ONLY when the user explicitly asks you to search the web, "
+            "or when the wiki doesn't have the answer. "
+            "Returns search result snippets with URLs."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Search query for the web.",
+                },
+            },
+            "required": ["query"],
+        },
+    },
+}
+
+WIKI_TOOLS = [WIKI_READ_PAGE_TOOL, WIKI_WEB_SEARCH_TOOL]
+
+
+async def execute_web_search(query: str, max_results: int = 5) -> str:
+    """Search the web using DuckDuckGo and return JSON results."""
+    import asyncio
+    encoded = __import__("urllib.parse").quote(query)
+    url = f"https://lite.duckduckgo.com/lite/?q={encoded}"
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(url, headers={"User-Agent": "Zopedia/1.0"})
+            if resp.status_code != 200:
+                return json.dumps({"error": f"Search failed: HTTP {resp.status_code}"})
+
+            html = resp.text
+            # Parse DuckDuckGo Lite results
+            results = []
+            # Match result blocks: link + description
+            import re as _re
+            # Find all result rows: link line followed by snippet line
+            links = _re.findall(r'<a[^>]*href="([^"]+)"[^>]*>([^<]+)</a>', html)
+            snippets = _re.findall(r'<td class="result-snippet"[^>]*>(.*?)</td>', html, _re.DOTALL)
+
+            for i, (url, title) in enumerate(links):
+                if i >= max_results:
+                    break
+                # Skip DuckDuckGo internal links
+                if "duckduckgo.com" in url:
+                    continue
+                title_clean = _re.sub(r'<[^>]+>', '', title).strip()
+                snippet = _re.sub(r'<[^>]+>', '', snippets[i] if i < len(snippets) else "").strip()
+                results.append({
+                    "title": title_clean or url,
+                    "url": url,
+                    "snippet": snippet[:300],
+                })
+
+            if not results:
+                return json.dumps({"results": [], "query": query, "hint": "No results found."})
+
+            return json.dumps({"results": results, "query": query}, ensure_ascii=False)
+    except Exception as exc:
+        return json.dumps({"error": f"Web search failed: {exc}"})
 
 
 def execute_wiki_search(wiki_dir: str, query: str, max_results: int = 10) -> str:

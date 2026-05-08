@@ -29,6 +29,7 @@ from core.llm import (
     WIKI_TOOLS,
     chat_completions_non_streaming,
     chat_completions_stream,
+    execute_web_search,
     execute_wiki_read,
     llm_available,
 )
@@ -215,13 +216,33 @@ async def _resolve_tool_calls_stream(
                 except Exception:
                     size = 0
                     preview = ""
-                # Send only metadata to the frontend UI, not the full page content.
-                # The full content is already in the tool message the model sees.
                 yield {
                     "type": "tool_end",
                     "tool_name": "read_wiki_page",
                     "tool_call_id": tc_id,
                     "result": json.dumps({"path": page_path, "size_chars": size, "preview": preview}),
+                }
+            elif name == "web_search":
+                query_str = str(args.get("query", ""))
+                yield {
+                    "type": "tool_start",
+                    "tool_name": "web_search",
+                    "tool_call_id": tc_id,
+                    "arguments": {"query": query_str},
+                }
+                yield {"type": "tool_status", "text": f"Searching web: {query_str}"}
+                tool_result = await execute_web_search(query_str)
+                try:
+                    result_data = json.loads(tool_result)
+                    count = len(result_data.get("results", []))
+                    yield {"type": "tool_status", "text": f"Web search: {count} results"}
+                except Exception:
+                    pass
+                yield {
+                    "type": "tool_end",
+                    "tool_name": "web_search",
+                    "tool_call_id": tc_id,
+                    "result": tool_result,
                 }
             else:
                 tool_result = json.dumps({"error": f"Unknown tool: {name}"})
@@ -274,7 +295,7 @@ async def openai_chat_completions(request: Request):
     query = _extract_last_user_query(messages)
 
     if _WIKI_TOOL_RETRIEVAL:
-        wiki_tools = WIKI_TOOLS + [t for t in tools if t.get("function", {}).get("name") not in {"read_wiki_page"}]
+        wiki_tools = WIKI_TOOLS + [t for t in tools if t.get("function", {}).get("name") not in {"read_wiki_page", "web_search"}]
 
         index_path = _WIKI_VAULT / "wiki" / "index-concise.md"
         index_text = ""
@@ -287,21 +308,20 @@ async def openai_chat_completions(request: Request):
         wiki_system = {
             "role": "system",
             "content": (
-                "You have access to a personal wiki. Its entity and concept catalog is below.\n\n"
+                "You have access to a personal wiki and web search.\n\n"
+                "AVAILABLE TOOLS:\n"
+                "- read_wiki_page(path): Read a wiki page. Use paths from the index below.\n"
+                "- web_search(query): Search the web for external information. Use ONLY when the user explicitly asks for web search, or when the wiki doesn't have the answer.\n\n"
                 "HOW TO USE THE WIKI:\n"
-                "- You already have the full index of entities and concepts below. Do NOT search — just pick relevant pages from the index.\n"
-                "- Call read_wiki_page(path) to read any page. Use the exact path from the index.\n"
+                "- The full index of entities and concepts is below. Pick relevant pages directly — no need to search.\n"
                 "- Entity and concept pages are the most curated and up-to-date. They contain [[wikilinks]] to related analysis and source pages.\n"
                 "- IMPORTANT: Entity/concept pages list analysis backlinks under '## Referenced by Analyses'. "
                 "ALWAYS check this section and read the linked analysis/* pages — they contain detailed historical summaries.\n"
                 "- Follow the chain: read entities/concepts first, then their linked analysis pages, then sources if needed.\n"
-                "- Prefer analysis pages over source pages as sources can be large.\n"
-                "- Analysis pages (analysis/*) are historical summaries. Sources (sources/*) are raw documents.\n\n"
+                "- Prefer analysis pages over source pages as sources can be large.\n\n"
                 "CRITICAL RULES:\n"
                 "- NEVER invent or shorten page paths. Only use EXACT paths you read via read_wiki_page.\n"
-                "- Analysis page paths contain timestamps (e.g. analysis/2026-05-07-16-06-grasp-...). "
-                "Use the full path exactly as it appears in the wikilink or tool result. "
-                "Do NOT create fake paths like 'analysis/grasp-methodology'.\n"
+                "- Analysis page paths contain timestamps. Use the full path exactly as it appears.\n"
                 "- When citing a page, use the exact path from the tool call result, not a made-up name.\n\n"
                 "WIKI INDEX (Entities & Concepts):\n\n"
                 f"{index_text}\n"
