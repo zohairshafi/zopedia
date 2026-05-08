@@ -404,42 +404,24 @@ WIKI_TOOLS = [WIKI_READ_PAGE_TOOL, WIKI_WEB_SEARCH_TOOL]
 
 async def execute_web_search(query: str, max_results: int = 5) -> str:
     """Search the web using DuckDuckGo and return JSON results."""
-    encoded = quote(query)
-    url = f"https://lite.duckduckgo.com/lite/?q={encoded}"
-
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.get(url, headers={"User-Agent": "Zopedia/1.0"})
-            if resp.status_code != 200:
-                return json.dumps({"error": f"Search failed: HTTP {resp.status_code}"})
+        from ddgs import DDGS
 
-            html = resp.text
-            # Parse DuckDuckGo Lite results
-            results = []
-            # Match result blocks: link + description
-            import re as _re
-            # Find all result rows: link line followed by snippet line
-            links = _re.findall(r'<a[^>]*href="([^"]+)"[^>]*>([^<]+)</a>', html)
-            snippets = _re.findall(r'<td class="result-snippet"[^>]*>(.*?)</td>', html, _re.DOTALL)
-
-            for i, (url, title) in enumerate(links):
-                if i >= max_results:
-                    break
-                # Skip DuckDuckGo internal links
-                if "duckduckgo.com" in url:
-                    continue
-                title_clean = _re.sub(r'<[^>]+>', '', title).strip()
-                snippet = _re.sub(r'<[^>]+>', '', snippets[i] if i < len(snippets) else "").strip()
+        results = []
+        with DDGS() as ddgs:
+            for r in ddgs.text(query, max_results=max_results):
                 results.append({
-                    "title": title_clean or url,
-                    "url": url,
-                    "snippet": snippet[:300],
+                    "title": r.get("title", ""),
+                    "url": r.get("href", ""),
+                    "snippet": (r.get("body", "") or "")[:300],
                 })
 
-            if not results:
-                return json.dumps({"results": [], "query": query, "hint": "No results found."})
+        if not results:
+            return json.dumps({"results": [], "query": query, "hint": "No results found."})
 
-            return json.dumps({"results": results, "query": query}, ensure_ascii=False)
+        return json.dumps({"results": results, "query": query}, ensure_ascii=False)
+    except ImportError:
+        return json.dumps({"error": "duckduckgo_search package not installed. Run: pip install duckduckgo_search"})
     except Exception as exc:
         return json.dumps({"error": f"Web search failed: {exc}"})
 
