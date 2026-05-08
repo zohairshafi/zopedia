@@ -19,5 +19,8 @@ backend/wiki_data/
 .vscode/
 .idea/
 
+# Session context
+SESSION_CONTEXT.md
+
 # Env
 .env
