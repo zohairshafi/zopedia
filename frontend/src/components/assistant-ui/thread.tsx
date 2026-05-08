@@ -6,7 +6,7 @@ import {
   ComposerAttachments,
   UserMessageAttachments,
 } from "@/components/assistant-ui/attachment";
-import { CodeToggleIcon } from "@/components/assistant-ui/code-toggle-icon";
+
 import { MarkdownText } from "@/components/assistant-ui/markdown-text";
 import { MessageTiming } from "@/components/assistant-ui/message-timing";
 import { Reasoning, ReasoningGroup } from "@/components/assistant-ui/reasoning";
@@ -701,39 +701,7 @@ const WebSearchToggle: FC = () => {
   );
 };
 
-const CodeToolsToggle: FC = () => {
-  const modelLoaded = useChatRuntimeStore(
-    (s) => !!s.params.checkpoint && !s.modelLoading,
-  );
-  const useUpstream = useChatRuntimeStore((s) => s.useUpstream);
-  const supportsTools = useChatRuntimeStore((s) => s.supportsTools);
-  const codeToolsEnabled = useChatRuntimeStore((s) => s.codeToolsEnabled);
-  const setCodeToolsEnabled = useChatRuntimeStore((s) => s.setCodeToolsEnabled);
-  const controlsReady = modelLoaded || useUpstream;
-  const disabled = !controlsReady || (!useUpstream && !supportsTools);
 
-  return (
-    <button
-      type="button"
-      disabled={disabled}
-      onClick={() => setCodeToolsEnabled(!codeToolsEnabled)}
-      className={cn(
-        "flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-colors",
-        disabled
-          ? "cursor-not-allowed opacity-40"
-          : codeToolsEnabled
-            ? "bg-primary/10 text-primary hover:bg-primary/20"
-            : "bg-muted text-muted-foreground hover:bg-muted-foreground/15",
-      )}
-      aria-label={
-        codeToolsEnabled ? "Disable code execution" : "Enable code execution"
-      }
-    >
-      <CodeToggleIcon className="size-3.5" />
-      <span>Code</span>
-    </button>
-  );
-};
 
 
 const WikiChatHistoryToggle: FC = () => {
@@ -883,7 +851,6 @@ const ComposerAction: FC<{ disabled?: boolean }> = ({ disabled }) => {
         <ReasoningEffortControl />
         <PreserveThinkingToggle />
         <WebSearchToggle />
-        <CodeToolsToggle />
         <WikiChatHistoryToggle />
       </div>
       <div className="shrink-0 flex items-center gap-1">

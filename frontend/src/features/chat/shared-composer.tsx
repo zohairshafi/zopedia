@@ -2,7 +2,6 @@
 // Copyright 2026-present the Unsloth AI Inc. team. All rights reserved. See /studio/LICENSE.AGPL-3.0
 
 import { TooltipIconButton } from "@/components/assistant-ui/tooltip-icon-button";
-import { CodeToggleIcon } from "@/components/assistant-ui/code-toggle-icon";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -267,8 +266,6 @@ export function SharedComposer({
   const supportsTools = useChatRuntimeStore((s) => s.supportsTools);
   const toolsEnabled = useChatRuntimeStore((s) => s.toolsEnabled);
   const setToolsEnabled = useChatRuntimeStore((s) => s.setToolsEnabled);
-  const codeToolsEnabled = useChatRuntimeStore((s) => s.codeToolsEnabled);
-  const setCodeToolsEnabled = useChatRuntimeStore((s) => s.setCodeToolsEnabled);
   const controlsReady = modelLoaded || useUpstream;
   const reasoningDisabled = !controlsReady || (!useUpstream && !supportsReasoning);
   const toolsDisabled = !controlsReady || (!useUpstream && !supportsTools);
@@ -765,23 +762,6 @@ export function SharedComposer({
           >
             <GlobeIcon className="size-3.5" />
             <span>Search</span>
-          </button>
-          <button
-            type="button"
-            disabled={toolsDisabled}
-            onClick={() => setCodeToolsEnabled(!codeToolsEnabled)}
-            className={cn(
-              "flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-colors",
-              toolsDisabled
-                ? "cursor-not-allowed opacity-40"
-                : codeToolsEnabled
-                  ? "bg-primary/10 text-primary hover:bg-primary/20"
-                  : "bg-muted text-muted-foreground hover:bg-muted-foreground/15",
-            )}
-            aria-label={codeToolsEnabled ? "Disable code execution" : "Enable code execution"}
-          >
-            <CodeToggleIcon className="size-3.5" />
-            <span>Code</span>
           </button>
         </div>
         <div className="shrink-0 flex items-center gap-1">

@@ -690,7 +690,6 @@ export function createOpenAIStreamAdapter(): ChatModelAdapter {
       const {
         supportsTools,
         toolsEnabled,
-        codeToolsEnabled,
       } = runtime;
       const reasoningCapable = runtime.supportsReasoning || useUpstream;
       const toolCapable = supportsTools || useUpstream;
@@ -856,13 +855,12 @@ export function createOpenAIStreamAdapter(): ChatModelAdapter {
                 : { enable_thinking: reasoningEnabled }
               : {}),
             ...(supportsPreserveThinking ? { preserve_thinking: preserveThinking } : {}),
-            ...(toolCapable && (toolsEnabled || codeToolsEnabled)
+            ...(toolCapable
               ? {
                   enable_tools: true,
-                  enabled_tools: [
-                    ...(toolsEnabled ? ["web_search"] : []),
-                    ...(codeToolsEnabled ? ["python", "terminal"] : []),
-                  ],
+                  enabled_tools: toolsEnabled
+                    ? ["read_wiki_page", "web_search"]
+                    : ["read_wiki_page"],
                   auto_heal_tool_calls: useChatRuntimeStore.getState().autoHealToolCalls,
                   max_tool_calls_per_message: useChatRuntimeStore.getState().maxToolCallsPerMessage,
                   tool_call_timeout: (() => {

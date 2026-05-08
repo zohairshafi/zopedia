@@ -291,6 +291,8 @@ async def openai_chat_completions(request: Request):
     tools: list[dict] = body.get("tools") or []
     tool_choice = body.get("tool_choice")
     response_format = body.get("response_format")
+    enable_tools = bool(body.get("enable_tools", False))
+    enabled_tools: list[str] = body.get("enabled_tools") or []
 
     resolved_model = _resolve_model(model)
 
@@ -303,27 +305,60 @@ async def openai_chat_completions(request: Request):
     query = _extract_last_user_query(messages)
 
     if _WIKI_TOOL_RETRIEVAL:
-        wiki_tools = WIKI_TOOLS + [t for t in tools if t.get("function", {}).get("name") not in {"read_wiki_page", "web_search"}]
+        # Determine which tools are enabled. If enable_tools is set, use enabled_tools list.
+        # Otherwise default to both wiki + web search.
+        if enable_tools:
+            enabled_set = set(enabled_tools)
+        else:
+            enabled_set = {"read_wiki_page", "web_search"}
+
+        wiki_tools = [t for t in WIKI_TOOLS if t["function"]["name"] in enabled_set]
+        # Add any custom tools from the request
+        wiki_tools += [t for t in tools if t.get("function", {}).get("name") not in {"read_wiki_page", "web_search"}]
+
+        has_wiki = "read_wiki_page" in enabled_set
+        has_web = "web_search" in enabled_set
 
         index_path = _WIKI_VAULT / "wiki" / "index-concise.md"
         index_text = ""
-        if index_path.exists():
+        if has_wiki and index_path.exists():
             try:
                 index_text = index_path.read_text(encoding="utf-8", errors="ignore")
             except Exception:
                 index_text = "(wiki index unavailable)"
 
-        wiki_system = {
-            "role": "system",
-            "content": (
-                "You have access to a personal wiki and web search.\n\n"
+        # Build system prompt dynamically based on enabled tools
+        prompt_parts = []
+
+        # Intro line
+        if has_wiki and has_web:
+            prompt_parts.append("You have access to a personal wiki and web search.\n")
+        elif has_wiki:
+            prompt_parts.append("You have access to a personal wiki.\n")
+        elif has_web:
+            prompt_parts.append("You have access to web search.\n")
+
+        # Budget info (only relevant when wiki is enabled)
+        if has_wiki:
+            prompt_parts.append(
                 f"BUDGET: You have {_WIKI_MAX_TOOL_TURNS} turns (up to {_WIKI_MAX_READS_PER_TURN} wiki reads per turn, "
                 f"max {_WIKI_MAX_TOOL_TURNS * _WIKI_MAX_READS_PER_TURN} total reads). "
                 "Plan carefully: start with the most relevant entities/concepts, then follow their analysis backlinks. "
                 "Don't try to read everything — prioritize quality over quantity.\n\n"
-                "AVAILABLE TOOLS:\n"
-                "- read_wiki_page(path): Read a wiki page. Use paths from the index below.\n"
-                "- web_search(query): Search the web for external information. Use ONLY when the user explicitly asks for web search, or when the wiki doesn't have the answer.\n\n"
+            )
+
+        # Available tools
+        if wiki_tools:
+            prompt_parts.append("AVAILABLE TOOLS:\n")
+            for tool in wiki_tools:
+                name = tool["function"]["name"]
+                desc = tool["function"]["description"]
+                prompt_parts.append(f"- {name}: {desc}\n")
+            prompt_parts.append("\n")
+
+        # Wiki usage instructions
+        if has_wiki:
+            prompt_parts.append(
                 "HOW TO USE THE WIKI:\n"
                 "- The full index of entities and concepts is below. Pick relevant pages directly — no need to search.\n"
                 "- Entity and concept pages are the most curated and up-to-date. They contain [[wikilinks]] to related analysis and source pages.\n"
@@ -335,11 +370,24 @@ async def openai_chat_completions(request: Request):
                 "- NEVER invent or shorten page paths. Only use EXACT paths you read via read_wiki_page.\n"
                 "- Analysis page paths contain timestamps. Use the full path exactly as it appears.\n"
                 "- When citing a page, use the exact path from the tool call result, not a made-up name.\n\n"
-                "WIKI INDEX (Entities & Concepts):\n\n"
-                f"{index_text}\n"
-            ),
-        }
-        messages = [wiki_system] + list(messages)
+            )
+
+        # Web search guideline
+        if has_web and not has_wiki:
+            prompt_parts.append(
+                "Use web_search when the user asks for information that requires external or up-to-date sources.\n\n"
+            )
+
+        # Wiki index
+        if has_wiki and index_text:
+            prompt_parts.append(f"WIKI INDEX (Entities & Concepts):\n\n{index_text}\n")
+
+        if prompt_parts:
+            wiki_system = {
+                "role": "system",
+                "content": "".join(prompt_parts),
+            }
+            messages = [wiki_system] + list(messages)
 
         if stream:
             # ── Streaming with tool visibility ──────────────────────
