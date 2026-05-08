@@ -138,33 +138,6 @@ export function GeneralTab() {
         </p>
       </header>
 
-      <SettingsSection title="Account">
-        <SettingsRow
-          label="Hugging Face token"
-          description="Used to load gated models and push artifacts."
-        >
-          <div className="relative w-[260px]">
-            <Input
-              type={showToken ? "text" : "password"}
-              placeholder="hf_…"
-              value={draftToken}
-              onChange={(e) => setDraftToken(e.target.value)}
-              onBlur={commitToken}
-              className="h-8 w-full pr-8 font-mono text-xs"
-            />
-            <button
-              type="button"
-              onClick={() => setShowToken((s) => !s)}
-              className="absolute right-1.5 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground"
-              aria-label={showToken ? "Hide token" : "Show token"}
-              tabIndex={-1}
-            >
-              {showToken ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
-            </button>
-          </div>
-        </SettingsRow>
-      </SettingsSection>
-
       <SettingsSection title="Chat defaults">
         <SettingsRow
           label="Auto-title new chats"
@@ -173,27 +146,6 @@ export function GeneralTab() {
           <Switch checked={autoTitle} onCheckedChange={setAutoTitle} />
         </SettingsRow>
       </SettingsSection>
-
-      {!chatOnly && (
-        <SettingsSection title="Getting started">
-          <SettingsRow
-            label="Start onboarding"
-            description="Open the setup wizard again without changing your account."
-          >
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                resetOnboardingDone();
-                closeDialog();
-                navigate({ to: "/chat" });
-              }}
-            >
-              Start onboarding
-            </Button>
-          </SettingsRow>
-        </SettingsSection>
-      )}
 
       <SettingsSection title="Danger zone">
         <SettingsRow
@@ -218,7 +170,7 @@ export function GeneralTab() {
             <DialogTitle>Reset all local preferences?</DialogTitle>
             <DialogDescription>
               This clears your theme, tokens, and stored settings, then reloads
-              Studio. Chats and API keys are not affected.
+              Zopedia. Chats and API keys are not affected.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
