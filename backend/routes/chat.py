@@ -309,6 +309,9 @@ async def openai_chat_completions(request: Request):
             "role": "system",
             "content": (
                 "You have access to a personal wiki and web search.\n\n"
+                f"BUDGET: You have {_WIKI_MAX_TOOL_TURNS} turns to call tools. Each turn can batch multiple reads. "
+                "Plan your reads: start with the most relevant entities/concepts, then follow their analysis backlinks. "
+                "Don't try to read everything — prioritize quality over quantity.\n\n"
                 "AVAILABLE TOOLS:\n"
                 "- read_wiki_page(path): Read a wiki page. Use paths from the index below.\n"
                 "- web_search(query): Search the web for external information. Use ONLY when the user explicitly asks for web search, or when the wiki doesn't have the answer.\n\n"
@@ -316,7 +319,7 @@ async def openai_chat_completions(request: Request):
                 "- The full index of entities and concepts is below. Pick relevant pages directly — no need to search.\n"
                 "- Entity and concept pages are the most curated and up-to-date. They contain [[wikilinks]] to related analysis and source pages.\n"
                 "- IMPORTANT: Entity/concept pages list analysis backlinks under '## Referenced by Analyses'. "
-                "ALWAYS check this section and read the linked analysis/* pages — they contain detailed historical summaries.\n"
+                "ALWAYS check this section and read the linked analysis/* pages if the query needs a deeper answer - they contain detailed historical summaries.\n"
                 "- Follow the chain: read entities/concepts first, then their linked analysis pages, then sources if needed.\n"
                 "- Prefer analysis pages over source pages as sources can be large.\n\n"
                 "CRITICAL RULES:\n"
