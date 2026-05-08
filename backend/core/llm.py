@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import re
+from urllib.parse import quote
 import time
 from typing import Any, Callable, Optional
 
@@ -403,8 +404,7 @@ WIKI_TOOLS = [WIKI_READ_PAGE_TOOL, WIKI_WEB_SEARCH_TOOL]
 
 async def execute_web_search(query: str, max_results: int = 5) -> str:
     """Search the web using DuckDuckGo and return JSON results."""
-    import asyncio
-    encoded = __import__("urllib.parse").quote(query)
+    encoded = quote(query)
     url = f"https://lite.duckduckgo.com/lite/?q={encoded}"
 
     try:
