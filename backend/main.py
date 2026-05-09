@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 import sys
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
@@ -177,6 +179,49 @@ async def shutdown():
     import signal
     os.kill(os.getpid(), signal.SIGTERM)
     return {"status": "shutting_down"}
+
+
+# ── File Upload ──────────────────────────────────────────────────────
+
+
+@app.post("/api/upload")
+async def upload_file(request: Request):
+    """Upload files directly to the wiki raw/ folder for ingestion."""
+    from fastapi import UploadFile
+
+    raw_dir = _WIKI_VAULT / "raw"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+
+    form = await request.form()
+    uploaded: list[str] = []
+    failed: list[dict] = []
+
+    for field_name in form:
+        value = form[field_name]
+        if not isinstance(value, UploadFile):
+            continue
+        file: UploadFile = value
+        try:
+            content = await file.read()
+            if not content:
+                failed.append({"filename": file.filename or field_name, "reason": "empty file"})
+                continue
+            safe_name = file.filename or f"uploaded-{field_name}"
+            safe_name = safe_name.replace("/", "_").replace("\\", "_").strip()
+            if not safe_name:
+                failed.append({"filename": file.filename or field_name, "reason": "invalid filename"})
+                continue
+            dest = raw_dir / safe_name
+            if dest.exists():
+                stem = dest.stem
+                suffix = dest.suffix
+                dest = raw_dir / f"{stem}-{int(time.time())}{suffix}"
+            dest.write_bytes(content)
+            uploaded.append(str(dest.relative_to(_WIKI_VAULT)))
+        except Exception as exc:
+            failed.append({"filename": file.filename or field_name, "reason": str(exc)})
+
+    return {"status": "ok", "uploaded": uploaded, "failed": failed}
 
 
 # ── Health ─────────────────────────────────────────────────────────
