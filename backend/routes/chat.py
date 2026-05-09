@@ -366,10 +366,10 @@ async def openai_chat_completions(request: Request):
         if has_wiki:
             prompt_parts.append(
                 "HOW TO USE THE WIKI:\n"
-                "- The wiki index below is organized into Entity Communities and Concept Communities. "
-                "Each community groups related pages discovered through link analysis.\n"
+                "- The wiki index below is a table of contents. Each line is a community page (godnodes/*.md).\n"
+                "- Use read_wiki_page to expand a community — the page lists all entity/concept members.\n"
                 "- Start with the community name that best matches the user's question, "
-                "then read the listed pages. Follow their [[wikilinks]] to drill deeper.\n"
+                "read it, then read individual member pages and follow their [[wikilinks]].\n"
                 "- Entity and concept pages are the most curated and up-to-date. They contain [[wikilinks]] to related analysis and source pages.\n"
                 "- IMPORTANT: Entity/concept pages list analysis backlinks under '## Referenced by Analyses'. "
                 "ALWAYS check this section and read the linked analysis/* pages if the query needs a deeper answer - they contain detailed historical summaries.\n"
