@@ -307,8 +307,11 @@ async def openai_chat_completions(request: Request):
     if _WIKI_TOOL_RETRIEVAL:
         # Determine which tools are enabled. If enable_tools is set, use enabled_tools list.
         # Otherwise default to both wiki + web search.
+        # Wiki is always available when tool retrieval is enabled — the frontend toggle
+        # controls web_search only.
         if enable_tools:
             enabled_set = set(enabled_tools)
+            enabled_set.add("read_wiki_page")
         else:
             enabled_set = {"read_wiki_page", "web_search"}
 
@@ -319,7 +322,10 @@ async def openai_chat_completions(request: Request):
         has_wiki = "read_wiki_page" in enabled_set
         has_web = "web_search" in enabled_set
 
-        index_path = _WIKI_VAULT / "wiki" / "index-concise.md"
+        # Prefer the hierarchical god-nodes index; fall back to flat concise index
+        index_path = _WIKI_VAULT / "wiki" / "index-godnodes.md"
+        if not index_path.exists():
+            index_path = _WIKI_VAULT / "wiki" / "index-concise.md"
         index_text = ""
         if has_wiki and index_path.exists():
             try:
@@ -360,7 +366,8 @@ async def openai_chat_completions(request: Request):
         if has_wiki:
             prompt_parts.append(
                 "HOW TO USE THE WIKI:\n"
-                "- The full index of entities and concepts is below. Pick relevant pages directly — no need to search.\n"
+                "- The wiki index below is structured hierarchically. Start with 'Hub Pages' to find the most central topics.\n"
+                "- Each hub page has a 'Linked from' subsection listing pages directly connected to it — follow those links to drill deeper.\n"
                 "- Entity and concept pages are the most curated and up-to-date. They contain [[wikilinks]] to related analysis and source pages.\n"
                 "- IMPORTANT: Entity/concept pages list analysis backlinks under '## Referenced by Analyses'. "
                 "ALWAYS check this section and read the linked analysis/* pages if the query needs a deeper answer - they contain detailed historical summaries.\n"

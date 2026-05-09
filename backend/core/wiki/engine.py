@@ -892,6 +892,7 @@ class LLMWikiEngine:
 
         self.index_file = self.wiki_dir / "index.md"
         self.index_concise_file = self.wiki_dir / "index-concise.md"
+        self.index_godnodes_file = self.wiki_dir / "index-godnodes.md"
         self.log_file = self.wiki_dir / "log.md"
 
         self._ensure_layout()
@@ -2874,6 +2875,27 @@ class LLMWikiEngine:
 
         candidate_groups = self._enrichment_candidate_groups()
 
+        # Compute god_nodes from graphify for enrichment prioritization.
+        # High-connectivity hub pages should be favored when selecting links.
+        god_nodes: Set[str] = set()
+        try:
+            pages = self._all_wiki_pages()
+            graph = self._build_link_graph(pages)
+            graphify = self._graphify_lint_insights(pages, graph)
+            if graphify.get("available"):
+                for entry in graphify.get("god_nodes", []):
+                    if isinstance(entry, dict):
+                        node = str(entry.get("node", ""))
+                    else:
+                        node = str(entry)
+                    if node:
+                        # Normalize: strip .md extension to match candidate format
+                        if node.endswith(".md"):
+                            node = node[:-3]
+                        god_nodes.add(node)
+        except Exception:
+            pass
+
         max_pages = max(1, int(max_analysis_pages))
         analysis_pages = sorted(self.analysis_dir.glob("*.md"))[:max_pages]
         valid_targets = {
@@ -2928,6 +2950,7 @@ class LLMWikiEngine:
                     existing_links = existing_links,
                     limit = limit,
                     group_name = group_name,
+                    god_nodes = god_nodes,
                 )
                 if selected_links:
                     selected_by_group[group_name] = selected_links
@@ -6368,6 +6391,7 @@ class LLMWikiEngine:
             out.append("")
         self.index_file.write_text("\n".join(out).rstrip() + "\n", encoding = "utf-8")
         self._rebuild_index_concise()
+        self._rebuild_index_godnodes()
 
     def _rebuild_index_concise(self) -> None:
         """Build a compact index with only entities and concepts for model context.
@@ -6407,6 +6431,109 @@ class LLMWikiEngine:
         lines.append("---")
         lines.append(f"Total: {page_count} pages. Use read_wiki_page to read any page by its path.")
         self.index_concise_file.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+
+    def _rebuild_index_godnodes(self, top_n: int = 8) -> None:
+        """Build a hierarchical index using graphify god nodes as entry points.
+
+        Structure:
+        - Hub Pages (god nodes with connection counts)
+        - Linked from each hub (direct outbound entity/concept neighbors)
+        - Other Pages (everything not linked from a hub)
+
+        Falls back to inbound-link-count ranking if graphify is unavailable.
+        This index is designed to stay compact even when the wiki has
+        hundreds of pages — god nodes act as a table of contents.
+        """
+        top_n = max(2, int(top_n))
+        pages = [p for p in self._all_wiki_pages()
+                 if p.startswith("entities/") or p.startswith("concepts/")]
+        if not pages:
+            return
+
+        link_graph = self._build_link_graph(pages)
+        inbound = link_graph.get("inbound", {})
+        outbound = link_graph.get("outbound", {})
+
+        # Compute god nodes: try graphify, fall back to inbound-link count
+        god_nodes: List[Tuple[str, int]] = []
+        graphify = self._graphify_lint_insights(pages, link_graph)
+        if graphify.get("available"):
+            for entry in graphify.get("god_nodes", []):
+                if isinstance(entry, dict):
+                    node = str(entry.get("node", ""))
+                    score = int(entry.get("score", len(inbound.get(node, []))))
+                else:
+                    node = str(entry)
+                    score = len(inbound.get(node, []))
+                if node:
+                    god_nodes.append((node, max(1, score)))
+        if not god_nodes:
+            # Fallback: rank by inbound link count
+            scored = [(p, len(inbound.get(p, []))) for p in pages]
+            scored.sort(key=lambda item: -item[1])
+            god_nodes = [(p, s) for p, s in scored[:top_n] if s > 0]
+        if not god_nodes:
+            return
+
+        gn_set = {gn for gn, _ in god_nodes}
+        index_summary = self._index_summary_by_page()
+
+        def _page_title(rel: str) -> str:
+            """Extract first H1 from a page by its relative path (with .md)."""
+            summary = str(index_summary.get(rel, "")).strip()
+            if summary:
+                return summary[:120]
+            page_path = self.wiki_dir / rel
+            if page_path.exists():
+                try:
+                    text = page_path.read_text(encoding="utf-8", errors="ignore")
+                    for raw_line in text.splitlines():
+                        stripped = raw_line.strip()
+                        if stripped.startswith("# "):
+                            return stripped[2:].strip()[:120]
+                except Exception:
+                    pass
+            label = rel[:-3] if rel.endswith(".md") else rel
+            return label.split("/", 1)[-1].replace("-", " ").replace("_", " ")
+
+        lines = ["# Wiki Index (Hub Pages)", ""]
+        lines.append("## Hub Pages")
+        for gn_path, gn_score in god_nodes:
+            gn_rel = gn_path[:-3] if gn_path.endswith(".md") else gn_path
+            title = _page_title(gn_path)
+            lines.append(f"- [[{gn_rel}]] - {title} ({gn_score} connections)")
+        lines.append("")
+
+        for gn_path, _gn_score in god_nodes:
+            gn_rel = gn_path[:-3] if gn_path.endswith(".md") else gn_path
+            neighbors = outbound.get(gn_path, [])
+            ent_concepts = sorted(
+                n for n in neighbors
+                if (n.startswith("entities/") or n.startswith("concepts/"))
+                and n != gn_path
+            )
+            if not ent_concepts:
+                continue
+            lines.append(f"## Linked from [[{gn_rel}]]")
+            for nb in ent_concepts[:12]:
+                nb_rel = nb[:-3] if nb.endswith(".md") else nb
+                title = _page_title(nb)
+                lines.append(f"- [[{nb_rel}]] - {title[:120]}")
+            lines.append("")
+
+        # Remaining pages not linked from any god node
+        remaining = [p for p in pages if p not in gn_set]
+        if remaining:
+            lines.append("## Other Pages")
+            for p in sorted(remaining):
+                rel = p[:-3] if p.endswith(".md") else p
+                title = _page_title(p)
+                lines.append(f"- [[{rel}]] - {title[:120]}")
+
+        page_count = sum(1 for l in lines if l.startswith("- [["))
+        lines.append("---")
+        lines.append(f"Total: {page_count} pages. Start from Hub Pages, then follow Linked sections. Use read_wiki_page to read any page by its path.")
+        self.index_godnodes_file.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
 
     def _append_log(self, entry: str) -> None:
         with self.log_file.open("a", encoding = "utf-8") as f:
@@ -7513,6 +7640,7 @@ class LLMWikiEngine:
         existing_links: Set[str],
         limit: int,
         group_name: str = "",
+        god_nodes: Optional[Set[str]] = None,
     ) -> List[str]:
         if limit <= 0:
             return []
@@ -7534,18 +7662,29 @@ class LLMWikiEngine:
             return []
 
         if not self.cfg.enrichment_llm_selector_enabled:
-            return []
+            return self._select_enrichment_links_lexical(
+                analysis_text = analysis_text,
+                candidates = filtered_candidates,
+                existing_links = set(),
+                limit = limit,
+            )
 
         llm_selected = self._llm_select_enrichment_links(
             analysis_text = analysis_text,
             candidates = filtered_candidates,
             limit = limit,
             group_name = group_name,
+            god_nodes = god_nodes,
         )
         if llm_selected is not None:
             return llm_selected
 
-        return []
+        return self._select_enrichment_links_lexical(
+            analysis_text = analysis_text,
+            candidates = filtered_candidates,
+            existing_links = set(),
+            limit = limit,
+        )
 
     def _select_enrichment_links_lexical(
         self,
@@ -7600,6 +7739,7 @@ class LLMWikiEngine:
         candidates: List[str],
         limit: int,
         group_name: str = "",
+        god_nodes: Optional[Set[str]] = None,
     ) -> Optional[List[str]]:
         if limit <= 0 or not candidates:
             return []
@@ -7627,6 +7767,8 @@ class LLMWikiEngine:
             overlap = len(set(candidate_terms).intersection(analysis_terms))
             phrase_match = bool(phrase) and phrase in analysis_lower
             score_hint = overlap + (2 if phrase_match else 0)
+            if god_nodes and normalized in god_nodes:
+                score_hint += 10  # boost hub pages above lexical match alone
             scored.append((score_hint, normalized, overlap, phrase_match))
 
         if not scored:

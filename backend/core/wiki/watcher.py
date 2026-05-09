@@ -407,7 +407,8 @@ class WikiFileEventHandler(FileSystemEventHandler):
                     try:
                         enrich_report = (
                             self.ingestor.wiki_manager.enrich_analysis_pages(
-                                dry_run = False
+                                dry_run = False,
+                                compact_knowledge_pages = True,
                             )
                         )
                         logger.info(
