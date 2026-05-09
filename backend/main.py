@@ -200,33 +200,42 @@ async def upload_file(request: Request):
 
     for field_name in form:
         value = form[field_name]
-        if not isinstance(value, UploadFile):
+        # FastAPI returns a list when multiple files share the same field name
+        files: list[UploadFile] = []
+        if isinstance(value, UploadFile):
+            files = [value]
+        elif isinstance(value, list):
+            files = [v for v in value if isinstance(v, UploadFile)]
+        else:
             continue
-        file: UploadFile = value
-        try:
-            safe_name = file.filename or f"uploaded-{field_name}"
-            safe_name = safe_name.replace("/", "_").replace("\\", "_").strip()
-            if not safe_name:
-                failed.append({"filename": file.filename or field_name, "reason": "invalid filename"})
-                continue
 
-            ext = Path(safe_name).suffix.lower()
-            if ext not in allowed_ext:
-                failed.append({"filename": safe_name, "reason": f"unsupported file type ({ext or 'none'}). Accepted: .md, .txt, .pdf"})
-                continue
+        for file in files:
+            try:
+                safe_name = file.filename or f"uploaded-{field_name}"
+                safe_name = safe_name.replace("/", "_").replace("\\", "_").strip()
+                if not safe_name:
+                    failed.append({"filename": file.filename or field_name, "reason": "invalid filename"})
+                    continue
 
-            content = await file.read()
-            if not content:
-                failed.append({"filename": safe_name, "reason": "empty file"})
-            dest = raw_dir / safe_name
-            if dest.exists():
-                stem = dest.stem
-                suffix = dest.suffix
-                dest = raw_dir / f"{stem}-{int(time.time())}{suffix}"
-            dest.write_bytes(content)
-            uploaded.append(str(dest.relative_to(_WIKI_VAULT)))
-        except Exception as exc:
-            failed.append({"filename": file.filename or field_name, "reason": str(exc)})
+                ext = Path(safe_name).suffix.lower()
+                if ext not in allowed_ext:
+                    failed.append({"filename": safe_name, "reason": f"unsupported file type ({ext or 'none'}). Accepted: .md, .txt, .pdf"})
+                    continue
+
+                content = await file.read()
+                if not content:
+                    failed.append({"filename": safe_name, "reason": "empty file"})
+                    continue
+
+                dest = raw_dir / safe_name
+                if dest.exists():
+                    stem = dest.stem
+                    suffix = dest.suffix
+                    dest = raw_dir / f"{stem}-{int(time.time())}{suffix}"
+                dest.write_bytes(content)
+                uploaded.append(str(dest.relative_to(_WIKI_VAULT)))
+            except Exception as exc:
+                failed.append({"filename": file.filename or field_name, "reason": str(exc)})
 
     return {"status": "ok", "uploaded": uploaded, "failed": failed}
 
