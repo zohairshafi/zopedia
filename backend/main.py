@@ -198,6 +198,8 @@ async def upload_file(request: Request):
     failed: list[dict] = []
     allowed_ext = {".md", ".txt", ".pdf"}
 
+    logger.info("Upload: received %d form fields: %s", len(form), list(form.keys()))
+
     for field_name in form:
         value = form[field_name]
         # FastAPI returns a list when multiple files share the same field name
@@ -237,6 +239,7 @@ async def upload_file(request: Request):
             except Exception as exc:
                 failed.append({"filename": file.filename or field_name, "reason": str(exc)})
 
+    logger.info("Upload: %d uploaded, %d failed", len(uploaded), len(failed))
     return {"status": "ok", "uploaded": uploaded, "failed": failed}
 
 
