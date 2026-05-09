@@ -6821,11 +6821,13 @@ class LLMWikiEngine:
         entity_communities, entity_covered = _build_projection(entity_nodes, "entity")
         concept_communities, concept_covered = _build_projection(concept_nodes, "concept")
 
-        # ── Name communities and generate slugs ──────────────────────
-        def _name_community(members: frozenset[str]) -> str:
-            """Name a community using LLM, falling back to most-central page title."""
+        # ── Describe communities and generate stable slugs ────────────
+        def _describe_community(members: frozenset[str]) -> str:
+            """Return a 2-3 sentence description of the community via LLM,
+            falling back to a summary of the most central pages."""
             central = max(members, key=lambda m: len(all_edges.get(m, [])))
-            fallback = _page_title(central) or central.split("/", 1)[-1].replace("-", " ")
+            central_title = _page_title(central) or central.split("/", 1)[-1].replace("-", " ")
+            fallback = f"Community centered around {central_title} ({len(members)} pages)"
 
             if not callable(self.llm_fn) or len(members) < 2:
                 return fallback
@@ -6840,25 +6842,28 @@ class LLMWikiEngine:
                 return fallback
 
             prompt = (
-                "Name this group of related wiki pages. Return 2-5 words in title case "
-                "capturing the common theme. Return JSON only: {\"name\": \"...\"}\n\n"
+                "Describe this group of related wiki pages in 2-3 sentences. "
+                "Capture the common theme, topic area, or relationship between them. "
+                "Be specific and helpful — a user will read this to decide whether to "
+                "explore this community. Return JSON only: {\"description\": \"...\"}\n\n"
                 "Pages:\n" + "\n".join(f"- {t}" for t in member_titles)
             )
             try:
                 raw = str(self.llm_fn(prompt) or "").strip()
                 parsed = self._safe_json(raw)
                 if isinstance(parsed, dict):
-                    name = str(parsed.get("name", "")).strip()
-                    if name and len(name) <= 80:
-                        return name
+                    desc = str(parsed.get("description", "")).strip()
+                    if desc and len(desc) <= 300:
+                        return desc
             except Exception:
                 pass
             return fallback
 
-        def _slugify(name: str) -> str:
-            """Convert a name to a filesystem-safe slug."""
-            slug = re.sub(r"[^a-zA-Z0-9]+", "-", name.lower()).strip("-")
-            return slug[:60] or "community"
+        def _community_slug(members: frozenset[str]) -> str:
+            """Stable slug from hash of sorted member paths — deterministic across rebuilds."""
+            key = ",".join(sorted(members))
+            h = hashlib.sha1(key.encode()).hexdigest()[:12]
+            return f"community-{h}"
 
         # ── Write community files and index ──────────────────────────
         # Clean stale community files from previous run
@@ -6873,26 +6878,23 @@ class LLMWikiEngine:
 
         def _write_community_file(
             cmembers: frozenset[str],
-            cname: str,
+            slug: str,
             ckind: str,
         ) -> str:
             """Write a community page, return the relative path."""
-            slug = _slugify(cname)
             rel = f"godnodes/{slug}"
             file_path = self.godnodes_dir / f"{slug}.md"
 
             lines = [
                 "---",
-                f"title: {cname}",
+                f"slug: {slug}",
                 f"type: godnode-community",
                 f"kind: {ckind}",
                 f"updated_at: {self._now_iso()}",
                 f"member_count: {len(cmembers)}",
                 "---",
                 "",
-                f"# {cname}",
-                "",
-                f"_{len(cmembers)} {ckind} pages in this community._",
+                f"# {ckind.title()} Community ({len(cmembers)} pages)",
                 "",
             ]
             for node in sorted(cmembers):
@@ -6903,18 +6905,27 @@ class LLMWikiEngine:
             file_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
             return rel
 
-        # Entity communities
-        if entity_communities:
-            index_lines.append("## Entity Communities")
-            for cid, community in enumerate(entity_communities, start=1):
-                name = _name_community(community)
-                rel = _write_community_file(community, name, "entity")
-                index_lines.append(f"- [[{rel}]] - {name} ({len(community)} pages)")
+        # ── Communities first (entities then concepts) ──────────────
+        for ckind, communities, covered, all_nodes_label in [
+            ("entity", entity_communities, entity_covered, "entities"),
+            ("concept", concept_communities, concept_covered, "concepts"),
+        ]:
+            if not communities:
+                continue
+            section = "## Entity Communities" if ckind == "entity" else "## Concept Communities"
+            index_lines.append(section)
+            for community in communities:
+                desc = _describe_community(community)
+                slug = _community_slug(community)
+                rel = _write_community_file(community, slug, ckind)
+                index_lines.append(f"- [[{rel}]] - {desc}")
                 total_communities += 1
             index_lines.append("")
 
-        # Remaining entities — list inline so the model can scan directly
+        # ── Other pages at the bottom ───────────────────────────────
         entity_remaining = sorted(set(entity_nodes) - set(entity_covered))
+        concept_remaining = sorted(set(concept_nodes) - set(concept_covered))
+
         if entity_remaining:
             index_lines.append("## Other Entities")
             for node in entity_remaining:
@@ -6923,18 +6934,6 @@ class LLMWikiEngine:
                 index_lines.append(f"- [[{rel}]] - {title[:120]}")
             index_lines.append("")
 
-        # Concept communities
-        if concept_communities:
-            index_lines.append("## Concept Communities")
-            for cid, community in enumerate(concept_communities, start=1):
-                name = _name_community(community)
-                rel = _write_community_file(community, name, "concept")
-                index_lines.append(f"- [[{rel}]] - {name} ({len(community)} pages)")
-                total_communities += 1
-            index_lines.append("")
-
-        # Remaining concepts — list inline
-        concept_remaining = sorted(set(concept_nodes) - set(concept_covered))
         if concept_remaining:
             index_lines.append("## Other Concepts")
             for node in concept_remaining:
@@ -6957,7 +6956,7 @@ class LLMWikiEngine:
             f"Total: {total_pages} pages in {total_communities} communities. "
             "Use read_wiki_page to expand community pages and see their members. "
             "\"Other\" pages are listed inline — no need to expand. "
-            "Start with the community name that best matches the user's question."
+            "Start with the community description that best matches the user's question."
         )
         self.index_godnodes_file.write_text("\n".join(index_lines).rstrip() + "\n", encoding="utf-8")
 
