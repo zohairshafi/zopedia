@@ -2393,8 +2393,9 @@ class LLMWikiEngine:
                 changes.append(
                     {
                         "page": rel_page,
-                        "trimmed_update_blocks": trimmed,
+                        "merged_update_blocks": trimmed,
                         "max_incremental_updates": limit,
+                        "method": "llm-rewrite",
                     }
                 )
 
@@ -6096,13 +6097,117 @@ class LLMWikiEngine:
         if len(blocks) <= limit:
             return text, 0
 
+        trimmed = len(blocks) - limit
+
+        # Full page rewrite via LLM: consolidate all incremental updates into
+        # the main page body, preserving links and time-based information.
+        rewritten = self._llm_rewrite_compacted_page(
+            text=text,
+            incremental_blocks=blocks,
+            recent_count=min(3, limit),
+        )
+        if rewritten:
+            return rewritten, trimmed
+
+        # Fallback: just drop the oldest blocks
         kept = blocks[-limit:]
-        trimmed = len(blocks) - len(kept)
         base = self._remove_markdown_section(text, "Incremental Updates").rstrip()
         rebuilt = (
             f"{base}\n\n## Incremental Updates\n\n" + "\n\n".join(kept).strip() + "\n"
         )
         return rebuilt, trimmed
+
+    def _llm_rewrite_compacted_page(
+        self,
+        text: str,
+        incremental_blocks: list[str],
+        recent_count: int = 3,
+    ) -> Optional[str]:
+        """Rewrite an entity/concept page, merging incremental updates into the body.
+
+        Called when incremental updates exceed the configured limit. The LLM
+        consolidates all knowledge from the updates into Summary, Facts, and
+        Contradictions sections, preserving all wikilinks and time-based info.
+        Returns the rewritten page text, or None if the LLM call fails.
+        """
+        if not callable(self.llm_fn):
+            return None
+
+        # Extract sections that should be preserved verbatim
+        refs = self._extract_markdown_section(text, "Referenced by Analyses")
+        sources = self._extract_markdown_section(text, "Sources")
+
+        # Build the rewrite prompt
+        updates_text = "\n\n---\n\n".join(
+            b[:2000] for b in incremental_blocks
+        )
+        if len(updates_text) > 16000:
+            updates_text = updates_text[:16000] + "\n\n...(older updates truncated)"
+
+        # Keep the last few updates for a Recent Changes section
+        recent_updates = "\n\n---\n\n".join(
+            incremental_blocks[-recent_count:]
+        ) if recent_count > 0 else ""
+
+        prompt = (
+            "You are maintaining a wiki knowledge page. This page has accumulated "
+            "many incremental updates that need to be consolidated into the main body.\n\n"
+            "## TASK\n"
+            "Rewrite this page by merging all incremental updates into the Summary, "
+            "Facts, and Contradictions sections. The goal is a clean, up-to-date page "
+            "that reads as if it was written today — no update history visible in the body.\n\n"
+            "## RULES\n"
+            "- Preserve the EXACT same frontmatter and # Title.\n"
+            "- Summary: rewrite to reflect the current state incorporating all updates.\n"
+            "- Facts: merge all new facts from the updates. Deduplicate. Keep the most "
+            "recent version when facts conflict. Preserve ALL [[wikilinks]].\n"
+            "- Contradictions: update with any new contradictions from the updates.\n"
+            "- Sources: PRESERVE the existing Sources section EXACTLY as-is. Do not add or remove.\n"
+            "- Referenced by Analyses: PRESERVE EXACTLY as-is. Do not modify.\n"
+            "- Add a '### Recent Changes' section at the very end (after Sources) with "
+            f"the {recent_count} most recent updates, verbatim.\n"
+            "- PRESERVE ALL [[wikilinks]] from the original page and updates.\n"
+            "- PRESERVE ALL dates, timestamps, and time-based information.\n"
+            "- Keep the same markdown structure: ## Section, ### Subsection.\n"
+            "- No markdown fences. Output the rewritten page directly.\n\n"
+            "## ORIGINAL PAGE\n"
+            f"{text[:8000]}\n\n"
+            "## INCREMENTAL UPDATES TO MERGE\n"
+            f"{updates_text}\n\n"
+            "## RECENT UPDATES (preserve verbatim at end)\n"
+            f"{recent_updates}"
+        )
+
+        try:
+            raw = str(self.llm_fn(prompt) or "").strip()
+        except Exception:
+            return None
+
+        if not raw or len(raw) < 100:
+            return None
+
+        # Validate: ensure critical sections exist in the output
+        has_summary = "## Summary" in raw
+        has_facts = "## Facts" in raw
+        if not has_summary or not has_facts:
+            logger.warning("Compaction rewrite missing required sections; falling back")
+            return None
+
+        # Restore Referenced by Analyses if LLM dropped it
+        if refs.strip() and "## Referenced by Analyses" not in raw:
+            raw = raw.rstrip() + f"\n\n## Referenced by Analyses\n{refs.strip()}\n"
+
+        # Restore Sources if LLM dropped it and we had one
+        if sources.strip() and "## Sources" not in raw:
+            # Insert before Referenced by Analyses if present
+            refs_match = re.search(r"\n## Referenced by Analyses", raw)
+            if refs_match:
+                idx = refs_match.start()
+                raw = raw[:idx] + f"\n## Sources\n{sources.strip()}\n" + raw[idx:]
+            else:
+                raw = raw.rstrip() + f"\n\n## Sources\n{sources.strip()}\n"
+
+        return raw
 
     def _archive_target_for_page(self, rel_path: str) -> Tuple[Path, str]:
         rel = Path(str(rel_path).replace("\\", "/"))
