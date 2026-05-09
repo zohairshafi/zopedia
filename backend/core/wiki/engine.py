@@ -3026,6 +3026,16 @@ class LLMWikiEngine:
                 max_incremental_updates = max_incremental_updates,
             )
 
+        # Rebuild god-nodes index with full community detection.
+        # Called here (not in _rebuild_index) because backlinks from analysis
+        # pages to entity/concept pages need to exist first for accurate
+        # bipartite projection and community detection.
+        if not dry_run:
+            try:
+                self._rebuild_index_godnodes()
+            except Exception as exc:
+                logger.warning("God-nodes index rebuild failed: %s", exc)
+
         return {
             "status": "ok",
             "dry_run": bool(dry_run),
@@ -6393,7 +6403,7 @@ class LLMWikiEngine:
             out.append("")
         self.index_file.write_text("\n".join(out).rstrip() + "\n", encoding = "utf-8")
         self._rebuild_index_concise()
-        self._rebuild_index_godnodes()
+        self._sync_godnodes_other()
 
     def _rebuild_index_concise(self) -> None:
         """Build a compact index with only entities and concepts for model context.
@@ -6433,6 +6443,117 @@ class LLMWikiEngine:
         lines.append("---")
         lines.append(f"Total: {page_count} pages. Use read_wiki_page to read any page by its path.")
         self.index_concise_file.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+
+    def _sync_godnodes_other(self) -> None:
+        """Lightweight sync: append new entity/concept pages to index-godnodes.md.
+
+        Runs on every _rebuild_index (each ingest). Scans for pages not yet
+        covered by any godnodes community file and lists them inline under
+        ## Other Entities / ## Other Concepts in index-godnodes.md.
+        This ensures new pages are immediately visible to the model without
+        running expensive community detection on every ingest.
+        """
+        if not self.index_godnodes_file.exists():
+            return
+
+        entity_pages = [p for p in self._all_wiki_pages() if p.startswith("entities/")]
+        concept_pages = [p for p in self._all_wiki_pages() if p.startswith("concepts/")]
+        if not entity_pages and not concept_pages:
+            return
+
+        # Collect all pages already covered by godnodes community files
+        covered: set[str] = set()
+        for gf in sorted(self.godnodes_dir.glob("*.md")):
+            try:
+                text = gf.read_text(encoding="utf-8", errors="ignore")
+            except Exception:
+                continue
+            for link in re.findall(r"\[\[([^\]]+)\]\]", text):
+                target = link.strip().replace("\\", "/")
+                if target.endswith(".md"):
+                    target = target[:-3]
+                covered.add(f"{target}.md")
+
+        new_entities = sorted(set(entity_pages) - covered)
+        new_concepts = sorted(set(concept_pages) - covered)
+
+        if not new_entities and not new_concepts:
+            return
+
+        index_summary = self._index_summary_by_page()
+
+        def _page_title(rel: str) -> str:
+            summary = str(index_summary.get(rel, "")).strip()
+            if summary:
+                return summary[:120]
+            page_path = self.wiki_dir / rel
+            if page_path.exists():
+                try:
+                    text = page_path.read_text(encoding="utf-8", errors="ignore")
+                    for raw_line in text.splitlines():
+                        stripped = raw_line.strip()
+                        if stripped.startswith("# "):
+                            return stripped[2:].strip()[:120]
+                except Exception:
+                    pass
+            label = rel[:-3] if rel.endswith(".md") else rel
+            return label.split("/", 1)[-1].replace("-", " ").replace("_", " ")
+
+        # Read current index, strip footer lines (--- and Total:)
+        existing = ""
+        try:
+            existing = self.index_godnodes_file.read_text(encoding="utf-8", errors="ignore")
+        except Exception:
+            pass
+        # Remove footer so we can append
+        existing = re.sub(r"\n---\n.*", "", existing, flags=re.DOTALL).rstrip()
+
+        lines = existing.splitlines() if existing else ["# Wiki Index (Community View)", ""]
+        modified = False
+
+        if new_entities:
+            # Find or add ## Other Entities section
+            other_idx = None
+            for i, line in enumerate(lines):
+                if line.strip() == "## Other Entities":
+                    other_idx = i
+                    break
+            if other_idx is None:
+                lines.append("## Other Entities")
+                other_idx = len(lines) - 1
+            for node in new_entities:
+                rel = node[:-3] if node.endswith(".md") else node
+                title = _page_title(node)
+                lines.insert(other_idx + 1, f"- [[{rel}]] - {title[:120]}")
+                other_idx += 1
+            modified = True
+
+        if new_concepts:
+            other_idx = None
+            for i, line in enumerate(lines):
+                if line.strip() == "## Other Concepts":
+                    other_idx = i
+                    break
+            if other_idx is None:
+                lines.append("## Other Concepts")
+                other_idx = len(lines) - 1
+            for node in new_concepts:
+                rel = node[:-3] if node.endswith(".md") else node
+                title = _page_title(node)
+                lines.insert(other_idx + 1, f"- [[{rel}]] - {title[:120]}")
+                other_idx += 1
+            modified = True
+
+        if modified:
+            # Re-add footer with updated counts
+            total = sum(1 for l in lines if l.startswith("- [["))
+            lines.append("---")
+            lines.append(
+                f"Total: {total} pages. Use read_wiki_page to expand community pages "
+                "and see their members. Start with the community that best matches "
+                "the user's question."
+            )
+            self.index_godnodes_file.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
 
     def _rebuild_index_godnodes(self) -> None:
         """Build a hierarchical index using community detection on bipartite projections.
@@ -6636,11 +6757,14 @@ class LLMWikiEngine:
                 total_communities += 1
             index_lines.append("")
 
-        # Remaining entities not in any community
+        # Remaining entities — list inline so the model can scan directly
         entity_remaining = sorted(set(entity_nodes) - set(entity_covered))
         if entity_remaining:
-            rel = _write_community_file(frozenset(entity_remaining), "Other Entities", "entity")
-            index_lines.append(f"- [[{rel}]] - Other Entities ({len(entity_remaining)} pages)")
+            index_lines.append("## Other Entities")
+            for node in entity_remaining:
+                rel = node[:-3] if node.endswith(".md") else node
+                title = _page_title(node)
+                index_lines.append(f"- [[{rel}]] - {title[:120]}")
             index_lines.append("")
 
         # Concept communities
@@ -6653,11 +6777,14 @@ class LLMWikiEngine:
                 total_communities += 1
             index_lines.append("")
 
-        # Remaining concepts not in any community
+        # Remaining concepts — list inline
         concept_remaining = sorted(set(concept_nodes) - set(concept_covered))
         if concept_remaining:
-            rel = _write_community_file(frozenset(concept_remaining), "Other Concepts", "concept")
-            index_lines.append(f"- [[{rel}]] - Other Concepts ({len(concept_remaining)} pages)")
+            index_lines.append("## Other Concepts")
+            for node in concept_remaining:
+                rel = node[:-3] if node.endswith(".md") else node
+                title = _page_title(node)
+                index_lines.append(f"- [[{rel}]] - {title[:120]}")
             index_lines.append("")
 
         if total_communities == 0 and not entity_remaining and not concept_remaining:
@@ -6671,8 +6798,9 @@ class LLMWikiEngine:
         )
         index_lines.append("---")
         index_lines.append(
-            f"Total: {total_pages} pages in {total_communities} communities + fallback groups. "
-            "Use read_wiki_page to expand any community page and see its members. "
+            f"Total: {total_pages} pages in {total_communities} communities. "
+            "Use read_wiki_page to expand community pages and see their members. "
+            "\"Other\" pages are listed inline — no need to expand. "
             "Start with the community name that best matches the user's question."
         )
         self.index_godnodes_file.write_text("\n".join(index_lines).rstrip() + "\n", encoding="utf-8")

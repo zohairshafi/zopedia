@@ -445,6 +445,20 @@ class WikiFileEventHandler(FileSystemEventHandler):
                             run_count,
                             exc,
                         )
+
+                    # Rebuild god-nodes community index now that backlinks exist
+                    try:
+                        self.ingestor.wiki_manager.engine._rebuild_index_godnodes()
+                        logger.info(
+                            "Auto wiki god-nodes index rebuilt after %d analyses",
+                            run_count,
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            "Auto wiki god-nodes rebuild failed after %d analyses: %s",
+                            run_count,
+                            exc,
+                        )
             except Exception as exc:
                 logger.warning("Auto wiki analysis failed for %s: %s", file_path, exc)
 
