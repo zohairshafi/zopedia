@@ -134,6 +134,10 @@ def apply_defaults() -> None:
     _setdefault("UNSLOTH_WIKI_ENGINE_ENRICH_REFRESH_OLDEST_NON_FALLBACK_PAGES", "0")
     _setdefault("UNSLOTH_WIKI_ENGINE_ENRICH_REPAIR_ANSWER_LINKS", "false")
 
+    # Community detection defaults for god-nodes index pagination
+    _setdefault("UNSLOTH_WIKI_COMMUNITY_CUTOFF", "20")
+    _setdefault("UNSLOTH_WIKI_COMMUNITY_MIN_SIZE", "4")
+
     # Merge/compaction defaults
     _setdefault("UNSLOTH_WIKI_ENGINE_MERGE_LLM_CANDIDATE_PLANNER_ENABLED", "true")
     _setdefault("UNSLOTH_WIKI_ENGINE_ENTITY_QUERY_FOCUS_LLM_ENABLED", "true")

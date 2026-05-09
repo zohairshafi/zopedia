@@ -148,6 +148,22 @@ WIKI_ENV_SPECS: tuple[WikiEnvSpec, ...] = (
         minimum=1,
         maximum=100,
     ),
+    WikiEnvSpec(
+        name="ZOPEDIA_WIKI_COMMUNITY_CUTOFF",
+        kind="int",
+        default="20",
+        description="Max nodes per community in graph-based index pagination. Controls granularity of the god-nodes index.",
+        minimum=5,
+        maximum=100,
+    ),
+    WikiEnvSpec(
+        name="ZOPEDIA_WIKI_COMMUNITY_MIN_SIZE",
+        kind="int",
+        default="4",
+        description="Communities smaller than this are merged into Other Pages in the god-nodes index.",
+        minimum=2,
+        maximum=50,
+    ),
 )
 
 _WIKI_ENV_SPECS_BY_NAME = {spec.name: spec for spec in WIKI_ENV_SPECS}

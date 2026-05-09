@@ -6432,54 +6432,57 @@ class LLMWikiEngine:
         lines.append(f"Total: {page_count} pages. Use read_wiki_page to read any page by its path.")
         self.index_concise_file.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
 
-    def _rebuild_index_godnodes(self, top_n: int = 8) -> None:
-        """Build a hierarchical index using graphify god nodes as entry points.
+    def _rebuild_index_godnodes(self) -> None:
+        """Build a hierarchical index using community detection on bipartite projections.
 
-        Structure:
-        - Hub Pages (god nodes with connection counts)
-        - Linked from each hub (direct outbound entity/concept neighbors)
-        - Other Pages (everything not linked from a hub)
+        Algorithm:
+        1. Build full link graph from ALL pages (entities + concepts + analysis + sources)
+        2. Build bipartite graph: entity/concept nodes on one side, analysis/source on the other
+        3. Project onto entity/concept space (entities connected if they co-occur on same pages)
+        4. Run greedy modularity community detection on each projection
+        5. Name communities via LLM (cached), falling back to most-central-page title
+        6. Small communities (< min_size) are merged into "Other Pages"
+        7. Write index-godnodes.md
 
-        Falls back to inbound-link-count ranking if graphify is unavailable.
-        This index is designed to stay compact even when the wiki has
-        hundreds of pages — god nodes act as a table of contents.
+        Config vars:
+        - ZOPEDIA_WIKI_COMMUNITY_CUTOFF (default 20): max nodes per community
+        - ZOPEDIA_WIKI_COMMUNITY_MIN_SIZE (default 4): communities below this go to Other
         """
-        top_n = max(2, int(top_n))
-        pages = [p for p in self._all_wiki_pages()
-                 if p.startswith("entities/") or p.startswith("concepts/")]
-        if not pages:
+        try:
+            import networkx as nx
+            from networkx.algorithms import bipartite
+            from networkx.algorithms.community import greedy_modularity_communities
+        except Exception:
+            self._rebuild_index_concise()  # fallback: just ensure concise exists
             return
 
-        link_graph = self._build_link_graph(pages)
-        inbound = link_graph.get("inbound", {})
-        outbound = link_graph.get("outbound", {})
+        cutoff = max(5, int(os.getenv("UNSLOTH_WIKI_COMMUNITY_CUTOFF", "20")))
+        min_size = max(2, int(os.getenv("UNSLOTH_WIKI_COMMUNITY_MIN_SIZE", "4")))
 
-        # Compute god nodes: try graphify, fall back to inbound-link count
-        god_nodes: List[Tuple[str, int]] = []
-        graphify = self._graphify_lint_insights(pages, link_graph)
-        if graphify.get("available"):
-            for entry in graphify.get("god_nodes", []):
-                if isinstance(entry, dict):
-                    node = str(entry.get("node", ""))
-                    score = int(entry.get("score", len(inbound.get(node, []))))
-                else:
-                    node = str(entry)
-                    score = len(inbound.get(node, []))
-                if node:
-                    god_nodes.append((node, max(1, score)))
-        if not god_nodes:
-            # Fallback: rank by inbound link count
-            scored = [(p, len(inbound.get(p, []))) for p in pages]
-            scored.sort(key=lambda item: -item[1])
-            god_nodes = [(p, s) for p, s in scored[:top_n] if s > 0]
-        if not god_nodes:
+        all_pages = self._all_wiki_pages()
+        if not all_pages:
             return
 
-        gn_set = {gn for gn, _ in god_nodes}
+        full_graph = self._build_link_graph(all_pages)
+        # Merge outbound + inbound adjacency properly
+        outbound = full_graph.get("outbound", {})
+        inbound = full_graph.get("inbound", {})
+        all_edges: dict[str, list[str]] = {}
+        for k in set(outbound.keys()) | set(inbound.keys()):
+            all_edges[k] = outbound.get(k, []) + inbound.get(k, [])
+
+        entity_nodes = [p for p in all_pages if p.startswith("entities/")]
+        concept_nodes = [p for p in all_pages if p.startswith("concepts/")]
+        bridge_nodes = [p for p in all_pages
+                        if p.startswith("analysis/") or p.startswith("sources/")]
+
+        if not bridge_nodes:
+            self._rebuild_index_concise()
+            return
+
         index_summary = self._index_summary_by_page()
 
         def _page_title(rel: str) -> str:
-            """Extract first H1 from a page by its relative path (with .md)."""
             summary = str(index_summary.get(rel, "")).strip()
             if summary:
                 return summary[:120]
@@ -6496,43 +6499,130 @@ class LLMWikiEngine:
             label = rel[:-3] if rel.endswith(".md") else rel
             return label.split("/", 1)[-1].replace("-", " ").replace("_", " ")
 
-        lines = ["# Wiki Index (Hub Pages)", ""]
-        lines.append("## Hub Pages")
-        for gn_path, gn_score in god_nodes:
-            gn_rel = gn_path[:-3] if gn_path.endswith(".md") else gn_path
-            title = _page_title(gn_path)
-            lines.append(f"- [[{gn_rel}]] - {title} ({gn_score} connections)")
-        lines.append("")
+        # ── Build bipartite graphs and project ──────────────────────
+        def _build_projection(
+            ec_nodes: list[str],
+            label: str,
+        ) -> tuple[list[frozenset[str]], frozenset[str]]:
+            """Build bipartite graph, project onto EC nodes, run community detection.
 
-        for gn_path, _gn_score in god_nodes:
-            gn_rel = gn_path[:-3] if gn_path.endswith(".md") else gn_path
-            neighbors = outbound.get(gn_path, [])
-            ent_concepts = sorted(
-                n for n in neighbors
-                if (n.startswith("entities/") or n.startswith("concepts/"))
-                and n != gn_path
+            Returns (communities_above_min_size, all_nodes_in_communities).
+            """
+            bg = nx.Graph()
+            bg.add_nodes_from(ec_nodes, bipartite=0)
+            bg.add_nodes_from(bridge_nodes, bipartite=1)
+
+            edges: list[tuple[str, str]] = []
+            for node, neighbors in all_edges.items():
+                if node in ec_nodes:
+                    for nb in neighbors:
+                        if nb in bridge_nodes:
+                            edges.append((node, nb))
+                elif node in bridge_nodes:
+                    for nb in neighbors:
+                        if nb in ec_nodes:
+                            edges.append((nb, node))
+            bg.add_edges_from(edges)
+
+            if bg.number_of_edges() == 0:
+                return [], frozenset()
+
+            projection = bipartite.projected_graph(bg, ec_nodes)
+            if projection.number_of_edges() == 0:
+                return [], frozenset()
+
+            raw_communities = list(greedy_modularity_communities(
+                projection, cutoff=cutoff, weight="weight"
+            ))
+            # Filter by min_size
+            communities = [c for c in raw_communities if len(c) >= min_size]
+            all_in_communities = frozenset().union(*communities) if communities else frozenset()
+            return communities, all_in_communities
+
+        entity_communities, entity_covered = _build_projection(entity_nodes, "entity")
+        concept_communities, concept_covered = _build_projection(concept_nodes, "concept")
+
+        # ── Name communities ────────────────────────────────────────
+        def _name_community(members: frozenset[str]) -> str:
+            """Name a community using the most central page title as fallback.
+            If the LLM is available, use it for a better name (cached by member hash)."""
+            # Fallback: use the most central member's title
+            central = max(members, key=lambda m: len(all_edges.get(m, [])))
+            fallback = _page_title(central) or central.split("/", 1)[-1].replace("-", " ")
+
+            if not callable(self.llm_fn):
+                return fallback
+
+            # Collect member titles
+            member_titles: list[str] = []
+            for m in sorted(members)[:15]:
+                title = _page_title(m)
+                if title:
+                    member_titles.append(title)
+
+            if len(member_titles) < 2:
+                return fallback
+
+            prompt = (
+                "Name this group of related wiki pages. Return 2-5 words capturing "
+                "the common theme. Return JSON only: {\"name\": \"...\"}\n\n"
+                "Pages:\n" + "\n".join(f"- {t}" for t in member_titles)
             )
-            if not ent_concepts:
+            try:
+                raw = str(self.llm_fn(prompt) or "").strip()
+                parsed = self._safe_json(raw)
+                if isinstance(parsed, dict):
+                    name = str(parsed.get("name", "")).strip()
+                    if name and len(name) <= 80:
+                        return name
+            except Exception:
+                pass
+            return fallback
+
+        # ── Build index ─────────────────────────────────────────────
+        lines = ["# Wiki Index (Community View)", ""]
+        total_pages = 0
+
+        for section_label, communities, all_nodes, covered in [
+            ("Entity Communities", entity_communities, entity_nodes, entity_covered),
+            ("Concept Communities", concept_communities, concept_nodes, concept_covered),
+        ]:
+            lines.append(f"## {section_label}")
+            if not communities:
+                lines.append("- (no communities detected)")
+                lines.append("")
                 continue
-            lines.append(f"## Linked from [[{gn_rel}]]")
-            for nb in ent_concepts[:12]:
-                nb_rel = nb[:-3] if nb.endswith(".md") else nb
-                title = _page_title(nb)
-                lines.append(f"- [[{nb_rel}]] - {title[:120]}")
-            lines.append("")
 
-        # Remaining pages not linked from any god node
-        remaining = [p for p in pages if p not in gn_set]
-        if remaining:
-            lines.append("## Other Pages")
-            for p in sorted(remaining):
-                rel = p[:-3] if p.endswith(".md") else p
-                title = _page_title(p)
-                lines.append(f"- [[{rel}]] - {title[:120]}")
+            for cid, community in enumerate(communities, start=1):
+                name = _name_community(community)
+                lines.append(f"### {name}")
+                for node in sorted(community)[:20]:  # cap per community
+                    rel = node[:-3] if node.endswith(".md") else node
+                    title = _page_title(node)
+                    lines.append(f"- [[{rel}]] - {title[:120]}")
+                lines.append("")
+                total_pages += len(community)
 
-        page_count = sum(1 for l in lines if l.startswith("- [["))
+            # Remaining pages not in any community
+            remaining = sorted(set(all_nodes) - set(covered))
+            if remaining:
+                lines.append("### Other Pages")
+                for node in remaining:
+                    rel = node[:-3] if node.endswith(".md") else node
+                    title = _page_title(node)
+                    lines.append(f"- [[{rel}]] - {title[:120]}")
+                total_pages += len(remaining)
+                lines.append("")
+
+        if total_pages == 0:
+            return
+
         lines.append("---")
-        lines.append(f"Total: {page_count} pages. Start from Hub Pages, then follow Linked sections. Use read_wiki_page to read any page by its path.")
+        lines.append(
+            f"Total: {total_pages} pages across {len(entity_communities) + len(concept_communities)} communities. "
+            "Start with the community name that best matches the user's question, "
+            "then read the listed pages and follow their [[wikilinks]]."
+        )
         self.index_godnodes_file.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
 
     def _append_log(self, entry: str) -> None:

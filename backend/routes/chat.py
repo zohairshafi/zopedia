@@ -366,8 +366,10 @@ async def openai_chat_completions(request: Request):
         if has_wiki:
             prompt_parts.append(
                 "HOW TO USE THE WIKI:\n"
-                "- The wiki index below is structured hierarchically. Start with 'Hub Pages' to find the most central topics.\n"
-                "- Each hub page has a 'Linked from' subsection listing pages directly connected to it — follow those links to drill deeper.\n"
+                "- The wiki index below is organized into Entity Communities and Concept Communities. "
+                "Each community groups related pages discovered through link analysis.\n"
+                "- Start with the community name that best matches the user's question, "
+                "then read the listed pages. Follow their [[wikilinks]] to drill deeper.\n"
                 "- Entity and concept pages are the most curated and up-to-date. They contain [[wikilinks]] to related analysis and source pages.\n"
                 "- IMPORTANT: Entity/concept pages list analysis backlinks under '## Referenced by Analyses'. "
                 "ALWAYS check this section and read the linked analysis/* pages if the query needs a deeper answer - they contain detailed historical summaries.\n"
