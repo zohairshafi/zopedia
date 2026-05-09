@@ -7921,7 +7921,7 @@ class LLMWikiEngine:
             normalized = str(candidate).strip().replace("\\", "/")
             if not normalized or normalized in existing_links:
                 continue
-            if normalized.startswith("analysis/"):
+            if normalized.startswith("analysis/") or normalized.startswith("godnodes/"):
                 continue
             if normalized in seen_candidates:
                 continue
@@ -7974,7 +7974,7 @@ class LLMWikiEngine:
             normalized = candidate.strip().replace("\\", "/")
             if not normalized or normalized in existing_links:
                 continue
-            if normalized.startswith("analysis/"):
+            if normalized.startswith("analysis/") or normalized.startswith("godnodes/"):
                 continue
 
             label = normalized.split("/", 1)[-1]
