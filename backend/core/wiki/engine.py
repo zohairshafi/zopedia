@@ -6579,7 +6579,7 @@ class LLMWikiEngine:
             self._rebuild_index_concise()  # fallback: just ensure concise exists
             return
 
-        cutoff = max(5, int(os.getenv("UNSLOTH_WIKI_COMMUNITY_CUTOFF", "20")))
+        cutoff = max(1, int(os.getenv("UNSLOTH_WIKI_COMMUNITY_CUTOFF", "20")))
         min_size = max(2, int(os.getenv("UNSLOTH_WIKI_COMMUNITY_MIN_SIZE", "4")))
 
         all_pages = self._all_wiki_pages()
@@ -6654,8 +6654,9 @@ class LLMWikiEngine:
             if projection.number_of_edges() == 0:
                 return [], frozenset()
 
+            effective_cutoff = min(cutoff, max(1, projection.number_of_nodes()))
             raw_communities = list(greedy_modularity_communities(
-                projection, cutoff=cutoff, weight="weight"
+                projection, cutoff=effective_cutoff, weight="weight"
             ))
             # Filter by min_size
             communities = [c for c in raw_communities if len(c) >= min_size]
