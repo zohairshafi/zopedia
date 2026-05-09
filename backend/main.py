@@ -187,7 +187,6 @@ async def shutdown():
 @app.post("/api/upload")
 async def upload_file(request: Request):
     """Upload files directly to the wiki raw/ folder for ingestion."""
-    from fastapi import UploadFile
     from routes.wiki import _WIKI_VAULT
 
     raw_dir = _WIKI_VAULT / "raw"
@@ -202,18 +201,16 @@ async def upload_file(request: Request):
 
     for field_name in form:
         value = form[field_name]
-        logger.info("Upload: field=%s type=%s", field_name, type(value).__name__)
-        # FastAPI returns a list when multiple files share the same field name
-        files: list[UploadFile] = []
-        if isinstance(value, UploadFile):
-            files = [value]
+        # Collect uploadable files: single file, list of files, or skip
+        items: list = []
+        if hasattr(value, "filename") and hasattr(value, "read"):
+            items = [value]
         elif isinstance(value, list):
-            files = [v for v in value if isinstance(v, UploadFile)]
+            items = [v for v in value if hasattr(v, "filename") and hasattr(v, "read")]
         else:
-            logger.warning("Upload: skipping field %s (unexpected type %s)", field_name, type(value).__name__)
             continue
 
-        for file in files:
+        for file in items:
             try:
                 safe_name = file.filename or f"uploaded-{field_name}"
                 safe_name = safe_name.replace("/", "_").replace("\\", "_").strip()
