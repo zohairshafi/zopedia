@@ -83,6 +83,23 @@ _rebuild_index() → _rebuild_index_concise() → _sync_godnodes_other()
 ```
 `_sync_godnodes_other` appends new entity/concept pages inline to `index-godnodes.md` without running community detection.
 
+## Knowledge Compaction
+
+Entity and concept pages accumulate incremental updates over time. When the number
+of update blocks exceeds `ZOPEDIA_WIKI_KNOWLEDGE_MAX_INCREMENTAL_UPDATES` (default 10),
+the page is rewritten:
+
+1. **LLM rewrites the entire page**: Consolidates all incremental updates into
+   Summary, Facts, and Contradictions. Preserves all [[wikilinks]], dates, timestamps,
+   Sources, and Referenced by Analyses sections.
+2. **Prioritization**: Pages with the most overflow are compacted first.
+3. **Per-cycle cap**: `ZOPEDIA_WIKI_COMPACTION_MAX_PAGES` (default 64) limits how
+   many pages are LLM-rewritten per maintenance cycle. 0 disables.
+4. **Recent changes**: The last 3 updates are preserved verbatim in a `### Recent Changes` section.
+
+Compaction runs during maintenance cycles (via `enrich_analysis_pages` with
+`compact_knowledge_pages=True`) and via the API.
+
 ## God-Nodes Index Pagination
 
 ### Problem
@@ -135,6 +152,7 @@ Total: 27 pages in 3 communities. Use read_wiki_page to expand community pages.
 |---|---|---|
 | `ZOPEDIA_WIKI_COMMUNITY_CUTOFF` | 20 | Max nodes per community |
 | `ZOPEDIA_WIKI_COMMUNITY_MIN_SIZE` | 4 | Communities below this → "Other" (listed inline) |
+| `ZOPEDIA_WIKI_COMPACTION_MAX_PAGES` | 64 | Max pages LLM-rewritten per maintenance cycle. 0=off. Pages with most overflow prioritized |
 
 ## Tool-Calling Protocol (SSE Events)
 

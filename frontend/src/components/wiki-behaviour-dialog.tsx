@@ -71,6 +71,7 @@ const CATEGORY_ORDER = [
   "Ranking",
   "Auto Analysis",
   "Quality & Maintenance",
+  "Index & Communities",
   "Web Enrichment",
   "Other",
 ] as const;
@@ -116,10 +117,17 @@ function categoryForVariable(name: string): WikiVariableCategory {
     name.includes("AUTO_RETRY_FALLBACK_ANALYSES") ||
     name.includes("MERGE_MAINTENANCE") ||
     name.includes("KNOWLEDGE_MAX_INCREMENTAL") ||
+    name.includes("COMPACTION_MAX_PAGES") ||
     name.includes("ENRICH_REFRESH_OLDEST_NON_FALLBACK") ||
     name.includes("ENRICH_REPAIR_ANSWER_LINKS")
   ) {
     return "Quality & Maintenance";
+  }
+  if (
+    name.includes("COMMUNITY_CUTOFF") ||
+    name.includes("COMMUNITY_MIN_SIZE")
+  ) {
+    return "Index & Communities";
   }
   if (name.includes("ENGINE_RANKING") || name.includes("ENGINE_LLM_RERANK")) {
     return "Ranking";

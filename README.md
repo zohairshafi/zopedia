@@ -67,7 +67,8 @@ cd ../backend && python main.py
 | `ZOPEDIA_WIKI_AUTO_LINT_EVERY` | `10` | Maintenance cadence (every N ingests, 0=off) |
 | `ZOPEDIA_WIKI_AUTO_RETRY_FALLBACK_ANALYSES_MAX_PAGES` | `24` | Fallback retry batch size (0=off) |
 | `ZOPEDIA_WIKI_MERGE_MAINTENANCE_MAX_MERGES` | `512` | Max merges per maintenance run |
-| `ZOPEDIA_WIKI_KNOWLEDGE_MAX_INCREMENTAL_UPDATES` | `10` | Max incremental updates per page before LLM summarization |
+| `ZOPEDIA_WIKI_KNOWLEDGE_MAX_INCREMENTAL_UPDATES` | `10` | Max incremental updates per page before LLM rewrite |
+| `ZOPEDIA_WIKI_COMPACTION_MAX_PAGES` | `64` | Max pages LLM-rewritten per maintenance cycle (0=off) |
 
 ### Other
 | Variable | Default | Description |
