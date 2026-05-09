@@ -188,6 +188,7 @@ async def shutdown():
 async def upload_file(request: Request):
     """Upload files directly to the wiki raw/ folder for ingestion."""
     from fastapi import UploadFile
+    from routes.wiki import _WIKI_VAULT
 
     raw_dir = _WIKI_VAULT / "raw"
     raw_dir.mkdir(parents=True, exist_ok=True)
