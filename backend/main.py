@@ -195,6 +195,7 @@ async def upload_file(request: Request):
     form = await request.form()
     uploaded: list[str] = []
     failed: list[dict] = []
+    allowed_ext = {".md", ".txt", ".pdf"}
 
     for field_name in form:
         value = form[field_name]
@@ -202,15 +203,20 @@ async def upload_file(request: Request):
             continue
         file: UploadFile = value
         try:
-            content = await file.read()
-            if not content:
-                failed.append({"filename": file.filename or field_name, "reason": "empty file"})
-                continue
             safe_name = file.filename or f"uploaded-{field_name}"
             safe_name = safe_name.replace("/", "_").replace("\\", "_").strip()
             if not safe_name:
                 failed.append({"filename": file.filename or field_name, "reason": "invalid filename"})
                 continue
+
+            ext = Path(safe_name).suffix.lower()
+            if ext not in allowed_ext:
+                failed.append({"filename": safe_name, "reason": f"unsupported file type ({ext or 'none'}). Accepted: .md, .txt, .pdf"})
+                continue
+
+            content = await file.read()
+            if not content:
+                failed.append({"filename": safe_name, "reason": "empty file"})
             dest = raw_dir / safe_name
             if dest.exists():
                 stem = dest.stem

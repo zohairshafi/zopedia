@@ -27,8 +27,22 @@ export function WikiUploadDialog({ open, onOpenChange }: WikiUploadDialogProps) 
     if (uploading) return;
 
     const formData = new FormData();
-    const fileArray = Array.from(files);
-    if (fileArray.length === 0) return;
+    const allowed = [".md", ".txt", ".pdf"];
+    const fileArray = Array.from(files).filter((f) => {
+      const ext = "." + f.name.split(".").pop()?.toLowerCase();
+      return allowed.includes(ext);
+    });
+    if (fileArray.length === 0) {
+      toast.error("No valid files", {
+        description: "Accepted: .md, .txt, .pdf",
+      });
+      return;
+    }
+    if (fileArray.length < Array.from(files).length) {
+      toast.warning("Some files were skipped", {
+        description: "Only .md, .txt, .pdf files are accepted.",
+      });
+    }
 
     for (const file of fileArray) {
       formData.append("files", file);
@@ -116,6 +130,7 @@ export function WikiUploadDialog({ open, onOpenChange }: WikiUploadDialogProps) 
             ref={fileInputRef}
             type="file"
             multiple
+            accept=".md,.txt,.pdf,text/markdown,text/plain,application/pdf"
             className="hidden"
             onChange={(e) => {
               if (e.target.files && e.target.files.length > 0) {
