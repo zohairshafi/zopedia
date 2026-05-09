@@ -755,21 +755,6 @@ export function AppSidebar() {
                   <SidebarMenuItem>
                     <SidebarMenuButton
                       onClick={() => {
-                        setWikiUploadOpen(true);
-                        closeMobileIfOpen();
-                      }}
-                      className="h-[32px] rounded-[10px] gap-[8.5px] px-2.5 font-medium text-[#383835] dark:text-[#c7c7c4] hover:bg-[#f0f0f0]! dark:hover:bg-[#2a2c2f]! hover:text-black! dark:hover:text-white! data-active:bg-[#f0f0f0]! dark:data-active:bg-[#2a2c2f]! data-active:text-black! dark:data-active:text-white!"
-                    >
-                      <HugeiconsIcon icon={FolderUploadIcon} strokeWidth={1.75} className="size-[18px]! shrink-0" />
-                      <span className="text-[14px] leading-[18px] tracking-[0.01em]">
-                        Upload Files
-                      </span>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-
-                  <SidebarMenuItem>
-                    <SidebarMenuButton
-                      onClick={() => {
                         setWikiDataOpen(true);
                         closeMobileIfOpen();
                       }}
@@ -795,6 +780,21 @@ export function AppSidebar() {
                       <HugeiconsIcon icon={PencilEdit02Icon} strokeWidth={1.75} className="size-[18px]! shrink-0" />
                       <span className="text-[14px] leading-[18px] tracking-[0.01em]">
                         Edit Wiki Behaviour
+                      </span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      onClick={() => {
+                        setWikiUploadOpen(true);
+                        closeMobileIfOpen();
+                      }}
+                      className="h-[32px] rounded-[10px] gap-[8.5px] px-2.5 font-medium text-[#383835] dark:text-[#c7c7c4] hover:bg-[#f0f0f0]! dark:hover:bg-[#2a2c2f]! hover:text-black! dark:hover:text-white! data-active:bg-[#f0f0f0]! dark:data-active:bg-[#2a2c2f]! data-active:text-black! dark:data-active:text-white!"
+                    >
+                      <HugeiconsIcon icon={FolderUploadIcon} strokeWidth={1.75} className="size-[18px]! shrink-0" />
+                      <span className="text-[14px] leading-[18px] tracking-[0.01em]">
+                        Upload Files
                       </span>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
