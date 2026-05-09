@@ -367,44 +367,47 @@ class WikiFileEventHandler(FileSystemEventHandler):
                 )
 
                 if self.lint_every > 0 and run_count % self.lint_every == 0:
+                    maint_start = time.time()
+                    logger.info("Maintenance cycle starting (run %d)", run_count)
+
                     try:
+                        t0 = time.time()
                         lint_report = self.ingestor.wiki_manager.get_health()
                         logger.info(
-                            "Auto wiki lint complete after %d analyses: orphans=%d stale=%d broken=%d",
-                            run_count,
+                            "Maintenance [1/5] lint done in %.1fs: orphans=%d stale=%d broken=%d",
+                            time.time() - t0,
                             len(lint_report.get("orphans", [])),
                             len(lint_report.get("stale_pages", [])),
                             len(lint_report.get("broken_links", [])),
                         )
                     except Exception as exc:
                         logger.warning(
-                            "Auto wiki lint failed after %d analyses: %s",
+                            "Maintenance [1/5] lint failed after %d analyses: %s",
                             run_count,
                             exc,
                         )
 
                     if self.maintenance_retry_fallback_max_pages > 0:
                         try:
+                            t0 = time.time()
                             retry_report = self.ingestor.wiki_manager.retry_fallback_analysis_pages(
                                 dry_run = False,
                                 max_analysis_pages = self.maintenance_retry_fallback_max_pages,
                             )
                             logger.info(
-                                "Auto wiki fallback-retry complete after %d analyses: scanned=%d fallback_found=%d regenerated=%d still_fallback=%d",
-                                run_count,
+                                "Maintenance [2/5] fallback-retry done in %.1fs: scanned=%d fallback=%d regenerated=%d",
+                                time.time() - t0,
                                 int(retry_report.get("scanned_pages", 0)),
                                 int(retry_report.get("fallback_pages_found", 0)),
                                 int(retry_report.get("regenerated_pages", 0)),
-                                int(retry_report.get("fallback_still", 0)),
                             )
                         except Exception as exc:
                             logger.warning(
-                                "Auto wiki fallback-retry failed after %d analyses: %s",
-                                run_count,
-                                exc,
+                                "Maintenance [2/5] fallback-retry failed: %s", exc
                             )
 
                     try:
+                        t0 = time.time()
                         enrich_report = (
                             self.ingestor.wiki_manager.enrich_analysis_pages(
                                 dry_run = False,
@@ -412,53 +415,52 @@ class WikiFileEventHandler(FileSystemEventHandler):
                             )
                         )
                         logger.info(
-                            "Auto wiki enrichment complete after %d analyses: scanned=%d updated=%d",
-                            run_count,
+                            "Maintenance [3/5] enrichment done in %.1fs: scanned=%d updated=%d",
+                            time.time() - t0,
                             int(enrich_report.get("scanned_pages", 0)),
                             int(enrich_report.get("updated_pages", 0)),
                         )
                     except Exception as exc:
                         logger.warning(
-                            "Auto wiki enrichment failed after %d analyses: %s",
-                            run_count,
-                            exc,
+                            "Maintenance [3/5] enrichment failed: %s", exc
                         )
 
                     try:
+                        t0 = time.time()
                         backlinks_report = (
                             self.ingestor.wiki_manager.refresh_analysis_backlinks(
                                 dry_run = False
                             )
                         )
                         logger.info(
-                            "Auto wiki analysis-backlinks complete after %d analyses: scanned=%d targets=%d linked=%d updated=%d removed=%d",
-                            run_count,
+                            "Maintenance [4/5] backlinks done in %.1fs: scanned=%d linked=%d updated=%d",
+                            time.time() - t0,
                             int(backlinks_report.get("scanned_analysis_pages", 0)),
-                            int(backlinks_report.get("target_pages", 0)),
                             int(backlinks_report.get("linked_target_pages", 0)),
                             int(backlinks_report.get("updated_pages", 0)),
-                            int(backlinks_report.get("removed_sections", 0)),
                         )
                     except Exception as exc:
                         logger.warning(
-                            "Auto wiki analysis-backlinks failed after %d analyses: %s",
-                            run_count,
-                            exc,
+                            "Maintenance [4/5] backlinks failed: %s", exc
                         )
 
                     # Rebuild god-nodes community index now that backlinks exist
                     try:
+                        t0 = time.time()
                         self.ingestor.wiki_manager.engine._rebuild_index_godnodes()
                         logger.info(
-                            "Auto wiki god-nodes index rebuilt after %d analyses",
-                            run_count,
+                            "Maintenance [5/5] god-nodes index rebuilt in %.1fs",
+                            time.time() - t0,
                         )
                     except Exception as exc:
                         logger.warning(
-                            "Auto wiki god-nodes rebuild failed after %d analyses: %s",
-                            run_count,
-                            exc,
+                            "Maintenance [5/5] god-nodes rebuild failed: %s", exc
                         )
+
+                    logger.info(
+                        "Maintenance cycle complete in %.1fs",
+                        time.time() - maint_start,
+                    )
             except Exception as exc:
                 logger.warning("Auto wiki analysis failed for %s: %s", file_path, exc)
 

@@ -2443,7 +2443,15 @@ class LLMWikiEngine:
         force_chunk_resolved = 0
         errors: List[str] = []
 
+        total_scanned = len(analysis_pages)
+        scanned = 0
+        logger.info("Retry-fallback: scanning %d analysis pages", total_scanned)
+
         for page_path in analysis_pages:
+            scanned += 1
+            if scanned % 5 == 0:
+                logger.info("Retry-fallback: %d/%d scanned, %d fallback found, %d regenerated",
+                            scanned, total_scanned, fallback_pages_found, regenerated_pages)
             rel_page = f"analysis/{page_path.name}"
             text = page_path.read_text(encoding = "utf-8", errors = "ignore")
             if not self._analysis_page_uses_fallback(text):
@@ -2788,6 +2796,9 @@ class LLMWikiEngine:
                     }
                 )
 
+        logger.info("Retry-fallback: done. %d scanned, %d fallback found, %d regenerated, %d still fallback",
+                    scanned, fallback_pages_found, regenerated_pages, fallback_still)
+
         if not dry_run:
             # Retry flow may update existing fallback pages (Retry Status section), so
             # rebuild index after the run to refresh fallback markers and metadata lines.
@@ -2916,7 +2927,12 @@ class LLMWikiEngine:
             "changes": [],
         }
 
-        for page_path in analysis_pages:
+        total_pages = len(analysis_pages)
+        logger.info("Enrichment: scanning %d analysis pages", total_pages)
+
+        for i, page_path in enumerate(analysis_pages):
+            if i > 0 and i % 10 == 0:
+                logger.info("Enrichment: %d/%d pages scanned, %d updated so far", i, total_pages, updated_pages)
             rel_page = f"analysis/{page_path.name}"
             original_text = page_path.read_text(encoding = "utf-8", errors = "ignore")
             repaired_text, repair_change = self._repair_analysis_maintenance_links(
@@ -2988,6 +3004,8 @@ class LLMWikiEngine:
                     },
                 }
             )
+
+        logger.info("Enrichment: %d/%d pages scanned, %d updated", total_pages, total_pages, updated_pages)
 
         if (
             updated_pages > 0 or int(link_repair_report.get("repaired_pages", 0)) > 0
