@@ -202,6 +202,7 @@ async def upload_file(request: Request):
 
     for field_name in form:
         value = form[field_name]
+        logger.info("Upload: field=%s type=%s", field_name, type(value).__name__)
         # FastAPI returns a list when multiple files share the same field name
         files: list[UploadFile] = []
         if isinstance(value, UploadFile):
@@ -209,6 +210,7 @@ async def upload_file(request: Request):
         elif isinstance(value, list):
             files = [v for v in value if isinstance(v, UploadFile)]
         else:
+            logger.warning("Upload: skipping field %s (unexpected type %s)", field_name, type(value).__name__)
             continue
 
         for file in files:
