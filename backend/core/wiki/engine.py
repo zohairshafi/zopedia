@@ -2358,11 +2358,17 @@ class LLMWikiEngine:
         include_entities: bool = True,
         include_concepts: bool = True,
         max_incremental_updates: Optional[int] = None,
+        max_compaction_pages: Optional[int] = None,
     ) -> Dict[str, Any]:
         limit = (
             int(self.cfg.knowledge_max_incremental_updates)
             if max_incremental_updates is None
             else max(1, int(max_incremental_updates))
+        )
+        cap = (
+            max(0, int(os.getenv("UNSLOTH_WIKI_COMPACTION_MAX_PAGES", "64")))
+            if max_compaction_pages is None
+            else max(0, int(max_compaction_pages))
         )
 
         folders: List[Tuple[str, Path]] = []
@@ -2371,54 +2377,80 @@ class LLMWikiEngine:
         if include_concepts:
             folders.append(("concepts", self.concepts_dir))
 
+        # Phase 1: scan all pages, collect overflow counts
+        Candidate = Tuple[int, str, Path, str]  # (overflow, rel_page, path, original_text)
+        candidates: List[Candidate] = []
         scanned_pages = 0
-        compacted_pages = 0
-        trimmed_update_blocks = 0
-        changes: List[Dict[str, Any]] = []
 
         for prefix, folder in folders:
             for page_path in sorted(folder.glob("*.md")):
                 scanned_pages += 1
                 rel_page = f"{prefix}/{page_path.name}"
                 original = page_path.read_text(encoding = "utf-8", errors = "ignore")
-                updated, trimmed = self._trim_incremental_update_section(
-                    original,
-                    max_incremental_updates = limit,
-                )
-                if trimmed <= 0:
+                updates = self._extract_markdown_section(original, "Incremental Updates")
+                if not updates.strip():
                     continue
+                blocks = self._split_incremental_update_blocks(updates)
+                overflow = len(blocks) - limit
+                if overflow > 0:
+                    candidates.append((overflow, rel_page, page_path, original))
 
-                compacted_pages += 1
-                trimmed_update_blocks += trimmed
-                changes.append(
-                    {
-                        "page": rel_page,
-                        "merged_update_blocks": trimmed,
-                        "max_incremental_updates": limit,
-                        "method": "llm-rewrite",
-                    }
-                )
+        # Phase 2: sort by most overflow, cap at limit, compact
+        candidates.sort(key=lambda item: -item[0])
 
-                if not dry_run:
-                    page_path.write_text(updated, encoding = "utf-8")
+        compacted_pages = 0
+        trimmed_update_blocks = 0
+        changes: List[Dict[str, Any]] = []
+
+        taken = candidates[:cap] if cap > 0 else candidates
+        logger.info(
+            "Compaction: %d pages need compaction, processing %d (cap=%d)",
+            len(candidates), len(taken), cap,
+        )
+
+        for overflow, rel_page, page_path, original in taken:
+            updated, trimmed = self._trim_incremental_update_section(
+                original,
+                max_incremental_updates = limit,
+            )
+            if trimmed <= 0:
+                continue
+
+            compacted_pages += 1
+            trimmed_update_blocks += trimmed
+            changes.append(
+                {
+                    "page": rel_page,
+                    "overflow_blocks": overflow,
+                    "merged_update_blocks": trimmed,
+                    "max_incremental_updates": limit,
+                    "method": "llm-rewrite",
+                }
+            )
+
+            if not dry_run:
+                page_path.write_text(updated, encoding = "utf-8")
 
         if compacted_pages > 0 and not dry_run:
             self._rebuild_index()
             self._append_log(
                 f"## [{self._today()}] compact-knowledge | maintenance\n"
-                f"- Scanned pages: {scanned_pages}\n"
+                f"- Candidate pages (exceeded limit): {len(candidates)}\n"
                 f"- Compacted pages: {compacted_pages}\n"
                 f"- Trimmed update blocks: {trimmed_update_blocks}\n"
                 f"- Max incremental updates per page: {limit}\n"
+                f"- Max compaction pages per run: {cap}\n"
             )
 
         return {
             "enabled": True,
             "dry_run": bool(dry_run),
             "scanned_pages": scanned_pages,
+            "candidate_pages": len(candidates),
             "compacted_pages": compacted_pages,
             "trimmed_update_blocks": trimmed_update_blocks,
             "max_incremental_updates": limit,
+            "max_compaction_pages": cap,
             "changes": changes,
         }
 

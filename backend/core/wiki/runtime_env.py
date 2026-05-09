@@ -133,6 +133,14 @@ WIKI_ENV_SPECS: tuple[WikiEnvSpec, ...] = (
         maximum=256,
     ),
     WikiEnvSpec(
+        name="ZOPEDIA_WIKI_COMPACTION_MAX_PAGES",
+        kind="int",
+        default="64",
+        description="Max entity/concept pages compacted per maintenance run. Pages with most overflow are prioritized.",
+        minimum=0,
+        maximum=2048,
+    ),
+    WikiEnvSpec(
         name="ZOPEDIA_WIKI_MAX_TOOL_TURNS",
         kind="int",
         default="8",

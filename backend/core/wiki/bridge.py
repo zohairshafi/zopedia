@@ -143,6 +143,7 @@ def apply_defaults() -> None:
     _setdefault("UNSLOTH_WIKI_ENGINE_ENTITY_QUERY_FOCUS_LLM_ENABLED", "true")
     _setdefault("UNSLOTH_WIKI_MERGE_MAINTENANCE_MAX_MERGES", "512")
     _setdefault("UNSLOTH_WIKI_KNOWLEDGE_MAX_INCREMENTAL_UPDATES", "10")
+    _setdefault("UNSLOTH_WIKI_COMPACTION_MAX_PAGES", "64")
 
 
 # Apply defaults on import
