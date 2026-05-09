@@ -22,10 +22,12 @@ cd ../backend && python main.py
 ## Features
 
 - **Wiki ingestion**: Drop PDFs or text files into `wiki_data/raw/` — entities, concepts, and summaries are extracted automatically
-- **RAG chat**: Chat with your wiki using `read_wiki_page` tool-calling
+- **Tool-calling RAG**: Model uses `read_wiki_page` and `web_search` tools to find information
+- **Community-based index pagination**: Wiki pages are clustered into named communities via bipartite graph projection + community detection. The `index-godnodes.md` TOC stays compact regardless of wiki size
 - **Web search**: Model can search DuckDuckGo when wiki doesn't have the answer
 - **Graph visualization**: Browse wiki knowledge graph (entities, concepts, analysis, sources)
-- **Maintenance**: Lint, enrich, merge duplicate pages, archive stale content
+- **Maintenance**: Auto lint, enrich, merge duplicates, archive stale content, compact knowledge pages
+- **God-nodes index lifecycle**: New pages land in "Other" section instantly; community detection redistributes them during maintenance cycles
 
 ## Environment Variables
 
@@ -36,14 +38,15 @@ cd ../backend && python main.py
 | `ZOPEDIA_LLM_API_KEY` | — | API key for upstream API |
 | `ZOPEDIA_LLM_MODEL` | — | Upstream model name |
 
-### Wiki
+### Wiki & Chat
 | Variable | Default | Description |
 |---|---|---|
 | `ZOPEDIA_WIKI_VAULT` | `./wiki_data` | Root wiki vault directory |
 | `ZOPEDIA_WIKI_WATCHER` | `true` | Enable background raw-folder watcher |
 | `ZOPEDIA_WIKI_AUTO_QUERY_ON_INGEST` | `true` | Auto-generate analysis after ingestion |
-| `ZOPEDIA_WIKI_TOOL_RETRIEVAL` | `true` | Use tool-calling for wiki retrieval |
-| `ZOPEDIA_WIKI_MAX_TOOL_TURNS` | `8` | Max tool calls per chat request |
+| `ZOPEDIA_WIKI_TOOL_RETRIEVAL` | `true` | Use tool-calling for wiki retrieval (disable for legacy RAG) |
+| `ZOPEDIA_WIKI_MAX_TOOL_TURNS` | `8` | Max tool-calling turns per chat request |
+| `ZOPEDIA_WIKI_MAX_READS_PER_TURN` | `20` | Max wiki reads per tool-calling turn |
 | `ZOPEDIA_WIKI_LLM_MAX_TOKENS` | `6000` | Max tokens for wiki analysis/extraction |
 
 ### Ingestion
@@ -51,6 +54,12 @@ cd ../backend && python main.py
 |---|---|---|
 | `ZOPEDIA_WIKI_PENDING_INGEST_INTERVAL_SECONDS` | `45` | Min seconds between ingest sweeps |
 | `ZOPEDIA_WIKI_PENDING_INGEST_MAX_FILES_PER_CHAT` | `1` | Max files ingested per chat request (0=off) |
+
+### God-Nodes Index Pagination
+| Variable | Default | Description |
+|---|---|---|
+| `ZOPEDIA_WIKI_COMMUNITY_CUTOFF` | `20` | Max nodes per community (controls cluster granularity) |
+| `ZOPEDIA_WIKI_COMMUNITY_MIN_SIZE` | `4` | Communities smaller than this merge into Other Pages |
 
 ### Maintenance
 | Variable | Default | Description |
@@ -69,4 +78,4 @@ cd ../backend && python main.py
 
 ## Architecture
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the full prompt table, flow diagrams, and directory structure.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for full prompt table, flow diagrams, maintenance lifecycle, and god-nodes index pagination design.
