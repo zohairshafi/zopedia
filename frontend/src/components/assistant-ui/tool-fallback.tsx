@@ -16,9 +16,9 @@ import {
 } from "@assistant-ui/react";
 import {
   AlertCircleIcon,
-  CheckIcon,
   ChevronDownIcon,
   LoaderIcon,
+  VectorSquareIcon,
   XCircleIcon,
 } from "lucide-react";
 import {
@@ -96,7 +96,7 @@ type ToolStatus = ToolCallMessagePartStatus["type"];
 
 const statusIconMap: Record<ToolStatus, ElementType> = {
   running: LoaderIcon,
-  complete: CheckIcon,
+  complete: VectorSquareIcon,
   incomplete: XCircleIcon,
   "requires-action": AlertCircleIcon,
 };
