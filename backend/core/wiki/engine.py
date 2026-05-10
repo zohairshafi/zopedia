@@ -10191,13 +10191,14 @@ class LLMWikiEngine:
     def _first_nonempty_content_line(self, text: str) -> str:
         for ln in text.splitlines():
             s = ln.strip()
-            if (
-                s
-                and not s.startswith("#")
-                and not s.startswith("---")
-                and not s.startswith("type:")
-            ):
-                return s
+            if not s:
+                continue
+            if s.startswith(("#", "---")):
+                continue
+            # Skip frontmatter fields
+            if re.match(r"^[a-z_]+:", s):
+                continue
+            return s
         return ""
 
     def _slug(self, s: str) -> str:

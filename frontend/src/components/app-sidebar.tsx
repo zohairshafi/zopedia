@@ -45,6 +45,7 @@ import {
   NewReleasesIcon,
   EcoPowerIcon,
   PencilEdit02Icon,
+  ArrowReloadHorizontalIcon,
   LayoutAlignLeftIcon,
   Settings02Icon,
   ZapIcon,
@@ -293,6 +294,7 @@ export function AppSidebar() {
   const [shutdownOpen, setShutdownOpen] = useState(false);
   const [wikiBehaviourOpen, setWikiBehaviourOpen] = useState(false);
   const [wikiDataOpen, setWikiDataOpen] = useState(false);
+  const [isRunningRebuildIndex, setIsRunningRebuildIndex] = useState(false);
   const [wikiUploadOpen, setWikiUploadOpen] = useState(false);
 
   // Chat collapsible state — open by default, auto-expand on route entry
@@ -391,6 +393,32 @@ export function AppSidebar() {
       toast.error("Wiki lint failed", { description: message });
     } finally {
       setIsRunningWikiLint(false);
+    }
+  }
+
+  async function handleRebuildIndex(): Promise<void> {
+    if (isRunningRebuildIndex || isRunningWikiMaintenance || isRunningWikiLint) return;
+
+    setIsRunningRebuildIndex(true);
+    try {
+      const response = await authFetch("/api/inference/wiki/rebuild-index", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dry_run: false, max_analysis_pages: 256, max_links_per_page: 128 }),
+      });
+      if (!response.ok) {
+        throw new Error(await parseApiErrorMessage(response));
+      }
+      const result = (await response.json()) as WikiAnalysisBacklinksResult;
+      toast.success("Index rebuilt", {
+        description: `Backlinks: ${result.scanned_analysis_pages ?? 0} pages scanned, ${result.updated_pages ?? 0} updated. Community index regenerated.`,
+      });
+      closeMobileIfOpen();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Index rebuild failed";
+      toast.error("Index rebuild failed", { description: message });
+    } finally {
+      setIsRunningRebuildIndex(false);
     }
   }
 
@@ -712,6 +740,21 @@ export function AppSidebar() {
                       <HugeiconsIcon icon={Search01Icon} strokeWidth={1.75} className="size-[18px]! shrink-0" />
                       <span className="text-[14px] leading-[18px] tracking-[0.01em]">
                         {isRunningWikiLint ? "Linting..." : "Run Lint"}
+                      </span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      onClick={() => {
+                        void handleRebuildIndex();
+                      }}
+                      disabled={isRunningRebuildIndex || isRunningWikiMaintenance || isRunningWikiLint}
+                      className="h-[32px] rounded-[10px] gap-[8.5px] px-2.5 font-medium text-[#383835] dark:text-[#c7c7c4] hover:bg-[#f0f0f0]! dark:hover:bg-[#2a2c2f]! hover:text-black! dark:hover:text-white! data-active:bg-[#f0f0f0]! dark:data-active:bg-[#2a2c2f]! data-active:text-black! dark:data-active:text-white!"
+                    >
+                      <HugeiconsIcon icon={ArrowReloadHorizontalIcon} strokeWidth={1.75} className="size-[18px]! shrink-0" />
+                      <span className="text-[14px] leading-[18px] tracking-[0.01em]">
+                        {isRunningRebuildIndex ? "Rebuilding..." : "Refresh Index"}
                       </span>
                     </SidebarMenuButton>
                   </SidebarMenuItem>

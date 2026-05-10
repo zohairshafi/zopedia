@@ -549,6 +549,45 @@ async def wiki_analysis_backlinks(payload: WikiAnalysisBacklinksRequest, current
     return WikiAnalysisBacklinksResponse(status=str(report.get("status", "ok")), dry_run=bool(report.get("dry_run", payload.dry_run)), scanned_analysis_pages=int(report.get("scanned_analysis_pages", 0)), target_pages=int(report.get("target_pages", 0)), linked_target_pages=int(report.get("linked_target_pages", 0)), updated_pages=int(report.get("updated_pages", 0)), removed_sections=int(report.get("removed_sections", 0)), max_links_per_page=int(report.get("max_links_per_page", payload.max_links_per_page)), changes=[dict(i) for i in report.get("changes", [])])
 
 
+# ── Wiki Rebuild Index (backlinks + godnodes) ────────────────────────
+
+
+@router.post("/wiki/rebuild-index", response_model=WikiAnalysisBacklinksResponse)
+async def wiki_rebuild_index(payload: WikiAnalysisBacklinksRequest, current_subject: str = Depends(_optional_subject)):
+    manager, _ = get_wiki_components()
+    # Step 1: refresh analysis backlinks (zero LLM calls, pure lexical)
+    try:
+        backlinks_report = manager.refresh_analysis_backlinks(
+            dry_run=payload.dry_run,
+            max_analysis_pages=payload.max_analysis_pages,
+            max_links_per_page=payload.max_links_per_page,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Analysis backlink refresh failed: {exc}",
+        )
+    # Step 2: rebuild god-nodes community index
+    try:
+        manager.engine._rebuild_index_godnodes()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"God-nodes index rebuild failed: {exc}",
+        )
+    return WikiAnalysisBacklinksResponse(
+        status="ok",
+        dry_run=bool(backlinks_report.get("dry_run", payload.dry_run)),
+        scanned_analysis_pages=int(backlinks_report.get("scanned_analysis_pages", 0)),
+        target_pages=int(backlinks_report.get("target_pages", 0)),
+        linked_target_pages=int(backlinks_report.get("linked_target_pages", 0)),
+        updated_pages=int(backlinks_report.get("updated_pages", 0)),
+        removed_sections=int(backlinks_report.get("removed_sections", 0)),
+        max_links_per_page=int(backlinks_report.get("max_links_per_page", payload.max_links_per_page)),
+        changes=[dict(i) for i in backlinks_report.get("changes", [])],
+    )
+
+
 # ── Wiki Merge Maintenance ─────────────────────────────────────────
 
 @router.post("/wiki/merge-maintenance", response_model=WikiMergeMaintenanceResponse)
