@@ -76,6 +76,29 @@ Drop files into `backend/wiki_data/raw/` or use the **Upload Files** button in t
 
 ---
 
+## API-First / Headless Usage
+
+Zopedia exposes an OpenAI-compatible chat endpoint. You don't need the UI — embed it into any application that can make HTTP requests:
+
+```bash
+curl http://127.0.0.1:8000/v1/chat/completions \
+  -H "Authorization: Bearer sk-zopedia-YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "messages": [{"role": "user", "content": "What do we know about Project Aurora?"}],
+    "stream": true
+  }'
+```
+
+The model automatically reads your wiki, follows cross-references, and synthesizes answers — no UI required. Use it as a:
+
+- **Research assistant**: Point `ZOPEDIA_WIKI_VAULT/raw` at your Zotero library folder. Every paper you add gets ingested, analyzed, and cross-referenced. Your literature review maintains itself.
+- **Company knowledge base**: Drop meeting notes, design docs, and post-mortems into `raw/`. The wiki connects people, projects, and decisions.
+- **Personal second brain**: Journal entries, book notes, article clippings — everything interlinked, searchable by conversation.
+- **Embedded agent**: Call `/v1/chat/completions` from your own app, CLI tool, or automation pipeline. The wiki is the memory.
+
+---
+
 ## Features
 
 ### Wiki Intelligence
@@ -87,7 +110,7 @@ Drop files into `backend/wiki_data/raw/` or use the **Upload Files** button in t
 
 ### Smart Retrieval
 
-- **Tool-calling RAG**: The model uses `read_wiki_page` and `web_search` tools — no chunk-and-embed, no lexical search
+- **Tool-calling RAG**: The model uses `read_wiki_page` and `web_search` tools — no chunk-and-embed, no lexical search, no vector embedding and vector DB 
 - **Community-based index**: Pages are clustered via bipartite graph projection + greedy modularity community detection. The index stays compact regardless of wiki size (one line per community)
 - **Hierarchical navigation**: Model scans community TOC → expands relevant cluster → reads individual pages → follows `[[wikilinks]]` to analysis pages
 - **Web search fallback**: When the wiki doesn't have the answer, the model can search DuckDuckGo
