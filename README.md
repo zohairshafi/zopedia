@@ -65,7 +65,7 @@ cd ../frontend && npm install && npm run build
 # Configure (DeepSeek, OpenAI, or any compatible API)
 export ZOPEDIA_LLM_BASE_URL=https://api.deepseek.com/v1
 export ZOPEDIA_LLM_API_KEY=sk-your-key
-export ZOPEDIA_LLM_MODEL=deepseek-chat
+export ZOPEDIA_LLM_MODEL=deepseek-v4-flash
 
 # Run
 cd ../backend && python main.py
@@ -85,7 +85,7 @@ curl http://127.0.0.1:8000/v1/chat/completions \
   -H "Authorization: Bearer sk-zopedia-YOUR_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "messages": [{"role": "user", "content": "What do we know about Project Aurora?"}],
+    "messages": [{"role": "user", "content": "What do we know about Zopedia?"}],
     "stream": true
   }'
 ```
