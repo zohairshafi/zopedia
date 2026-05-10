@@ -65,7 +65,7 @@ cd ../frontend && npm install && npm run build
 # Configure (DeepSeek, OpenAI, or any compatible API)
 export ZOPEDIA_LLM_BASE_URL=https://api.deepseek.com/v1
 export ZOPEDIA_LLM_API_KEY=sk-your-key
-export ZOPEDIA_LLM_MODEL=deepseek-v4-flash
+export ZOPEDIA_LLM_MODEL=deepseek-v4-flash 
 
 # Run
 cd ../backend && python main.py
@@ -73,6 +73,39 @@ cd ../backend && python main.py
 ```
 
 Drop files into `backend/wiki_data/raw/` or use the **Upload Files** button in the sidebar under Wiki Options.
+
+---
+
+## Providers & Local LLMs
+
+Zopedia speaks the **OpenAI-compatible API protocol** (`/chat/completions`, standard messages, standard tool definitions). It works with any provider that implements this format:
+
+| Provider | Works? | Notes |
+|---|---|---|
+| **DeepSeek** | Native | Full CoT reasoning visibility via `reasoning_content` |
+| **OpenAI** | Yes | Standard chat completions, tool calling |
+| **Ollama** | Yes | Run fully local. Start with `ollama serve`, point `ZOPEDIA_LLM_BASE_URL` at `http://localhost:11434/v1` |
+| **llama.cpp** | Yes | Run fully local. Use its built-in `/v1/chat/completions` endpoint |
+| **vLLM / LiteLLM** | Yes | Any OpenAI-compatible proxy |
+| **Anthropic** | No (direct) | Different API format. Use LiteLLM as a proxy to translate |
+
+### Fully Local Setup
+
+```bash
+# Terminal 1: Start Ollama with a tool-calling-capable model
+ollama pull qwen3:14b    # or llama3.1, mistral, etc.
+ollama serve
+
+# Terminal 2: Point Zopedia at your local Ollama
+export ZOPEDIA_LLM_BASE_URL=http://localhost:11434/v1
+export ZOPEDIA_LLM_API_KEY=ollama     # Ollama ignores the key but requires one
+export ZOPEDIA_LLM_MODEL=qwen3:14b
+
+cd backend && python main.py
+# Everything runs on your machine — no data leaves
+```
+
+> **Note**: Tool calling requires a model that supports it. Look for models with tool-calling / function-calling support (Qwen 3, Llama 3.1+, Mistral 3, Command R+, etc.). Smaller models (<7B) may struggle with complex multi-turn tool use.
 
 ---
 
