@@ -227,7 +227,7 @@ class WikiManager:
     def refresh_analysis_backlinks(
         self,
         dry_run: bool = True,
-        max_analysis_pages: int = 256,
+        max_analysis_pages: Optional[int] = None,
         max_links_per_page: int = 128,
     ) -> Dict:
         """Populate entity/concept backlink sections from analysis-page wikilinks."""

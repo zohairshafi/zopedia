@@ -2867,7 +2867,7 @@ class LLMWikiEngine:
     def enrich_analysis_pages(
         self,
         dry_run: bool = False,
-        max_analysis_pages: int = 64,
+        max_analysis_pages: Optional[int] = None,
         fill_gaps_from_web: Optional[bool] = None,
         max_web_gap_queries: Optional[int] = None,
         refresh_non_fallback_oldest_pages: Optional[int] = None,
@@ -2942,8 +2942,16 @@ class LLMWikiEngine:
         except Exception:
             pass
 
-        max_pages = max(1, int(max_analysis_pages))
-        analysis_pages = sorted(self.analysis_dir.glob("*.md"))[:max_pages]
+        max_pages = (
+            max(1, int(max_analysis_pages))
+            if max_analysis_pages is not None
+            else max(1, int(os.getenv("UNSLOTH_WIKI_MAX_ANALYSIS_PAGES", "64")))
+        )
+        analysis_pages = sorted(
+            self.analysis_dir.glob("*.md"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )[:max_pages]
         valid_targets = {
             rel[:-3] for rel in self._all_wiki_pages() if rel.endswith(".md")
         }
@@ -3198,10 +3206,14 @@ class LLMWikiEngine:
     def refresh_analysis_backlinks(
         self,
         dry_run: bool = True,
-        max_analysis_pages: int = 256,
+        max_analysis_pages: Optional[int] = None,
         max_links_per_page: int = 128,
     ) -> Dict[str, Any]:
-        max_pages = max(1, int(max_analysis_pages))
+        max_pages = (
+            max(1, int(max_analysis_pages))
+            if max_analysis_pages is not None
+            else max(1, int(os.getenv("UNSLOTH_WIKI_MAX_ANALYSIS_PAGES", "64")))
+        )
         max_links = max(1, int(max_links_per_page))
 
         target_pages: List[Tuple[str, Path]] = []
@@ -3213,7 +3225,11 @@ class LLMWikiEngine:
         target_rel_set = {target_rel for target_rel, _ in target_pages}
         target_phrase_catalog = self._analysis_backlink_target_phrase_catalog(target_pages)
 
-        analysis_pages = sorted(self.analysis_dir.glob("*.md"))[:max_pages]
+        analysis_pages = sorted(
+            self.analysis_dir.glob("*.md"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )[:max_pages]
         analysis_refs_by_target: Dict[str, Set[str]] = {}
         link_signals_by_target: Dict[str, Set[str]] = {}
         signal_counts = {

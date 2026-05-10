@@ -237,7 +237,7 @@ class WikiRetryFallbackResponse(BaseModel):
 
 class WikiAnalysisBacklinksRequest(BaseModel):
     dry_run: bool = Field(True)
-    max_analysis_pages: int = Field(256, ge=1, le=5000)
+    max_analysis_pages: Optional[int] = Field(None, ge=1, le=5000)
     max_links_per_page: int = Field(128, ge=1, le=2000)
 
 

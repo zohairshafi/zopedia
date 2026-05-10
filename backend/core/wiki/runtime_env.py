@@ -89,6 +89,14 @@ WIKI_ENV_SPECS: tuple[WikiEnvSpec, ...] = (
         minimum=10,
     ),
     WikiEnvSpec(
+        name="ZOPEDIA_WIKI_MAX_ANALYSIS_PAGES",
+        kind="int",
+        default="64",
+        description="Max analysis pages processed per enrich/retry/backlinks operation. Most-recent pages are prioritized.",
+        minimum=1,
+        maximum=1024,
+    ),
+    WikiEnvSpec(
         name="ZOPEDIA_WIKI_AUTO_LINT_EVERY",
         kind="int",
         default="10",

@@ -32,6 +32,7 @@ def apply_defaults() -> None:
     _setdefault("UNSLOTH_WIKI_WATCHER", "true")
     _setdefault("UNSLOTH_WIKI_AUTO_QUERY_ON_INGEST", "true")
     _setdefault("UNSLOTH_WIKI_AUTO_QUERY_CHAT_HISTORY", "false")
+    _setdefault("UNSLOTH_WIKI_MAX_ANALYSIS_PAGES", "64")
     _setdefault("UNSLOTH_WIKI_AUTO_LINT_EVERY", "10")
     _setdefault("UNSLOTH_WIKI_AUTO_RETRY_FALLBACK_ANALYSES_MAX_PAGES", "24")
     _setdefault("UNSLOTH_WIKI_CHAT_HISTORY_FLUSH_SECONDS", "600")

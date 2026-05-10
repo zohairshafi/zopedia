@@ -64,6 +64,7 @@ cd ../backend && python main.py
 ### Maintenance
 | Variable | Default | Description |
 |---|---|---|
+| `ZOPEDIA_WIKI_MAX_ANALYSIS_PAGES` | `64` | Max analysis pages per enrich/retry/backlinks operation |
 | `ZOPEDIA_WIKI_AUTO_LINT_EVERY` | `10` | Maintenance cadence (every N ingests, 0=off) |
 | `ZOPEDIA_WIKI_AUTO_RETRY_FALLBACK_ANALYSES_MAX_PAGES` | `24` | Fallback retry batch size (0=off) |
 | `ZOPEDIA_WIKI_MERGE_MAINTENANCE_MAX_MERGES` | `512` | Max merges per maintenance run |

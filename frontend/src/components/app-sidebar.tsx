@@ -404,7 +404,7 @@ export function AppSidebar() {
       const response = await authFetch("/api/inference/wiki/rebuild-index", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dry_run: false, max_analysis_pages: 256, max_links_per_page: 128 }),
+        body: JSON.stringify({ dry_run: false, max_links_per_page: 128 }),
       });
       if (!response.ok) {
         throw new Error(await parseApiErrorMessage(response));
@@ -446,7 +446,7 @@ export function AppSidebar() {
       const retryResponse = await authFetch("/api/inference/wiki/retry-fallback", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dry_run: false, max_analysis_pages: 256 }),
+        body: JSON.stringify({ dry_run: false }),
       });
       if (!retryResponse.ok) {
         throw new Error(
@@ -459,7 +459,6 @@ export function AppSidebar() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           dry_run: false,
-          max_analysis_pages: 256,
           run_fallback_retry_first: false,
           fill_gaps_from_web: fillGapsFromWeb,
           ...(fillGapsFromWeb ? { max_web_gap_queries: 8 } : {}),
@@ -478,7 +477,6 @@ export function AppSidebar() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             dry_run: false,
-            max_analysis_pages: 256,
             max_links_per_page: 128,
           }),
         },
