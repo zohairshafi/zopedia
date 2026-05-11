@@ -419,7 +419,8 @@ async def openai_chat_completions(request: Request):
                     if messages and messages[-1].get("role") == "assistant" and messages[-1].get("content") and not messages[-1].get("tool_calls"):
                         messages.pop()
                     # Add instruction to break the model out of tool-calling mode and force synthesis.
-                    messages.append({"role": "user", "content": "Now synthesize a complete, thorough answer using all the wiki pages you just read. Provide the answer directly — do not output JSON or tool-call syntax."})
+                    # Marked so we can remove it after streaming — it should not persist into the next turn.
+                    messages.append({"role": "user", "content": "Now synthesize a complete, thorough answer using all the wiki pages you just read. Provide the answer directly — do not output JSON or tool-call syntax.", "_ephemeral": True})
                 except Exception as exc:
                     logger.warning("Tool-calling retrieval failed, falling back: %s", exc)
                     yield f"data: {json.dumps({'type': 'tool_status', 'content': f'Error: {exc}'})}\n\n"
@@ -438,6 +439,10 @@ async def openai_chat_completions(request: Request):
                         yield f"data: {json.dumps({'id': chunk_id, 'object': 'chat.completion.chunk', 'created': created, 'model': resolved_model, 'choices': [{'index': 0, 'delta': {'content': event['content']}, 'finish_reason': None}]})}\n\n"
                     elif event["type"] == "error":
                         yield f"data: {json.dumps({'error': event['message']})}\n\n"
+                # Remove ephemeral synthesis instruction so it doesn't leak into next turn
+                if messages and messages[-1].get("_ephemeral"):
+                    messages.pop()
+
                 yield "data: [DONE]\n\n"
 
             return StreamingResponse(event_generator(), media_type="text/event-stream")
@@ -447,7 +452,7 @@ async def openai_chat_completions(request: Request):
                 messages = await _resolve_tool_calls(list(messages), wiki_tools, resolved_model)
                 if messages and messages[-1].get("role") == "assistant" and messages[-1].get("content") and not messages[-1].get("tool_calls"):
                     messages.pop()
-                messages.append({"role": "user", "content": "Now synthesize a complete, thorough answer using all the wiki pages you just read. Provide the answer directly — do not output JSON or tool-call syntax."})
+                messages.append({"role": "user", "content": "Now synthesize a complete, thorough answer using all the wiki pages you just read. Provide the answer directly — do not output JSON or tool-call syntax.", "_ephemeral": True})
             except Exception as exc:
                 logger.warning("Tool-calling retrieval failed, falling back: %s", exc)
                 if query:
