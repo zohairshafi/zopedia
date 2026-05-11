@@ -150,7 +150,7 @@ Total: 27 pages in 3 communities. Use read_wiki_page to expand community pages.
 
 | Variable | Default | Description |
 |---|---|---|
-| `ZOPEDIA_WIKI_COMMUNITY_CUTOFF` | 20 | Max nodes per community |
+| `ZOPEDIA_WIKI_COMMUNITY_CUTOFF` | 20 | Max number of communities (higher = more granular) |
 | `ZOPEDIA_WIKI_COMMUNITY_MIN_SIZE` | 4 | Communities below this → "Other" (listed inline) |
 | `ZOPEDIA_WIKI_COMPACTION_MAX_PAGES` | 64 | Max pages LLM-rewritten per maintenance cycle. 0=off. Pages with most overflow prioritized |
 

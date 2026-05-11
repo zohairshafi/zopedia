@@ -168,7 +168,7 @@ WIKI_ENV_SPECS: tuple[WikiEnvSpec, ...] = (
         name="ZOPEDIA_WIKI_COMMUNITY_CUTOFF",
         kind="int",
         default="20",
-        description="Max nodes per community in graph-based index pagination. Controls granularity of the god-nodes index.",
+        description="Max number of communities detected by graph-based clustering. Higher values produce more fine-grained clusters. Controls granularity of the god-nodes index.",
         minimum=5,
         maximum=100,
     ),

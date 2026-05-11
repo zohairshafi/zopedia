@@ -6739,7 +6739,7 @@ class LLMWikiEngine:
         7. Write index-godnodes.md
 
         Config vars:
-        - ZOPEDIA_WIKI_COMMUNITY_CUTOFF (default 20): max nodes per community
+        - ZOPEDIA_WIKI_COMMUNITY_CUTOFF (default 20): max number of communities (higher = more granular)
         - ZOPEDIA_WIKI_COMMUNITY_MIN_SIZE (default 4): communities below this go to Other
         """
         try:
@@ -6891,7 +6891,7 @@ class LLMWikiEngine:
 
             prompt = (
                 "These wiki pages form a connected cluster discovered by community detection. "
-                "Return 5-10 comma-separated keywords or key phrases that describe the common "
+                "Return 8-10 comma-separated keywords or key phrases that describe the common "
                 "theme, domain, or relationship uniting them. Also provide a short URL-safe "
                 "slug (2-5 words, hyphenated). Be specific — use topic names, proper nouns, "
                 "and technical terms. Return JSON only:\n"

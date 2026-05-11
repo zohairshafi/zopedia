@@ -227,7 +227,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for full prompt table, maintenance lifecy
 ### Index & Communities
 | Variable | Default | Description |
 |---|---|---|
-| `ZOPEDIA_WIKI_COMMUNITY_CUTOFF` | `20` | Max nodes per community (controls cluster granularity) |
+| `ZOPEDIA_WIKI_COMMUNITY_CUTOFF` | `20` | Max number of communities detected (higher = more fine-grained clusters) |
 | `ZOPEDIA_WIKI_COMMUNITY_MIN_SIZE` | `4` | Communities smaller than this merge into Other Pages |
 
 ### Ingestion
