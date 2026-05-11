@@ -21,6 +21,7 @@ async function hasActiveSession(): Promise<boolean> {
 interface AuthStatus {
   initialized: boolean;
   requires_password_change: boolean;
+  auth_disabled?: boolean;
 }
 
 async function fetchAuthStatus(): Promise<AuthStatus> {
@@ -31,6 +32,24 @@ async function fetchAuthStatus(): Promise<AuthStatus> {
   } catch {
     return { initialized: true, requires_password_change: mustChangePassword() };
   }
+}
+
+async function autoLogin(): Promise<void> {
+  try {
+    const res = await fetch(apiUrl("/api/auth/login"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: "zopedia", password: "zopedia" }),
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data.access_token) {
+      localStorage.setItem("unsloth_auth_token", data.access_token);
+      if (data.refresh_token) {
+        localStorage.setItem("unsloth_auth_refresh_token", data.refresh_token);
+      }
+    }
+  } catch { /* fall through to login page */ }
 }
 
 function authRedirect(to: "/login" | "/change-password"): never {
@@ -50,10 +69,19 @@ export async function requireAuth(): Promise<void> {
     }
     return;
   }
+
   const status = await fetchAuthStatus();
+
+  // Auth disabled: auto-login and skip the login screen entirely
+  if (status.auth_disabled) {
+    await autoLogin();
+    return;
+  }
+
   if (status.requires_password_change || mustChangePassword()) {
     authRedirect("/change-password");
   }
+  // initialized=false means first run — redirect to set password
   authRedirect(status.initialized ? "/login" : "/change-password");
 }
 

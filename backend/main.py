@@ -277,7 +277,7 @@ if _AUTH_DISABLED:
 
     @_auth_stub.get("/auth/status")
     async def _auth_status():
-        return {"initialized": True, "requires_password_change": False}
+        return {"initialized": True, "requires_password_change": False, "auth_disabled": True}
 
     @_auth_stub.post("/auth/login")
     async def _auth_login():
