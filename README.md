@@ -316,3 +316,9 @@ npm run build               # Output to frontend/dist/
 ---
 
 Built on the idea that your knowledge base should compound — every question answered, every source ingested, every cross-reference added makes the next question better.
+
+---
+
+## License & Attribution
+
+Zopedia is built on top of [Unsloth Studio](https://github.com/unslothai/unsloth), an open-source platform for local LLM fine-tuning and chat. Unsloth Studio is licensed under AGPL-3.0, and Zopedia retains the same license. The core wiki engine, graphify library, ingestion pipeline, and frontend UI framework were adapted from Unsloth Studio — with training, model serving, and fine-tuning features removed, and community-based index pagination, maintenance lifecycle improvements, and an upstream-API-only chat flow added on top.
