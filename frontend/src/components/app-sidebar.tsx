@@ -620,22 +620,27 @@ export function AppSidebar() {
               });
             }}
             className="flex items-center gap-[6px] select-none"
-            aria-label="Zopedia home"
+            aria-label="zopedia home"
           >
             <img
               src="/circle-logo-small.png"
-              alt="Zopedia"
-              className="h-[34px] w-[34px] rounded-lg object-contain"
+              alt="zopedia"
+              className="h-[34px] w-[34px] rounded-full object-cover dark:hidden"
+            />
+            <img
+              src="/circle-logo-small-light.png"
+              alt="zopedia"
+              className="h-[34px] w-[34px] rounded-full object-cover hidden dark:block"
             />
             <span className="font-heading text-[21px] font-semibold tracking-[-0.01em] dark:tracking-[0.02em] leading-none text-black dark:text-white">
               zopedia
             </span>
-            <span
+            {/* <span
               style={{ fontFamily: '"Inter Variable", ui-sans-serif, system-ui, sans-serif' }}
               className="ml-0.5 inline-flex items-center justify-center rounded-full border border-[#e0ded6] px-[5px] py-[2px] text-[8px] font-medium leading-none tracking-[0.04em] text-[#62605a] antialiased subpixel-antialiased shadow-[0_1px_2px_rgba(0,0,0,0.06)] dark:border-[#3a3c3f] dark:text-[#9d9fa5] dark:shadow-[0_1px_2px_rgba(0,0,0,0.35)]"
             >
               BETA
-            </span>
+            </span> */}
           </Link>
           {!isMobile && (
             <Tooltip>

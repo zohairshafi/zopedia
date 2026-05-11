@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Copyright 2026-present the Unsloth AI Inc. team. All rights reserved. See /studio/LICENSE.AGPL-3.0
+// Copyright 2026-present the Zopedia. All rights reserved. See /studio/LICENSE.AGPL-3.0
 
 import {
   ComposerAddAttachment,
@@ -218,15 +218,20 @@ const ThreadWelcome: FC<{ hideComposer?: boolean }> = ({ hideComposer }) => {
         <div className="aui-thread-welcome-message flex w-full flex-col justify-center gap-6 px-4">
           <div className="flex flex-col items-center gap-2 text-center">
             <img
-              src="/Sloth emojis/sloth pc square.png"
-              alt="Sloth mascot"
-              className="size-20"
+              src="/logo_main.png"
+              alt="zopedia Logo"
+              className="size-40 dark:hidden"
+            />
+            <img
+              src="/logo_main_light.png"
+              alt="zopedia Logo"
+              className="size-40 hidden dark:block"
             />
             <h1 className="aui-thread-welcome-message-inner fade-in slide-in-from-bottom-1 animate-in font-heading font-semibold text-2xl tracking-[-0.02em] duration-200">
-              Zopedia
+              zopedia
             </h1>
             <p className="aui-thread-welcome-message-inner fade-in slide-in-from-bottom-1 -mt-1 animate-in font-heading font-normal text-muted-foreground text-sm delay-75 duration-200">
-              Chat with your personal knowledge base. Upload files, ask questions, and explore your data.
+              Chat with your personal knowledge base. Upload files, ask questions, and explore your files.
             </p>
           </div>
           <GeneratingSpinner />
