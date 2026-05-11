@@ -215,7 +215,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for full prompt table, maintenance lifecy
 |---|---|---|
 | `ZOPEDIA_LLM_BASE_URL` | — | Upstream API endpoint (OpenAI-compatible) |
 | `ZOPEDIA_LLM_API_KEY` | — | API key |
-| `ZOPEDIA_LLM_MODEL` | — | Model name (e.g. `deepseek-chat`) |
+| `ZOPEDIA_LLM_MODEL` | — | Model name (e.g. `deepseek-v4-flash`) |
 
 ### Wiki & Chat
 | Variable | Default | Description |
