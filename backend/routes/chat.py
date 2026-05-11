@@ -6,7 +6,7 @@ Tool-calling architecture:
 - After resolution: the final assistant message is popped and the API is called
   again with streaming for proper token-by-token output + CoT/reasoning visibility.
 - A future revision will stream tool_call/tool_start/tool_end events during
-  resolution for full visibility (following the original Unsloth pattern).
+  resolution for full visibility (following the original Zopedia pattern).
 """
 
 from __future__ import annotations
@@ -135,7 +135,7 @@ async def _resolve_tool_calls_stream(
         max_turns = _WIKI_MAX_TOOL_TURNS
     """Async generator that yields tool-calling progress events.
 
-    Yields events following the original Unsloth protocol:
+    Yields events following the original Zopedia protocol:
       {"type": "tool_status", "text": "..."}
       {"type": "tool_start", "tool_name": "...", "tool_call_id": "...", "arguments": {...}}
       {"type": "tool_end", "tool_name": "...", "tool_call_id": "...", "result": "..."}

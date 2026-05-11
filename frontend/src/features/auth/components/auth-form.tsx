@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Copyright 2026-present the Unsloth AI Inc. team. All rights reserved. See /studio/LICENSE.AGPL-3.0
+// Copyright 2026-present the Zopedia team. All rights reserved. See /studio/LICENSE.AGPL-3.0
 
 import { apiUrl } from "@/lib/api-base";
 import { Button } from "@/components/ui/button";
@@ -73,7 +73,7 @@ type AuthFormProps = {
   mode: AuthMode;
 };
 
-const HIDDEN_LOGIN_USERNAME = "unsloth";
+const HIDDEN_LOGIN_USERNAME = "zopedia";
 
 export function AuthForm({ mode }: AuthFormProps): ReactElement | null {
   const navigate = useNavigate();
@@ -282,10 +282,10 @@ export function AuthForm({ mode }: AuthFormProps): ReactElement | null {
       navigate({ to: getPostAuthRoute() });
     } catch (err: unknown) {
       let msg = err instanceof Error ? err.message : "Auth failed.";
-      if (msg.includes("unsloth studio reset-password") && usePlatformStore.getState().deviceType === "windows") {
+      if (msg.includes("zopedia reset-password") && usePlatformStore.getState().deviceType === "windows") {
         msg = msg.replace(
-          "unsloth studio reset-password",
-          ".\\unsloth_studio\\Scripts\\unsloth.exe studio reset-password",
+          "zopedia reset-password",
+          ".\\zopedia\\Scripts\\zopedia.exe reset-password",
         );
       }
       setError(msg);

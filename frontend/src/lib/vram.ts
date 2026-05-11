@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Copyright 2026-present the Unsloth AI Inc. team. All rights reserved. See /studio/LICENSE.AGPL-3.0
+// Copyright 2026-present the Zopedia team. All rights reserved. See /studio/LICENSE.AGPL-3.0
 
 /**
  * VRAM estimation for model loading (4-bit quantization via bitsandbytes).
  *
  * Estimates the total driver-level VRAM (what nvidia-smi reports) needed to
- * load a model in 4-bit with Unsloth / bitsandbytes.  This determines
+ * load a model in 4-bit with Zopedia / bitsandbytes.  This determines
  * whether a model will fit on the user's GPU before any training begins.
  *
  * Formula:  totalParams * 0.90  +  1.4 GB
@@ -60,7 +60,7 @@ export const FP16_LOADING_BYTES = 2.0;
 export type TrainingMethod = "qlora" | "lora" | "full";
 
 /**
- * Estimate VRAM (GB) needed to load a model with Unsloth.
+ * Estimate VRAM (GB) needed to load a model with Zopedia.
  *
  * The bytes-per-param rate depends on the training method:
  *   - QLoRA  : 4-bit quantized via bnb  -> 0.90 bytes/param (calibrated)

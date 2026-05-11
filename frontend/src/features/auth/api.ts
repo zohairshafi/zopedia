@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Copyright 2026-present the Unsloth AI Inc. team. All rights reserved. See /studio/LICENSE.AGPL-3.0
+// Copyright 2026-present the Zopedia team. All rights reserved. See /studio/LICENSE.AGPL-3.0
 
 import { apiUrl, isTauri } from "@/lib/api-base";
 import {
@@ -111,7 +111,7 @@ export async function authFetch(
     response = await fetch(resolvedInput, { ...init, headers });
   } catch (err) {
     if (err instanceof TypeError) {
-      throw new Error("Studio isn't running -- please relaunch it.");
+      throw new Error("Zopedia isn't running -- please relaunch it.");
     }
     throw err;
   }

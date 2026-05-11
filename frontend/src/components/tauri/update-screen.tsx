@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Copyright 2026-present the Unsloth AI Inc. team. All rights reserved. See /studio/LICENSE.AGPL-3.0
+// Copyright 2026-present the Zopedia team. All rights reserved. See /studio/LICENSE.AGPL-3.0
 
 import type { UpdateStatus } from "@/hooks/use-tauri-update";
 import { AnimatePresence, motion } from "motion/react";
@@ -28,8 +28,8 @@ function Spinner({ size = 24 }: { size?: number }) {
 function Logo() {
   return (
     <div className="flex flex-col items-center gap-4">
-      <img src="/sticker.png" alt="Unsloth" className="h-[72px] w-[72px] object-contain" />
-      <img src="/studio.png" alt="Unsloth Studio" className="h-auto w-[250px] object-contain dark:invert" />
+      <img src="/sticker.png" alt="Zopedia" className="h-[72px] w-[72px] object-contain" />
+      <img src="/studio.png" alt="Zopedia" className="h-auto w-[250px] object-contain dark:invert" />
     </div>
   );
 }

@@ -4461,7 +4461,7 @@ class LLMWikiEngine:
             req = Request(
                 normalized_url,
                 headers = {
-                    "User-Agent": "UnslothWikiBot/1.0 (+https://github.com/unslothai/unsloth)",
+                    "User-Agent": "ZopediaWikiBot/1.0",
                     "Accept": "text/html, text/plain;q=0.9, */*;q=0.5",
                 },
             )

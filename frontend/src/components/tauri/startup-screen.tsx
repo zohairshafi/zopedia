@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Copyright 2026-present the Unsloth AI Inc. team. All rights reserved. See /studio/LICENSE.AGPL-3.0
+// Copyright 2026-present the Zopedia team. All rights reserved. See /studio/LICENSE.AGPL-3.0
 
 import { ShimmerButton } from "@/components/ui/shimmer-button";
 import type { BackendStatus } from "@/hooks/use-tauri-backend";
@@ -51,8 +51,8 @@ function TealSpinner({ size = 24 }: { size?: number }) {
 function Logo() {
   return (
     <div className="flex flex-col items-center gap-4">
-      <img src="/sticker.png" alt="Unsloth" className="h-[72px] w-[72px] object-contain" />
-      <img src="/studio.png" alt="Unsloth Studio" className="h-auto w-[250px] object-contain dark:invert" />
+      <img src="/sticker.png" alt="Zopedia" className="h-[72px] w-[72px] object-contain" />
+      <img src="/studio.png" alt="Zopedia" className="h-auto w-[250px] object-contain dark:invert" />
     </div>
   );
 }
@@ -169,7 +169,7 @@ function RepairingContent({
       </div>
       <div className="mb-10 flex flex-col items-center gap-2">
         <TealSpinner />
-        <p className="text-sm font-bold text-foreground">Updating existing Studio install...</p>
+        <p className="text-sm font-bold text-foreground">Updating existing Zopedia install...</p>
         {latest && (
           <p className="max-w-xs text-center text-xs text-muted-foreground">{latest}</p>
         )}

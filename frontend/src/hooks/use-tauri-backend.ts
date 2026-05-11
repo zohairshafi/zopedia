@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Copyright 2026-present the Unsloth AI Inc. team. All rights reserved. See /studio/LICENSE.AGPL-3.0
+// Copyright 2026-present the Zopedia team. All rights reserved. See /studio/LICENSE.AGPL-3.0
 
 import { useEffect, useState, useCallback, useRef } from "react";
 import { isTauri, setApiBase } from "@/lib/api-base";
@@ -166,7 +166,7 @@ export function useTauriBackend() {
             await startRepair();
           } else {
             setBackendError(
-              "Managed Studio install is too old. Run `unsloth studio update`.",
+              "Zopedia install is too old. Run `zopedia update`.",
             );
           }
           return;
@@ -461,7 +461,7 @@ export function useTauriBackend() {
       const detail =
         event instanceof CustomEvent && typeof event.detail === "string"
           ? event.detail
-          : "Desktop authentication failed. Update or repair the managed Studio install, then restart Studio.";
+          : "Desktop authentication failed. Update or repair Zopedia, then restart it.";
       setAuthFailure(detail);
     };
     window.addEventListener("tauri-auth-failed", onAuthFailed);

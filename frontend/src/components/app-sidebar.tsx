@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Copyright 2026-present the Unsloth AI Inc. team. All rights reserved. See /studio/LICENSE.AGPL-3.0
+// Copyright 2026-present the Zopedia team. All rights reserved. See /studio/LICENSE.AGPL-3.0
 
 import {
   Sidebar,
@@ -623,12 +623,12 @@ export function AppSidebar() {
             aria-label="zopedia home"
           >
             <img
-              src="/circle-logo-small.png"
+              src="/circle-logo-small-light.png"
               alt="zopedia"
               className="h-[34px] w-[34px] rounded-full object-cover dark:hidden"
             />
             <img
-              src="/circle-logo-small-light.png"
+              src="/circle-logo-small.png"
               alt="zopedia"
               className="h-[34px] w-[34px] rounded-full object-cover hidden dark:block"
             />
@@ -940,7 +940,7 @@ export function AppSidebar() {
                   </div>
                   <div className="flex flex-col gap-0.5 leading-none group-data-[collapsible=icon]:hidden">
                     <span className="truncate font-heading text-[13px] tracking-[0.02em] font-semibold text-[#383835] dark:text-[#c7c7c4]">{displayTitle}</span>
-                    <span className="truncate text-[11px] tracking-[0.01em] text-muted-foreground">Studio</span>
+                    <span className="truncate text-[11px] tracking-[0.01em] text-muted-foreground">Zopedia</span>
                   </div>
                   <ChevronsUpDown strokeWidth={1.25} className="ml-auto size-4 text-muted-foreground group-data-[collapsible=icon]:hidden" />
                 </SidebarMenuButton>

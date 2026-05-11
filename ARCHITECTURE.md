@@ -156,7 +156,7 @@ Total: 27 pages in 3 communities. Use read_wiki_page to expand community pages.
 
 ## Tool-Calling Protocol (SSE Events)
 
-Following the original Unsloth pattern:
+Following the original Zopedia pattern:
 
 | Event Type | Direction | Purpose |
 |---|---|---|

@@ -710,10 +710,11 @@ async def wiki_save_chat_history(payload: WikiChatHistorySaveRequest, current_su
     lines = [
         f"# {title}",
         "",
-        "> This file is an exported Zopedia chat history. It was saved from a conversation "
+        "> This file is an exported chat history. It was saved from a conversation "
         "with the wiki and will be ingested as a new source. When analyzing this file, "
         "treat it as a dialogue between a user and an AI assistant. Extract entities, "
-        "concepts, and facts as you would from any other source.",
+        "concepts, and facts as you would from any other source. "
+        "Check for any updated or new information that might be relevant to the wiki.",
         "",
         f"thread_id: {thread_id}",
         f"saved_at: {datetime.now().isoformat()}",

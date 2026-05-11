@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-# Copyright 2026-present the Unsloth AI Inc. team. All rights reserved. See /studio/LICENSE.AGPL-3.0
+# Copyright 2026-present the Zopedia team. All rights reserved. See /studio/LICENSE.AGPL-3.0
 
 """
 SQLite storage for authentication data (user credentials + JWT secret).
@@ -15,7 +15,7 @@ from typing import Optional, Tuple
 from utils.paths import auth_db_path, ensure_dir
 
 DB_PATH = auth_db_path()
-DEFAULT_ADMIN_USERNAME = "unsloth"
+DEFAULT_ADMIN_USERNAME = "zopedia"
 
 # Plaintext bootstrap password file — lives beside auth.db, deleted on
 # first password change so the credential never lingers on disk.

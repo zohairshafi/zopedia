@@ -218,12 +218,12 @@ const ThreadWelcome: FC<{ hideComposer?: boolean }> = ({ hideComposer }) => {
         <div className="aui-thread-welcome-message flex w-full flex-col justify-center gap-6 px-4">
           <div className="flex flex-col items-center gap-2 text-center">
             <img
-              src="/logo_main.png"
+              src="/logo_main_light.png"
               alt="zopedia Logo"
               className="size-40 dark:hidden"
             />
             <img
-              src="/logo_main_light.png"
+              src="/logo_main.png"
               alt="zopedia Logo"
               className="size-40 hidden dark:block"
             />

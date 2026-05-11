@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Copyright 2026-present the Unsloth AI Inc. team. All rights reserved. See /studio/LICENSE.AGPL-3.0
+// Copyright 2026-present the Zopedia team. All rights reserved. See /studio/LICENSE.AGPL-3.0
 
 import { cn } from "@/lib/utils";
 import { copyToClipboard } from "@/lib/copy-to-clipboard";
@@ -9,7 +9,7 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type { ReactElement } from "react";
 import { useEffect, useRef, useState } from "react";
 
-const STUDIO_UPDATE_CMD = "unsloth studio update";
+const STUDIO_UPDATE_CMD = "zopedia update";
 const STUDIO_UPDATE_FALLBACK_UNIX_CMD =
   "curl -fsSL https://unsloth.ai/install.sh | sh";
 const STUDIO_UPDATE_FALLBACK_WINDOWS_CMD =
@@ -157,7 +157,7 @@ export function UpdateStudioInstructions({
       </AnimatePresence>
       <CopyableCommand command={STUDIO_UPDATE_CMD} copyLabel="update command" />
       <p className="text-xs text-muted-foreground leading-relaxed">
-        If that fails or unsloth studio update is unavailable, run:
+        If that fails or zopedia update is unavailable, run:
       </p>
       <AnimatePresence mode="wait" initial={false}>
         <motion.div
@@ -178,7 +178,7 @@ export function UpdateStudioInstructions({
         </motion.div>
       </AnimatePresence>
       <p className="text-xs text-muted-foreground leading-relaxed">
-        Restart Studio after updating for changes to take effect.
+        Restart Zopedia after updating for changes to take effect.
       </p>
     </div>
   );

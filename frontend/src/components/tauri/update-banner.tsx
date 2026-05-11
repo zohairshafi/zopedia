@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Copyright 2026-present the Unsloth AI Inc. team. All rights reserved. See /studio/LICENSE.AGPL-3.0
+// Copyright 2026-present the Zopedia team. All rights reserved. See /studio/LICENSE.AGPL-3.0
 
 import { Button } from "@/components/ui/button";
 import type { UpdateInfo, UpdateStatus } from "@/hooks/use-tauri-update";
@@ -58,7 +58,7 @@ export function UpdateBanner({
                 </p>
                 <p className="text-xs text-muted-foreground">
                   {isExternalServer
-                    ? "Run `unsloth studio update` from your terminal"
+                    ? "Run `zopedia update` from your terminal"
                     : "A new app update is available"}
                 </p>
               </div>
