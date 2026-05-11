@@ -6838,39 +6838,59 @@ class LLMWikiEngine:
         concept_communities, concept_covered = _build_projection(concept_nodes, "concept")
 
         # ── Describe communities and generate stable slugs ────────────
+        def _member_label(rel: str) -> str:
+            """Get a clean display label for a wiki page from the index, without file I/O."""
+            md_rel = rel if rel.endswith(".md") else f"{rel}.md"
+            summary = str(index_summary.get(md_rel, "")).strip()
+            if summary:
+                # Filter out garbage: frontmatter fields, merge artifacts, bullets
+                if re.match(r"^(title|type|updated_at|similarity|confidence|reason|status):",
+                            summary, re.IGNORECASE):
+                    summary = ""
+                elif summary.startswith("- "):
+                    summary = ""
+            if not summary:
+                # Fall back to H1 from page text only if index has no good data
+                page_path = self.wiki_dir / md_rel
+                if page_path.exists():
+                    try:
+                        text = page_path.read_text(encoding="utf-8", errors="ignore")
+                        for raw_line in text.splitlines():
+                            stripped = raw_line.strip()
+                            if stripped.startswith("# ") and not stripped.startswith("## "):
+                                summary = stripped[2:].strip()[:120]
+                                break
+                    except Exception:
+                        pass
+            if not summary:
+                summary = rel.split("/", 1)[-1].replace("-", " ").replace("_", " ")
+            return summary
+
         def _describe_community(members: frozenset[str]) -> str:
             """Return a 2-3 sentence description of the community via LLM,
-            falling back to a summary of the most central pages."""
-            # Collect member titles, filtering out garbage index summaries
-            member_pages: list[tuple[str, str]] = []
-            for m in sorted(members):
-                title = _page_title(m)
-                rel = m[:-3] if m.endswith(".md") else m
-                # Skip titles that look like frontmatter, index artifacts, or merge data
-                if title and not re.match(
-                    r"^(title|type|updated_at|similarity|confidence|reason|status):",
-                    title,
-                    re.IGNORECASE,
-                ):
-                    member_pages.append((rel, title))
-                else:
-                    # Use the raw slug as a fallback label
-                    label = rel.split("/", 1)[-1].replace("-", " ").replace("_", " ")
-                    member_pages.append((rel, label))
+            falling back to listing representative member labels."""
+            member_labels = sorted(
+                [_member_label(m) for m in members if _member_label(m)],
+                key=len,
+                reverse=True,
+            )
 
-            # Fallback: describe using the most-connected pages
-            central = max(members, key=lambda m: len(all_edges.get(m, [])))
-            central_title = _page_title(central)
-            if re.match(r"^(title|type|updated_at|similarity|confidence|reason|status):",
-                        central_title, re.IGNORECASE) if central_title else True:
-                central_title = central.split("/", 1)[-1].replace("-", " ").replace("_", " ")
-            fallback = f"A cluster of {len(members)} wiki pages including {central_title} and related topics"
+            # Pick representative labels: the most descriptive (longest) ones
+            representatives = [l for l in member_labels if len(l) > 10][:3]
+            if not representatives:
+                representatives = member_labels[:3]
+
+            fallback = (
+                f"A cluster of {len(members)} pages"
+                + (f" including {representatives[0]}" if representatives else "")
+                + (" and related topics" if len(members) > 1 else "")
+            )
 
             if not callable(self.llm_fn) or len(members) < 2:
                 return fallback
 
-            titles_for_llm = [title for _, title in member_pages[:15] if title and len(title) > 2]
-            if len(titles_for_llm) < 2:
+            sample = member_labels[:15]
+            if len(sample) < 2:
                 return fallback
 
             prompt = (
@@ -6878,7 +6898,7 @@ class LLMWikiEngine:
                 "Describe their common theme in 2-3 sentences. What topic, domain, or relationship "
                 "unites them? Be specific and helpful so a user can decide whether to explore "
                 "this cluster. Return JSON only: {\"description\": \"...\"}\n\n"
-                "Pages in this cluster:\n" + "\n".join(f"- {t}" for t in titles_for_llm)
+                "Pages in this cluster:\n" + "\n".join(f"- {t}" for t in sample)
             )
             try:
                 raw = str(self.llm_fn(prompt) or "").strip()
@@ -10225,7 +10245,7 @@ class LLMWikiEngine:
             s = ln.strip()
             if not s:
                 continue
-            if s.startswith(("#", "---")):
+            if s.startswith(("#", "---", "- ", "* ")):
                 continue
             # Skip frontmatter fields
             if re.match(r"^[a-z_]+:", s):
