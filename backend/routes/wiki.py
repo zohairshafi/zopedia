@@ -703,9 +703,9 @@ async def wiki_save_chat_history(payload: WikiChatHistorySaveRequest, current_su
     thread_id = payload.thread_id.strip() or "unknown"
     title = (payload.thread_title or "Chat History").strip()
     safe_id = _RE.sub(r"[^a-zA-Z0-9._-]+", "_", thread_id).strip("._-") or "chat"
-    timestamp = datetime.now().strftime("%Y-%m-%d-%H%M")
-    filename = f"chat-history-{safe_id}-{timestamp}.md"
+    filename = f"chat-history-{safe_id}.md"
     file_path = raw_dir / filename
+    is_update = file_path.exists()
 
     lines = [
         f"# {title}",
@@ -760,7 +760,7 @@ async def wiki_save_chat_history(payload: WikiChatHistorySaveRequest, current_su
 
     return WikiChatHistorySaveResponse(
         status="ok",
-        operation="created",
+        operation="updated" if is_update else "created",
         thread_id=thread_id,
         file_path=str(file_path),
         relative_path=relative_path,
