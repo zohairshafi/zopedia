@@ -265,19 +265,25 @@ function extractTextParts(m: ThreadMessage | undefined): string {
 
 async function generateTitleWithModel(payload: {
   userText: string;
+  assistantText?: string;
 }): Promise<string | null> {
   const store = useChatRuntimeStore.getState();
   const params = store.params;
   const useUpstream = store.useUpstream;
   if (!params.checkpoint && !useUpstream) return null;
 
-  const user = clip(payload.userText, 256);
-  const parts: string[] = [user];
+  const user = clip(payload.userText, 400);
+  let context = `User: ${user}`;
+  if (payload.assistantText) {
+    const assistantPreview = clip(payload.assistantText, 300);
+    context += `\nAssistant response begins: ${assistantPreview}`;
+  }
 
   function normalizeTitle(raw: string): string | null {
     let title = raw.split(/\r?\n/, 1)[0] ?? "";
-    title = title.replace(/^\s*title\s*:\s*/i, "");
-    title = title.replace(/[^\x20-\x7E]+/g, " ");
+    title = title.replace(/^\s*(title|chat title|Thread title)\s*:?\s*/i, "");
+    // Allow unicode for non-English topics, strip control chars
+    title = title.replace(/[\x00-\x1f\x7f]+/g, " ");
     title = title.replace(/["'`]+/g, "");
     title = title.replace(/[.!?:;,]+/g, " ");
     title = title.replace(/\s+/g, " ").trim();
@@ -287,10 +293,10 @@ async function generateTitleWithModel(payload: {
       return null;
     }
 
-    const words = title.split(" ").filter(Boolean).slice(0, 6);
+    const words = title.split(" ").filter(Boolean).slice(0, 8);
     const joined = words.join(" ").trim();
     if (!joined) return null;
-    return joined.length > 60 ? joined.slice(0, 60).trimEnd() : joined;
+    return joined.length > 80 ? joined.slice(0, 80).trimEnd() : joined;
   }
 
   const response = await authFetch("/v1/chat/completions", {
@@ -301,7 +307,7 @@ async function generateTitleWithModel(payload: {
       stream: false,
       temperature: 0.2,
       top_p: 0.9,
-      max_tokens: 24,
+      max_tokens: 32,
       top_k: 20,
       repetition_penalty: 1.0,
       ...(useUpstream ? { use_upstream: true } : {}),
@@ -309,9 +315,11 @@ async function generateTitleWithModel(payload: {
         {
           role: "system",
           content:
-            "Write 1 concise chat title for the user's message. Rules: 2-6 words, no quotes, no punctuation, ASCII only, do not echo input. Output title only.",
+            "Write a concise chat title (3-8 words) summarizing what the user is asking about. "
+            + "Be specific — use topic names, proper nouns, and technical terms. "
+            + "Output only the title, no quotes, no prefixes, no punctuation at the end.",
         },
-        { role: "user", content: parts.join("\n") },
+        { role: "user", content: context },
       ],
     }),
   });
@@ -519,9 +527,12 @@ function createDexieAdapter(
 
       inflightTitleByKey.add(key);
       try {
+        const firstAssistant = messages.find((m) => m.role === "assistant");
+        const assistantText = extractTextParts(firstAssistant) || undefined;
         const title =
           (await generateTitleWithModel({
             userText,
+            assistantText,
           })) ||
           fallbackTitleFromUserText(userText);
 
