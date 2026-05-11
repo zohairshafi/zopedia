@@ -6891,24 +6891,34 @@ class LLMWikiEngine:
 
             prompt = (
                 "These wiki pages form a connected cluster discovered by community detection. "
-                "Describe their common theme in 2-3 sentences. What topic, domain, or relationship "
-                "unites them? Be specific and helpful so a user can decide whether to explore "
-                "this cluster. Return JSON only: {\"description\": \"...\"}\n\n"
+                "Return 5-10 comma-separated keywords or key phrases that describe the common "
+                "theme, domain, or relationship uniting them. Also provide a short URL-safe "
+                "slug (2-5 words, hyphenated). Be specific — use topic names, proper nouns, "
+                "and technical terms. Return JSON only:\n"
+                "{\"keywords\": [\"keyword1\", \"keyword two\", ...], \"slug\": \"my-topic-slug\"}\n\n"
                 "Pages in this cluster:\n" + "\n".join(f"- {t}" for t in sample)
             )
             try:
                 raw = str(self.llm_fn(prompt) or "").strip()
                 parsed = self._safe_json(raw)
                 if isinstance(parsed, dict):
-                    desc = str(parsed.get("description", "")).strip()
-                    if desc and 10 <= len(desc) <= 300:
-                        return desc
+                    keywords = parsed.get("keywords", [])
+                    slug = str(parsed.get("slug", "")).strip()
+                    if isinstance(keywords, list) and keywords:
+                        kw_str = ", ".join(str(k) for k in keywords[:10])
+                        if slug:
+                            return (slug, kw_str)
+                        return (None, kw_str)
             except Exception:
                 pass
-            return fallback
+            return (None, fallback)
 
-        def _community_slug(members: frozenset[str]) -> str:
-            """Stable slug from hash of sorted member paths — deterministic across rebuilds."""
+        def _community_slug(members: frozenset[str], llm_slug: Optional[str] = None) -> str:
+            """Semantic slug from LLM when available, hash fallback for stability."""
+            if llm_slug:
+                clean = re.sub(r"[^a-z0-9]+", "-", llm_slug.lower()).strip("-")
+                if clean:
+                    return clean[:60]
             key = ",".join(sorted(members))
             h = hashlib.sha1(key.encode()).hexdigest()[:12]
             return f"community-{h}"
@@ -6963,8 +6973,8 @@ class LLMWikiEngine:
             section = "## Entity Communities" if ckind == "entity" else "## Concept Communities"
             index_lines.append(section)
             for community in communities:
-                desc = _describe_community(community)
-                slug = _community_slug(community)
+                llm_slug, desc = _describe_community(community)
+                slug = _community_slug(community, llm_slug)
                 rel = _write_community_file(community, slug, ckind)
                 index_lines.append(f"- [[{rel}]] - {desc}")
                 total_communities += 1
