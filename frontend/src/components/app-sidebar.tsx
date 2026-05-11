@@ -625,7 +625,7 @@ export function AppSidebar() {
             <img
               src="/circle-logo-small.png"
               alt="Zopedia"
-              className="h-[34px] w-[34px] rounded-full object-cover"
+              className="h-[34px] w-[34px] rounded-lg object-contain"
             />
             <span className="font-heading text-[21px] font-semibold tracking-[-0.01em] dark:tracking-[0.02em] leading-none text-black dark:text-white">
               zopedia
