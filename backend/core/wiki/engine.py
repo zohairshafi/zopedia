@@ -6841,35 +6841,51 @@ class LLMWikiEngine:
         def _describe_community(members: frozenset[str]) -> str:
             """Return a 2-3 sentence description of the community via LLM,
             falling back to a summary of the most central pages."""
+            # Collect member titles, filtering out garbage index summaries
+            member_pages: list[tuple[str, str]] = []
+            for m in sorted(members):
+                title = _page_title(m)
+                rel = m[:-3] if m.endswith(".md") else m
+                # Skip titles that look like frontmatter, index artifacts, or merge data
+                if title and not re.match(
+                    r"^(title|type|updated_at|similarity|confidence|reason|status):",
+                    title,
+                    re.IGNORECASE,
+                ):
+                    member_pages.append((rel, title))
+                else:
+                    # Use the raw slug as a fallback label
+                    label = rel.split("/", 1)[-1].replace("-", " ").replace("_", " ")
+                    member_pages.append((rel, label))
+
+            # Fallback: describe using the most-connected pages
             central = max(members, key=lambda m: len(all_edges.get(m, [])))
-            central_title = _page_title(central) or central.split("/", 1)[-1].replace("-", " ")
-            fallback = f"Community centered around {central_title} ({len(members)} pages)"
+            central_title = _page_title(central)
+            if re.match(r"^(title|type|updated_at|similarity|confidence|reason|status):",
+                        central_title, re.IGNORECASE) if central_title else True:
+                central_title = central.split("/", 1)[-1].replace("-", " ").replace("_", " ")
+            fallback = f"A cluster of {len(members)} wiki pages including {central_title} and related topics"
 
             if not callable(self.llm_fn) or len(members) < 2:
                 return fallback
 
-            member_titles = []
-            for m in sorted(members)[:15]:
-                title = _page_title(m)
-                if title:
-                    member_titles.append(title)
-
-            if len(member_titles) < 2:
+            titles_for_llm = [title for _, title in member_pages[:15] if title and len(title) > 2]
+            if len(titles_for_llm) < 2:
                 return fallback
 
             prompt = (
-                "Describe this group of related wiki pages in 2-3 sentences. "
-                "Capture the common theme, topic area, or relationship between them. "
-                "Be specific and helpful — a user will read this to decide whether to "
-                "explore this community. Return JSON only: {\"description\": \"...\"}\n\n"
-                "Pages:\n" + "\n".join(f"- {t}" for t in member_titles)
+                "These wiki pages form a connected cluster discovered by community detection. "
+                "Describe their common theme in 2-3 sentences. What topic, domain, or relationship "
+                "unites them? Be specific and helpful so a user can decide whether to explore "
+                "this cluster. Return JSON only: {\"description\": \"...\"}\n\n"
+                "Pages in this cluster:\n" + "\n".join(f"- {t}" for t in titles_for_llm)
             )
             try:
                 raw = str(self.llm_fn(prompt) or "").strip()
                 parsed = self._safe_json(raw)
                 if isinstance(parsed, dict):
                     desc = str(parsed.get("description", "")).strip()
-                    if desc and len(desc) <= 300:
+                    if desc and 10 <= len(desc) <= 300:
                         return desc
             except Exception:
                 pass
