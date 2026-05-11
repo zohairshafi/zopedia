@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="frontend/public/logo_main.png" alt="Zopedia" width="200" />
+</p>
+
 # Zopedia
 
 > A personal wiki that grows with you. Drop in sources, ask questions, and let the LLM build a structured, interlinked knowledge base that compounds over time.
