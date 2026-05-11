@@ -6568,8 +6568,8 @@ class LLMWikiEngine:
                     if fallback_tag:
                         line = f"{line} {fallback_tag}".rstrip()
                 else:
-                    first_line = self._first_nonempty_content_line(page_text)
-                    line = f"- [[{rel}]] - {first_line[:140] if first_line else ''}".rstrip()
+                    title = self._extract_h1_title(page_text) or self._first_nonempty_content_line(page_text)
+                    line = f"- [[{rel}]] - {title[:140] if title else ''}".rstrip()
                 out.append(line)
             out.append("")
         self.index_file.write_text("\n".join(out).rstrip() + "\n", encoding = "utf-8")
@@ -6850,16 +6850,12 @@ class LLMWikiEngine:
                 elif summary.startswith("- "):
                     summary = ""
             if not summary:
-                # Fall back to H1 from page text only if index has no good data
+                # Fall back to H1 from page text
                 page_path = self.wiki_dir / md_rel
                 if page_path.exists():
                     try:
                         text = page_path.read_text(encoding="utf-8", errors="ignore")
-                        for raw_line in text.splitlines():
-                            stripped = raw_line.strip()
-                            if stripped.startswith("# ") and not stripped.startswith("## "):
-                                summary = stripped[2:].strip()[:120]
-                                break
+                        summary = self._extract_h1_title(text)
                     except Exception:
                         pass
             if not summary:
@@ -10240,14 +10236,22 @@ class LLMWikiEngine:
         except Exception:
             return None
 
+    def _extract_h1_title(self, text: str) -> str:
+        """Extract the first H1 heading from page text. Returns empty string if none found."""
+        for ln in text.splitlines():
+            stripped = ln.strip()
+            if stripped.startswith("# ") and not stripped.startswith("## "):
+                return stripped[2:].strip()[:200]
+        return ""
+
     def _first_nonempty_content_line(self, text: str) -> str:
+        """Legacy fallback: first meaningful content line that isn't a header/bullet/frontmatter."""
         for ln in text.splitlines():
             s = ln.strip()
             if not s:
                 continue
             if s.startswith(("#", "---", "- ", "* ")):
                 continue
-            # Skip frontmatter fields
             if re.match(r"^[a-z_]+:", s):
                 continue
             return s
