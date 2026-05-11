@@ -798,6 +798,8 @@ export function AppSidebar() {
                     </SidebarMenuButton>
                   </SidebarMenuItem>
 
+                  <div className="my-0.5 border-t border-border mx-2" />
+
                   <SidebarMenuItem>
                     <SidebarMenuButton
                       onClick={() => {
@@ -829,6 +831,8 @@ export function AppSidebar() {
                       </span>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
+
+                  <div className="my-0.5 border-t border-border mx-2" />
 
                   <SidebarMenuItem>
                     <SidebarMenuButton
