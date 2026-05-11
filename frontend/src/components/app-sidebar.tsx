@@ -628,7 +628,7 @@ export function AppSidebar() {
               className="h-[34px] w-[34px] rounded-full object-cover"
             />
             <span className="font-heading text-[21px] font-semibold tracking-[-0.01em] dark:tracking-[0.02em] leading-none text-black dark:text-white">
-              unsloth
+              zopedia
             </span>
             <span
               style={{ fontFamily: '"Inter Variable", ui-sans-serif, system-ui, sans-serif' }}
