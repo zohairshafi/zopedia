@@ -139,7 +139,11 @@ function categoryForVariable(name: string): WikiVariableCategory {
     name.includes("_RAG_") ||
     name.includes("_INDEX_") ||
     name.includes("LOG_INJECTED") ||
-    name.includes("LLM_MAX_TOKENS")
+    name.includes("LLM_MAX_TOKENS") ||
+    name.includes("MAX_TOOL_TURNS") ||
+    name.includes("MAX_READS_PER_TURN") ||
+    name.includes("MAX_CHARS_PER_READ") ||
+    name.includes("MAX_CUMULATIVE_READ_CHARS")
   ) {
     return "RAG & Logging";
   }

@@ -165,6 +165,22 @@ WIKI_ENV_SPECS: tuple[WikiEnvSpec, ...] = (
         maximum=100,
     ),
     WikiEnvSpec(
+        name="ZOPEDIA_WIKI_MAX_CHARS_PER_READ",
+        kind="int",
+        default="12000",
+        description="Max chars returned per read_wiki_page call. Pages are truncated to this length. 12000 chars ≈ 3000 tokens.",
+        minimum=1000,
+        maximum=100000,
+    ),
+    WikiEnvSpec(
+        name="ZOPEDIA_WIKI_MAX_CUMULATIVE_READ_CHARS",
+        kind="int",
+        default="500000",
+        description="Hard cap on cumulative chars from all read_wiki_page calls in a single chat request. When exceeded, tool loop stops. 500000 chars ≈ 125000 tokens.",
+        minimum=10000,
+        maximum=5000000,
+    ),
+    WikiEnvSpec(
         name="ZOPEDIA_WIKI_COMMUNITY_CUTOFF",
         kind="int",
         default="20",

@@ -171,6 +171,25 @@ Following the original Zopedia pattern:
 - **`read_wiki_page(path)`** — Reads any wiki page by path. Full content goes to model; only metadata (`path`, `size_chars`, `preview`) goes to UI.
 - **`web_search(query)`** — Searches DuckDuckGo via `ddgs` library. Returns titles, URLs, snippets.
 
+### Tool-Calling Budget
+
+To prevent context window exhaustion from unbounded wiki reads, two caps limit how much page content is loaded:
+
+| Variable | Default | Description |
+|---|---|---|
+| `ZOPEDIA_WIKI_MAX_CHARS_PER_READ` | 12000 | Max chars per `read_wiki_page` result. Pages truncated to this. 12K chars ≈ 3K tokens. |
+| `ZOPEDIA_WIKI_MAX_CUMULATIVE_READ_CHARS` | 500000 | Hard stop after cumulative read chars exceed this. 500K chars ≈ 125K tokens. |
+| `ZOPEDIA_WIKI_MAX_TOOL_TURNS` | 8 | Max tool-calling turns per request. Each turn can batch multiple reads. |
+| `ZOPEDIA_WIKI_MAX_READS_PER_TURN` | 20 | Max wiki reads per tool-calling turn. |
+
+The budget is surfaced in the system prompt so the model can plan its reads. When the cumulative cap is hit mid-turn, remaining tool calls are skipped and the model is forced to synthesize.
+
+For a 1M-token context window targeting ~250-300K usable tokens, recommended values:
+```bash
+ZOPEDIA_WIKI_MAX_CHARS_PER_READ=16000       # ~4K tokens per page
+ZOPEDIA_WIKI_MAX_CUMULATIVE_READ_CHARS=800000  # ~200K tokens for tool results
+```
+
 ### Frontend Tool Toggle
 
 The Search button in the chat composer controls only `web_search`. Wiki (`read_wiki_page`) is always available. The frontend sends:
@@ -185,7 +204,8 @@ The Search button in the chat composer controls only `web_search`. Wiki (`read_w
 ## Ingestion Flow
 
 1. File placed in `raw/` → Watcher detects → `Ingestor.ingest_file()`
-2. Content read (PDF via PyMuPDF or text)
+2. Content read via **MarkItDown** (PDF, DOCX, PPTX, XLSX, HTML, CSV, EPUB, images, audio, ZIP, etc.)
+   with plain-text fallback for unsupported formats.
 3. `Engine.ingest_source()`:
    - `_extract_from_source()` → LLM extracts entities, concepts, summary
    - Source page written to `sources/`

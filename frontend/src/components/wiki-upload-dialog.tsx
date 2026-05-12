@@ -1,6 +1,6 @@
-// Zopedia — File upload dialog for wiki ingestion
+// Zopedia — File upload + URL ingest dialog for wiki ingestion
 
-import { useState, useCallback, useRef, type DragEvent } from "react";
+import { useState, useCallback, useRef, type DragEvent, type FormEvent } from "react";
 import {
   Dialog,
   DialogContent,
@@ -8,9 +8,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { authFetch } from "@/features/auth";
 import { cn } from "@/lib/utils";
-import { UploadIcon } from "lucide-react";
+import { UploadIcon, Link } from "lucide-react";
 import { toast } from "sonner";
 
 interface WikiUploadDialogProps {
@@ -18,29 +20,52 @@ interface WikiUploadDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
+const ALLOWED_EXTENSIONS = [
+  ".md", ".txt", ".pdf", ".docx", ".pptx", ".xlsx", ".xls",
+  ".html", ".htm", ".csv", ".epub", ".ipynb", ".json", ".xml",
+  ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg",
+  ".mp3", ".wav", ".zip",
+];
+
+const ACCEPT_STRING = [
+  "text/markdown", "text/plain", "application/pdf",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.ms-excel",
+  "text/html", "text/csv", "application/epub+zip",
+  "application/json", "text/xml", "application/xml",
+  "image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml",
+  "audio/mpeg", "audio/wav", "application/zip",
+  ...ALLOWED_EXTENSIONS,
+].join(",");
+
+const FORMAT_LABEL = "PDF, DOCX, PPTX, XLSX, HTML, CSV, EPUB, images, audio, ZIP, text, code";
+
 export function WikiUploadDialog({ open, onOpenChange }: WikiUploadDialogProps) {
   const [dragging, setDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [urlValue, setUrlValue] = useState("");
+  const [ingestingUrl, setIngestingUrl] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const uploadFiles = useCallback(async (files: FileList | File[]) => {
     if (uploading) return;
 
     const formData = new FormData();
-    const allowed = [".md", ".txt", ".pdf"];
     const fileArray = Array.from(files).filter((f) => {
       const ext = "." + f.name.split(".").pop()?.toLowerCase();
-      return allowed.includes(ext);
+      return ALLOWED_EXTENSIONS.includes(ext);
     });
     if (fileArray.length === 0) {
       toast.error("No valid files", {
-        description: "Accepted: .md, .txt, .pdf",
+        description: `Accepted: ${FORMAT_LABEL}`,
       });
       return;
     }
     if (fileArray.length < Array.from(files).length) {
       toast.warning("Some files were skipped", {
-        description: "Only .md, .txt, .pdf files are accepted.",
+        description: `Only supported formats are accepted.`,
       });
     }
 
@@ -78,6 +103,47 @@ export function WikiUploadDialog({ open, onOpenChange }: WikiUploadDialogProps) 
     }
   }, [uploading, onOpenChange]);
 
+  const ingestUrl = useCallback(async (e: FormEvent) => {
+    e.preventDefault();
+    const trimmed = urlValue.trim();
+    if (!trimmed) return;
+    if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
+      toast.error("Invalid URL", {
+        description: "URL must start with http:// or https://",
+      });
+      return;
+    }
+
+    setIngestingUrl(true);
+    try {
+      const res = await authFetch("/api/inference/wiki/ingest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ source_path: trimmed, max_pending_raw_files: 0 }),
+      });
+      if (!res.ok) {
+        const detail = await res.json().then((d) => (d as { detail?: string }).detail).catch(() => null);
+        throw new Error(detail || `Request failed (${res.status})`);
+      }
+      const data = await res.json();
+      if (data.results?.length > 0) {
+        toast.success("URL ingested", {
+          description: trimmed,
+        });
+        setUrlValue("");
+        onOpenChange(false);
+      } else {
+        toast.error("URL ingestion returned no results");
+      }
+    } catch (err) {
+      toast.error("URL ingestion failed", {
+        description: err instanceof Error ? err.message : "Unknown error",
+      });
+    } finally {
+      setIngestingUrl(false);
+    }
+  }, [urlValue, onOpenChange]);
+
   const onDragOver = (e: DragEvent) => {
     e.preventDefault();
     setDragging(true);
@@ -91,6 +157,8 @@ export function WikiUploadDialog({ open, onOpenChange }: WikiUploadDialogProps) 
     }
   };
 
+  const busy = uploading || ingestingUrl;
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
@@ -100,13 +168,15 @@ export function WikiUploadDialog({ open, onOpenChange }: WikiUploadDialogProps) 
             Files are placed in the wiki raw/ folder and ingested automatically.
           </DialogDescription>
         </DialogHeader>
+
+        {/* File upload zone */}
         <div
           className={cn(
             "flex flex-col items-center justify-center gap-4 rounded-xl border-2 border-dashed p-8 transition-colors cursor-pointer",
             dragging
               ? "border-primary bg-primary/5"
               : "border-muted-foreground/25 hover:border-muted-foreground/50",
-            uploading && "pointer-events-none opacity-50",
+            busy && "pointer-events-none opacity-50",
           )}
           onDragOver={onDragOver}
           onDragLeave={onDragLeave}
@@ -122,7 +192,7 @@ export function WikiUploadDialog({ open, onOpenChange }: WikiUploadDialogProps) 
                 <span className="font-medium text-foreground">Click to browse</span>
                 {" or drag and drop"}
                 <br />
-                <span>PDF, text, markdown files</span>
+                <span className="text-xs">{FORMAT_LABEL}</span>
               </>
             )}
           </div>
@@ -130,7 +200,7 @@ export function WikiUploadDialog({ open, onOpenChange }: WikiUploadDialogProps) 
             ref={fileInputRef}
             type="file"
             multiple
-            accept=".md,.txt,.pdf,text/markdown,text/plain,application/pdf"
+            accept={ACCEPT_STRING}
             className="hidden"
             onChange={(e) => {
               if (e.target.files && e.target.files.length > 0) {
@@ -140,6 +210,36 @@ export function WikiUploadDialog({ open, onOpenChange }: WikiUploadDialogProps) 
             }}
           />
         </div>
+
+        {/* Divider */}
+        <div className="flex items-center gap-3">
+          <div className="h-px flex-1 bg-border" />
+          <span className="text-xs text-muted-foreground">or paste a URL</span>
+          <div className="h-px flex-1 bg-border" />
+        </div>
+
+        {/* URL input */}
+        <form onSubmit={ingestUrl} className="flex gap-2">
+          <div className="relative flex-1">
+            <Link className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+            <Input
+              type="url"
+              placeholder="https://example.com/document.pdf"
+              value={urlValue}
+              onChange={(e) => setUrlValue(e.target.value)}
+              disabled={busy}
+              className="pl-9"
+            />
+          </div>
+          <Button
+            type="submit"
+            disabled={!urlValue.trim() || busy}
+            variant="secondary"
+            size="sm"
+          >
+            {ingestingUrl ? "Ingesting..." : "Ingest"}
+          </Button>
+        </form>
       </DialogContent>
     </Dialog>
   );

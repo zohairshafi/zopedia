@@ -38,7 +38,12 @@ CODE_EXTENSIONS = {
     ".scala",
     ".php",
 }
-DOC_EXTENSIONS = {".md", ".txt", ".rst"}
+DOC_EXTENSIONS = {
+    ".md", ".txt", ".rst",
+    ".docx", ".pptx", ".xlsx", ".xls",
+    ".html", ".htm", ".csv", ".epub",
+    ".ipynb", ".json", ".xml", ".zip",
+}
 PAPER_EXTENSIONS = {".pdf"}
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}
 

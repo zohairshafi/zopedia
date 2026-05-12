@@ -63,6 +63,26 @@ class WikiIngestor:
         ".txt",
         ".md",
         ".rst",
+        ".docx",
+        ".pptx",
+        ".xlsx",
+        ".xls",
+        ".html",
+        ".htm",
+        ".csv",
+        ".epub",
+        ".ipynb",
+        ".json",
+        ".xml",
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".gif",
+        ".webp",
+        ".svg",
+        ".mp3",
+        ".wav",
+        ".zip",
     }
     _INGEST_STATE_FILENAME = ".ingest_state.json"
 
@@ -208,45 +228,6 @@ class WikiIngestor:
         scheme = urllib.parse.urlparse(value).scheme.lower()
         return scheme in {"http", "https"}
 
-    def _extract_pdf_text(self, file_path: Path) -> str:
-        extraction_errors: List[str] = []
-
-        try:
-            import pymupdf4llm
-
-            text = pymupdf4llm.to_markdown(
-                str(file_path),
-                write_images = False,
-                show_progress = False,
-                use_ocr = False,
-            )
-            if text and text.strip():
-                return text
-            extraction_errors.append("pymupdf4llm returned empty content")
-        except Exception as exc:
-            extraction_errors.append(f"pymupdf4llm failed: {exc}")
-
-        try:
-            from pypdf import PdfReader
-
-            reader = PdfReader(str(file_path))
-            chunks: List[str] = []
-            for page in reader.pages:
-                text = page.extract_text()
-                if text and text.strip():
-                    chunks.append(text)
-            extracted = "\n".join(chunks).strip()
-            if extracted:
-                return extracted
-            extraction_errors.append("pypdf returned empty content")
-        except Exception as exc:
-            extraction_errors.append(f"pypdf failed: {exc}")
-
-        raise RuntimeError(
-            f"No extractable text found in PDF {file_path}. "
-            f"Extraction attempts: {'; '.join(extraction_errors)}"
-        )
-
     def _read_text_file(self, file_path: Path) -> str:
         try:
             return file_path.read_text(encoding = "utf-8")
@@ -272,18 +253,39 @@ class WikiIngestor:
         return f"{resolved.stem} [{digest}]"
 
     def _read_local_content(self, file_path: Path) -> Tuple[str, str]:
+        # Try MarkItDown first — handles PDF, DOCX, PPTX, XLSX, HTML, CSV,
+        # EPUB, images (with LLM caption), audio (with transcription), ZIP, etc.
+        try:
+            from core.wiki.markitdown_converter import convert_file
+
+            content = convert_file(file_path)
+        except ImportError:
+            content = ""
+        except Exception as exc:
+            # MarkItDown conversion failed — log and fall back to plain text
+            logger.debug("MarkItDown conversion failed for %s: %s", file_path.name, exc)
+            content = ""
+
+        if content and content.strip():
+            return file_path.stem, content.strip()
+
+        # Fallback: plain text read for formats MarkItDown couldn't handle
+        # (or when markitdown package isn't installed)
         suffix = file_path.suffix.lower()
-
-        if suffix == ".pdf":
-            content = self._extract_pdf_text(file_path)
-        elif suffix in {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}:
+        if suffix in {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}:
             raise ValueError(
-                f"Unsupported wiki ingestion type for local file {file_path.name}: {suffix}. "
-                "Image ingestion requires a vision extraction stage that is not configured here."
+                f"Cannot extract text from image {file_path.name}. "
+                "Install openai SDK and configure ZOPEDIA_LLM_BASE_URL / ZOPEDIA_LLM_API_KEY "
+                "to enable LLM-based image descriptions via MarkItDown."
             )
-        else:
-            content = self._read_text_file(file_path)
+        if suffix in {".mp3", ".wav"}:
+            raise ValueError(
+                f"Cannot extract text from audio {file_path.name}. "
+                "Install openai SDK and configure ZOPEDIA_LLM_BASE_URL / ZOPEDIA_LLM_API_KEY "
+                "to enable audio transcription via MarkItDown."
+            )
 
+        content = self._read_text_file(file_path)
         cleaned = content.strip()
         if not cleaned:
             raise ValueError(f"Ingestion produced empty content for {file_path}")

@@ -195,7 +195,12 @@ async def upload_file(request: Request):
     form = await request.form()
     uploaded: list[str] = []
     failed: list[dict] = []
-    allowed_ext = {".md", ".txt", ".pdf"}
+    allowed_ext = {
+        ".md", ".txt", ".pdf", ".docx", ".pptx", ".xlsx", ".xls",
+        ".html", ".htm", ".csv", ".epub", ".ipynb", ".json", ".xml",
+        ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg",
+        ".mp3", ".wav", ".zip",
+    }
 
     logger.info("Upload: received %d form fields: %s", len(form), list(form.keys()))
 

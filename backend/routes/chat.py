@@ -53,8 +53,22 @@ router = APIRouter()
 _LLM_TIMEOUT_SECONDS = int(os.getenv("ZOPEDIA_LLM_TIMEOUT_SECONDS", "300"))
 _LLM_MODEL = os.getenv("ZOPEDIA_LLM_MODEL", "").strip()
 _WIKI_TOOL_RETRIEVAL = os.getenv("ZOPEDIA_WIKI_TOOL_RETRIEVAL", "true").strip().lower() in {"1", "true", "yes", "on"}
-_WIKI_MAX_TOOL_TURNS = int(os.getenv("ZOPEDIA_WIKI_MAX_TOOL_TURNS", "8"))
-_WIKI_MAX_READS_PER_TURN = int(os.getenv("ZOPEDIA_WIKI_MAX_READS_PER_TURN", "20"))
+
+
+def _wiki_max_tool_turns() -> int:
+    return int(os.getenv("ZOPEDIA_WIKI_MAX_TOOL_TURNS", "8"))
+
+
+def _wiki_max_reads_per_turn() -> int:
+    return int(os.getenv("ZOPEDIA_WIKI_MAX_READS_PER_TURN", "20"))
+
+
+def _wiki_max_chars_per_read() -> int:
+    return int(os.getenv("ZOPEDIA_WIKI_MAX_CHARS_PER_READ", "12000"))
+
+
+def _wiki_max_cumulative_read_chars() -> int:
+    return int(os.getenv("ZOPEDIA_WIKI_MAX_CUMULATIVE_READ_CHARS", "500000"))
 
 
 def _resolve_model(requested: Optional[str]) -> str:
@@ -117,7 +131,7 @@ def _inject_rag_context(messages: list[dict], query: str) -> tuple[list[dict], O
 async def _resolve_tool_calls(messages: list[dict], tools: list[dict], resolved_model: str, max_turns: int | None = None) -> list[dict]:
     """Execute tool-calling loop. Returns messages array (non-streaming path)."""
     if max_turns is None:
-        max_turns = _WIKI_MAX_TOOL_TURNS
+        max_turns = _wiki_max_tool_turns()
     result = None
     async for _ in _resolve_tool_calls_stream(messages, tools, resolved_model, max_turns):
         pass
@@ -132,7 +146,7 @@ async def _resolve_tool_calls_stream(
     max_turns: int | None = None,
 ):
     if max_turns is None:
-        max_turns = _WIKI_MAX_TOOL_TURNS
+        max_turns = _wiki_max_tool_turns()
     """Async generator that yields tool-calling progress events.
 
     Yields events following the original Zopedia protocol:
@@ -145,6 +159,9 @@ async def _resolve_tool_calls_stream(
     """
     wiki_dir = str(_WIKI_VAULT / "wiki")
     turn = 0
+    cumulative_read_chars = 0
+    max_chars_per_read = _wiki_max_chars_per_read()
+    max_cumulative = _wiki_max_cumulative_read_chars()
 
     while turn < max_turns:
         turn += 1
@@ -196,7 +213,7 @@ async def _resolve_tool_calls_stream(
 
             if name == "read_wiki_page":
                 read_count += 1
-                if read_count > _WIKI_MAX_READS_PER_TURN:
+                if read_count > _wiki_max_reads_per_turn():
                     break
 
             try:
@@ -215,7 +232,7 @@ async def _resolve_tool_calls_stream(
                     "arguments": {"path": page_path},
                 }
                 yield {"type": "tool_status", "text": f"Reading {page_path}..."}
-                tool_result = execute_wiki_read(wiki_dir, page_path)
+                tool_result = execute_wiki_read(wiki_dir, page_path, max_chars=max_chars_per_read)
                 try:
                     result_data = json.loads(tool_result)
                     size = result_data.get("size_chars", 0)
@@ -224,12 +241,16 @@ async def _resolve_tool_calls_stream(
                 except Exception:
                     size = 0
                     preview = ""
+                cumulative_read_chars += size
                 yield {
                     "type": "tool_end",
                     "tool_name": "read_wiki_page",
                     "tool_call_id": tc_id,
                     "result": json.dumps({"path": page_path, "size_chars": size, "preview": preview}),
                 }
+                if cumulative_read_chars >= max_cumulative:
+                    yield {"type": "tool_status", "text": f"Read budget reached ({cumulative_read_chars:,} chars). Synthesizing answer..."}
+                    break
             elif name == "web_search":
                 query_str = str(args.get("query", ""))
                 yield {
@@ -267,6 +288,10 @@ async def _resolve_tool_calls_stream(
                 "content": tool_result,
             })
 
+        # Stop further tool turns if cumulative read budget is exhausted
+        if cumulative_read_chars >= max_cumulative:
+            yield {"type": "tool_status", "text": "Synthesizing answer..."}
+            break
 
 
 # ── Standard chat/completions ──────────────────────────────────────
@@ -347,10 +372,12 @@ async def openai_chat_completions(request: Request):
         # Budget info (only relevant when wiki is enabled)
         if has_wiki:
             prompt_parts.append(
-                f"BUDGET: You have {_WIKI_MAX_TOOL_TURNS} turns (up to {_WIKI_MAX_READS_PER_TURN} wiki reads per turn, "
-                f"max {_WIKI_MAX_TOOL_TURNS * _WIKI_MAX_READS_PER_TURN} total reads). "
+                f"BUDGET: You have {_wiki_max_tool_turns()} turns (up to {_wiki_max_reads_per_turn()} wiki reads per turn, "
+                f"max {_wiki_max_tool_turns() * _wiki_max_reads_per_turn()} total reads). "
+                f"Each page is capped at {_wiki_max_chars_per_read():,} chars. "
+                f"Total read budget: {_wiki_max_cumulative_read_chars():,} chars cumulative. "
                 "Plan carefully: start with the most relevant entities/concepts, then follow their analysis backlinks. "
-                "Don't try to read everything — prioritize quality over quantity.\n\n"
+                "Prioritize quality over quantity — you cannot read everything.\n\n"
             )
 
         # Available tools
@@ -465,6 +492,9 @@ async def openai_chat_completions(request: Request):
 
     if not stream:
         result = await chat_completions_non_streaming(messages, model=resolved_model, temperature=temperature, max_tokens=max_tokens, tools=tools, response_format=response_format)
+        # Remove ephemeral synthesis instruction so it doesn't leak into the response
+        if messages and messages[-1].get("_ephemeral"):
+            messages.pop()
         if "error" in result:
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=result["error"])
         result["model"] = resolved_model

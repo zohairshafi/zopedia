@@ -495,7 +495,15 @@ async def wiki_delete_apply(payload: WikiDeleteApplyRequest, current_subject: st
 async def wiki_ingest(payload: WikiIngestRequest, current_subject: str = Depends(_optional_subject)):
     _, ingestor = get_wiki_components()
     if payload.source_path:
-        source_path = Path(payload.source_path).expanduser()
+        source_str = payload.source_path.strip()
+        # URLs are passed through directly — the ingestor downloads them via graphify
+        if source_str.startswith("http://") or source_str.startswith("https://"):
+            result = ingestor.ingest_file(Path(source_str), contributor="Zopedia")
+            if not result:
+                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to ingest URL: {source_str}")
+            return WikiIngestResponse(status="ok", processed_files=1, results=[{"source_path": source_str, "result": result}])
+
+        source_path = Path(source_str).expanduser()
         if not source_path.exists() or not source_path.is_file():
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"File not found: {source_path}")
         result = ingestor.ingest_file(source_path, contributor="Zopedia")
