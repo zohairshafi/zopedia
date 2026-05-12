@@ -10295,8 +10295,8 @@ class LLMWikiEngine:
             "- Section A: Brief summary paragraph\n"
             "- Section B: Key takeaways (bullets)\n"
             "- Section C: Wiki updates (bullets)\n"
-            "- Section D: Any important equations or formulas (bullets)\n"
-            "- Section E: Caveats (bullets)\n"
+            "- Section D: Any important equations or formulas (bullets) or data points\n"
+            "- Section E: Caveats or Limitations (bullets)\n"
             "- Section F: Any assumptions (bullets)\n"
             "- Section G: Is this a source or a conversation?\n"
             "- Section H: Any potential disputable claims?\n"
@@ -10307,6 +10307,7 @@ class LLMWikiEngine:
             "- Make sure you populate caveats and limitations by looking at the content critically, especially if it's technical. If the source is very clean and straightforward, say so but still include a caveats section with a note to that effect.\n"
             f"- Prioritize [[{source_rel}]] over unrelated pages\n"
             "This might be a chunked version of the source, so be mindful that some information might be missing. Focus on what's present in the text and avoid making assumptions about missing content."
+            "Be very detailed. Capture as much of the source content as possible in the answer, while still being concise and specific. The goal is to create a comprehensive summary that reflects the source accurately and is useful for wiki readers without having to refer to the original source."
         )
 
     def _compact_saved_question(self, question: str) -> str:
