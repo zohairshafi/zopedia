@@ -149,7 +149,7 @@ class WikiDataGraphResponse(BaseModel):
 
 class WikiIngestRequest(BaseModel):
     source_path: Optional[str] = Field(None)
-    max_pending_raw_files: int = Field(8, ge=1, le=128)
+    max_pending_raw_files: int = Field(8, ge=0, le=128)
 
 
 class WikiIngestResponse(BaseModel):
