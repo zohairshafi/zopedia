@@ -6933,15 +6933,16 @@ class LLMWikiEngine:
                 pass
             return (None, fallback)
 
-        def _community_slug(members: frozenset[str], llm_slug: Optional[str] = None) -> str:
+        def _community_slug(members: frozenset[str], ckind: str, llm_slug: Optional[str] = None) -> str:
             """Semantic slug from LLM when available, hash fallback for stability."""
+            prefix = f"{ckind}-"
             if llm_slug:
                 clean = re.sub(r"[^a-z0-9]+", "-", llm_slug.lower()).strip("-")
                 if clean:
-                    return clean[:60]
+                    return prefix + clean[:60]
             key = ",".join(sorted(members))
             h = hashlib.sha1(key.encode()).hexdigest()[:12]
-            return f"community-{h}"
+            return f"{prefix}community-{h}"
 
         # ── Write community files and index ──────────────────────────
         # Clean stale community files from previous run
@@ -6994,7 +6995,7 @@ class LLMWikiEngine:
             index_lines.append(section)
             for community in communities:
                 llm_slug, desc = _describe_community(community)
-                slug = _community_slug(community, llm_slug)
+                slug = _community_slug(community, ckind, llm_slug)
                 rel = _write_community_file(community, slug, ckind)
                 index_lines.append(f"- [[{rel}]] - {desc}")
                 total_communities += 1
