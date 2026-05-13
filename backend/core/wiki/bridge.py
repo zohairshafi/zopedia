@@ -25,7 +25,7 @@ def apply_defaults() -> None:
         "ZOPEDIA_WIKI_GODNODES_REBUILD_THRESHOLD": "UNSLOTH_WIKI_GODNODES_REBUILD_THRESHOLD",
     }
     for z_name, u_name in _map.items():
-        if z_name in os.environ and u_name not in os.environ:
+        if z_name in os.environ:
             os.environ[u_name] = os.environ[z_name]
 
     # Vault path defaults

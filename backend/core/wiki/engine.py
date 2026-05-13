@@ -9841,6 +9841,7 @@ class LLMWikiEngine:
                 "Requirements:\n"
                 "- Cite claims inline using wiki links.\n"
                 "- Prefer [[sources/...]] links, including chunk source pages.\n"
+                "- Be VERY detailed. You're merging multiple chunks, try to keep as much information as possible from all chunks. \n"
                 "- Do not cite analysis chunk pages in the final answer.\n\n"
                 "CHUNK_ANALYSIS_CONTEXT:\n" + "\n\n".join(context_blocks)
             )
