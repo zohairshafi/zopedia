@@ -16,11 +16,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-# ── Bridge: set UNSLOTH_* env vars before wiki engine imports ──────
-from core.wiki.bridge import apply_defaults  # noqa: E402
-
-apply_defaults()
-
 # ── Logging ────────────────────────────────────────────────────────
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -49,6 +44,12 @@ try:
     apply_stored_wiki_env_overrides(override_existing=False)
 except Exception:
     pass
+
+# ── Bridge: map ZOPEDIA_* env vars to UNSLOTH_* equivalents ────────
+# Must run AFTER stored overrides are loaded so the mapping picks up user-configured values.
+from core.wiki.bridge import apply_defaults  # noqa: E402
+
+apply_defaults()
 
 
 # ── Auth stub ──────────────────────────────────────────────────────
