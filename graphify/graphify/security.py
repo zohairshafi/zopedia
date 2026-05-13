@@ -24,10 +24,17 @@ def validate_url(url: str) -> str:
     Blocks file://, ftp://, data:, and any other scheme that could be used
     for SSRF or local file access.
     """
+    # Normalise common typos: "https:/domain", "https:domain", or too many slashes
+    url = re.sub(r"^(https?):/*([^/])", r"\1://\2", url)
     parsed = urllib.parse.urlparse(url)
     if parsed.scheme.lower() not in _ALLOWED_SCHEMES:
         raise ValueError(
             f"Blocked URL scheme '{parsed.scheme}' - only http and https are allowed. "
+            f"Got: {url!r}"
+        )
+    if not parsed.netloc:
+        raise ValueError(
+            f"URL has no host (missing '://' after scheme?). "
             f"Got: {url!r}"
         )
     return url
@@ -70,7 +77,7 @@ def safe_fetch(url: str, max_bytes: int = _MAX_FETCH_BYTES, timeout: int = 30) -
         urllib.error.URLError   - DNS / connection failure
         OSError               - size cap exceeded
     """
-    validate_url(url)
+    url = validate_url(url)
     opener = _build_opener()
     req = urllib.request.Request(
         url, headers = {"User-Agent": "Mozilla/5.0 graphify/1.0"}

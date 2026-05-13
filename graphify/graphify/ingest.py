@@ -1,6 +1,8 @@
 # fetch URLs (tweet/arxiv/pdf/web) and save as annotated markdown
 from __future__ import annotations
+import html
 import json
+import logging
 import re
 import urllib.error
 import urllib.parse
@@ -9,6 +11,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from graphify.security import safe_fetch, safe_fetch_text, validate_url
+
+logger = logging.getLogger(__name__)
 
 
 def _safe_filename(url: str, suffix: str) -> str:
@@ -64,7 +68,7 @@ def _html_to_markdown(html: str, url: str) -> str:
         )
         text = re.sub(r"<[^>]+>", " ", text)
         text = re.sub(r"\s+", " ", text).strip()
-        return text[:8000]
+        return text
 
 
 def _fetch_tweet(
@@ -78,10 +82,10 @@ def _fetch_tweet(
         req = urllib.request.Request(oembed_api, headers = {"User-Agent": "graphify/1.0"})
         with urllib.request.urlopen(req, timeout = 10) as resp:
             data = json.loads(resp.read())
-        tweet_text = re.sub(r"<[^>]+>", "", data.get("html", "")).strip()
+        tweet_text = html.unescape(re.sub(r"<[^>]+>", "", data.get("html", "")).strip())
         tweet_author = data.get("author_name", "unknown")
-    except Exception:
-        # oEmbed failed - save URL stub
+    except Exception as exc:
+        logger.warning("oEmbed fetch failed for %s: %s", url, exc)
         tweet_text = f"Tweet at {url} (could not fetch content)"
         tweet_author = "unknown"
 
@@ -101,6 +105,82 @@ contributor: {contributor or author or 'unknown'}
 Source: {url}
 """
     filename = _safe_filename(url, ".md")
+    return content, filename
+
+
+def _extract_youtube_id(url: str) -> str | None:
+    """Extract YouTube video ID from youtube.com or youtu.be URLs."""
+    # youtu.be/VIDEO_ID
+    match = re.search(r"youtu\.be/([\w\-]{11})", url)
+    if match:
+        return match.group(1)
+    # youtube.com/watch?v=VIDEO_ID
+    parsed = urllib.parse.urlparse(url)
+    if "youtube.com" in parsed.netloc:
+        qs = urllib.parse.parse_qs(parsed.query)
+        if "v" in qs:
+            return qs["v"][0]
+    return None
+
+
+def _fetch_youtube(
+    url: str, author: str | None, contributor: str | None
+) -> tuple[str, str]:
+    """Fetch a YouTube video transcript via youtube-transcript-api."""
+    video_id = _extract_youtube_id(url)
+    if not video_id:
+        return _fetch_webpage(url, author, contributor)
+
+    # Get video title via oEmbed
+    oembed_url = f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={video_id}&format=json"
+    title = video_id
+    channel = "unknown"
+    try:
+        req = urllib.request.Request(oembed_url, headers={"User-Agent": "graphify/1.0"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+            title = data.get("title", video_id)
+            channel = data.get("author_name", "unknown")
+    except Exception as exc:
+        logger.warning("YouTube oEmbed failed for %s: %s", url, exc)
+
+    # Get transcript
+    transcript_text = ""
+    try:
+        from youtube_transcript_api import YouTubeTranscriptApi
+
+        api = YouTubeTranscriptApi()
+        entries = api.fetch(video_id)
+        transcript_text = "\n".join(
+            f"[{e.start:.1f}s] {e.text}" for e in entries
+        )
+    except ImportError:
+        logger.warning("youtube-transcript-api not installed, falling back to webpage")
+        return _fetch_webpage(url, author, contributor)
+    except Exception as exc:
+        logger.warning("YouTube transcript fetch failed for %s: %s", url, exc)
+        transcript_text = f"(Transcript unavailable: {exc})"
+
+    now = datetime.now(timezone.utc).isoformat()
+    content = f"""---
+source_url: {url}
+youtube_id: {video_id}
+type: youtube
+title: "{title}"
+channel: "{channel}"
+captured_at: {now}
+contributor: {contributor or author or 'unknown'}
+---
+
+# {title}
+
+Source: {url}
+
+## Transcript
+
+{transcript_text}
+"""
+    filename = f"youtube_{video_id}.md"
     return content, filename
 
 
@@ -131,7 +211,7 @@ Source: {url}
 
 ---
 
-{markdown[:12000]}
+{markdown}
 """
     filename = _safe_filename(url, ".md")
     return content, filename
@@ -231,7 +311,7 @@ def ingest(
     url_type = _detect_url_type(url)
 
     try:
-        validate_url(url)
+        url = validate_url(url)
     except ValueError as exc:
         raise ValueError(f"ingest: {exc}") from exc
 
@@ -251,6 +331,10 @@ def ingest(
             content, filename = _fetch_tweet(url, author, contributor)
         elif url_type == "arxiv":
             content, filename = _fetch_arxiv(url, author, contributor)
+        elif url_type == "youtube":
+            content, filename = _fetch_youtube(url, author, contributor)
+        elif url_type == "github":
+            content, filename = _fetch_webpage(url, author, contributor)
         else:
             content, filename = _fetch_webpage(url, author, contributor)
     except (urllib.error.HTTPError, urllib.error.URLError, OSError) as exc:

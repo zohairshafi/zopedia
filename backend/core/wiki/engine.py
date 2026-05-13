@@ -6648,6 +6648,26 @@ class LLMWikiEngine:
         new_entities = sorted(set(entity_pages) - covered)
         new_concepts = sorted(set(concept_pages) - covered)
 
+        # Auto-trigger full community rebuild when too many pages are uncovered
+        # in either entities or concepts. Backlinks are refreshed first so the
+        # bipartite projection has accurate edges.
+        threshold = max(50, int(os.getenv("UNSLOTH_WIKI_GODNODES_REBUILD_THRESHOLD", "50")))
+        if len(new_entities) > threshold or len(new_concepts) > threshold:
+            logger.info(
+                "Godnodes uncovered pages (entities=%d, concepts=%d) exceeds "
+                "threshold (%d), refreshing backlinks then rebuilding communities.",
+                len(new_entities), len(new_concepts), threshold,
+            )
+            try:
+                self.refresh_analysis_backlinks(dry_run=False)
+            except Exception as exc:
+                logger.warning("Backlinks refresh before godnodes rebuild failed: %s", exc)
+            try:
+                self._rebuild_index_godnodes()
+            except Exception as exc:
+                logger.warning("Auto-triggered godnodes rebuild failed: %s", exc)
+            return
+
         if not new_entities and not new_concepts:
             return
 

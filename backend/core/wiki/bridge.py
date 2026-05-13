@@ -138,6 +138,7 @@ def apply_defaults() -> None:
     # Community detection defaults for god-nodes index pagination
     _setdefault("UNSLOTH_WIKI_COMMUNITY_CUTOFF", "20")
     _setdefault("UNSLOTH_WIKI_COMMUNITY_MIN_SIZE", "4")
+    _setdefault("UNSLOTH_WIKI_GODNODES_REBUILD_THRESHOLD", "50")
 
     # Merge/compaction defaults
     _setdefault("UNSLOTH_WIKI_ENGINE_MERGE_LLM_CANDIDATE_PLANNER_ENABLED", "true")
