@@ -74,20 +74,55 @@ def _html_to_markdown(html: str, url: str) -> str:
 def _fetch_tweet(
     url: str, author: str | None, contributor: str | None
 ) -> tuple[str, str]:
-    """Fetch a tweet URL. Returns (content, filename)."""
-    # Normalize to twitter.com for oEmbed
-    oembed_url = url.replace("x.com", "twitter.com")
-    oembed_api = f"https://publish.twitter.com/oembed?url={urllib.parse.quote(oembed_url)}&omit_script=true"
-    try:
-        req = urllib.request.Request(oembed_api, headers = {"User-Agent": "graphify/1.0"})
-        with urllib.request.urlopen(req, timeout = 10) as resp:
-            data = json.loads(resp.read())
-        tweet_text = html.unescape(re.sub(r"<[^>]+>", "", data.get("html", "")).strip())
-        tweet_author = data.get("author_name", "unknown")
-    except Exception as exc:
-        logger.warning("oEmbed fetch failed for %s: %s", url, exc)
-        tweet_text = f"Tweet at {url} (could not fetch content)"
-        tweet_author = "unknown"
+    """Fetch a tweet URL via fxTwitter API (full text, no auth), fallback oEmbed."""
+    # Extract screen name + tweet id for fxTwitter API
+    match = re.search(
+        r"(?:twitter\.com|x\.com)/(\w+)/status/(\d+)", url
+    )
+    tweet_text = ""
+    tweet_author = "unknown"
+    tweet_date = ""
+
+    if match:
+        screen_name = match.group(1)
+        tweet_id = match.group(2)
+
+        # Try fxTwitter first — returns full tweet text, no auth required
+        try:
+            fx_url = f"https://api.fxtwitter.com/{screen_name}/status/{tweet_id}"
+            req = urllib.request.Request(
+                fx_url, headers={"User-Agent": "graphify/1.0"}
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read())
+            tweet = data.get("tweet", {})
+            tweet_text = (tweet.get("text") or "").strip()
+            tweet_author = tweet.get("author", {}).get("name") or screen_name
+            tweet_date = tweet.get("created_at") or ""
+        except Exception as exc:
+            logger.warning("fxTwitter fetch failed for %s: %s", url, exc)
+
+    # Fallback to oEmbed (often truncated for longer tweets)
+    if not tweet_text:
+        try:
+            oembed_url = url.replace("x.com", "twitter.com")
+            oembed_api = (
+                f"https://publish.twitter.com/oembed"
+                f"?url={urllib.parse.quote(oembed_url)}&omit_script=true"
+            )
+            req = urllib.request.Request(
+                oembed_api, headers={"User-Agent": "graphify/1.0"}
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read())
+            tweet_text = html.unescape(
+                re.sub(r"<[^>]+>", "", data.get("html", "")).strip()
+            )
+            tweet_author = data.get("author_name", "unknown")
+        except Exception as exc:
+            logger.warning("oEmbed fetch failed for %s: %s", url, exc)
+            tweet_text = f"Tweet at {url} (could not fetch content)"
+            tweet_author = "unknown"
 
     now = datetime.now(timezone.utc).isoformat()
     content = f"""---
