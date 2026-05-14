@@ -13,18 +13,21 @@ def _setdefault(name: str, value: str) -> None:
         os.environ[name] = value
 
 
+ZOPEDIA_TO_UNSLOTH_MAP: dict[str, str] = {
+    "ZOPEDIA_WIKI_VAULT": "UNSLOTH_WIKI_VAULT",
+    "ZOPEDIA_WIKI_WATCHER": "UNSLOTH_WIKI_WATCHER",
+    "ZOPEDIA_WIKI_AUTO_QUERY_ON_INGEST": "UNSLOTH_WIKI_AUTO_QUERY_ON_INGEST",
+    "ZOPEDIA_WIKI_COMMUNITY_MIN_SIZE": "UNSLOTH_WIKI_COMMUNITY_MIN_SIZE",
+    "ZOPEDIA_WIKI_COMMUNITY_CUTOFF": "UNSLOTH_WIKI_COMMUNITY_CUTOFF",
+    "ZOPEDIA_WIKI_COMMUNITY_MAX_SIZE": "UNSLOTH_WIKI_COMMUNITY_MAX_SIZE",
+    "ZOPEDIA_WIKI_GODNODES_REBUILD_THRESHOLD": "UNSLOTH_WIKI_GODNODES_REBUILD_THRESHOLD",
+}
+
+
 def apply_defaults() -> None:
     """Apply all UNSLOTH_* defaults expected by the wiki engine/watcher/ingestor."""
     # Map ZOPEDIA_* vars to UNSLOTH_* equivalents first
-    _map = {
-        "ZOPEDIA_WIKI_VAULT": "UNSLOTH_WIKI_VAULT",
-        "ZOPEDIA_WIKI_WATCHER": "UNSLOTH_WIKI_WATCHER",
-        "ZOPEDIA_WIKI_AUTO_QUERY_ON_INGEST": "UNSLOTH_WIKI_AUTO_QUERY_ON_INGEST",
-        "ZOPEDIA_WIKI_COMMUNITY_MIN_SIZE": "UNSLOTH_WIKI_COMMUNITY_MIN_SIZE",
-        "ZOPEDIA_WIKI_COMMUNITY_CUTOFF": "UNSLOTH_WIKI_COMMUNITY_CUTOFF",
-        "ZOPEDIA_WIKI_GODNODES_REBUILD_THRESHOLD": "UNSLOTH_WIKI_GODNODES_REBUILD_THRESHOLD",
-    }
-    for z_name, u_name in _map.items():
+    for z_name, u_name in ZOPEDIA_TO_UNSLOTH_MAP.items():
         if z_name in os.environ:
             os.environ[u_name] = os.environ[z_name]
 
@@ -141,6 +144,7 @@ def apply_defaults() -> None:
     # Community detection defaults for god-nodes index pagination
     _setdefault("UNSLOTH_WIKI_COMMUNITY_CUTOFF", "20")
     _setdefault("UNSLOTH_WIKI_COMMUNITY_MIN_SIZE", "4")
+    _setdefault("UNSLOTH_WIKI_COMMUNITY_MAX_SIZE", "0")
     _setdefault("UNSLOTH_WIKI_GODNODES_REBUILD_THRESHOLD", "50")
 
     # Merge/compaction defaults

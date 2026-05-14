@@ -125,7 +125,8 @@ function categoryForVariable(name: string): WikiVariableCategory {
   }
   if (
     name.includes("COMMUNITY_CUTOFF") ||
-    name.includes("COMMUNITY_MIN_SIZE")
+    name.includes("COMMUNITY_MIN_SIZE") ||
+    name.includes("COMMUNITY_MAX_SIZE")
   ) {
     return "Index & Communities";
   }

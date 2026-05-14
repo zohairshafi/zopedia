@@ -233,6 +233,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for full prompt table, maintenance lifecy
 |---|---|---|
 | `ZOPEDIA_WIKI_COMMUNITY_CUTOFF` | `20` | Max number of communities detected (higher = more fine-grained clusters) |
 | `ZOPEDIA_WIKI_COMMUNITY_MIN_SIZE` | `4` | Communities smaller than this merge into Other Pages |
+| `ZOPEDIA_WIKI_COMMUNITY_MAX_SIZE` | `0` | Communities larger than this are recursively split (0=disabled) |
 
 ### Ingestion
 | Variable | Default | Description |
@@ -321,4 +322,4 @@ Built on the idea that your knowledge base should compound — every question an
 
 ## License & Attribution
 
-Zopedia is built on top of [Unsloth Studio](https://github.com/unslothai/unsloth), an open-source platform for local LLM fine-tuning and chat. Unsloth Studio is licensed under AGPL-3.0, and Zopedia retains the same license. The core wiki engine, ingestion pipeline, and frontend UI framework were adapted from Unsloth Studio — with training, model serving, and fine-tuning features removed, and community-based index pagination, maintenance lifecycle improvements, and an upstream-API-only chat flow added on top. Zopedia also borrows from the [Graphify](https://github.com/safishamsi/graphify/) library. 
+Zopedia is built on top of [Unsloth Studio](https://github.com/unslothai/unsloth), an open-source platform for local LLM fine-tuning and chat. Unsloth Studio is licensed under AGPL-3.0, and Zopedia retains the same license. The core wiki engine, ingestion pipeline, and frontend UI framework were adapted from Unsloth Studio — with training, model serving, and fine-tuning features removed, and community-based index pagination, maintenance lifecycle improvements, and an upstream-API-only chat flow added on top. Zopedia also borrows from the [Graphify](https://github.com/safishamsi/graphify/) and the [markitdown](https://github.com/microsoft/markitdown) libraries for ingestion. 

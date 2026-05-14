@@ -196,6 +196,14 @@ WIKI_ENV_SPECS: tuple[WikiEnvSpec, ...] = (
         minimum=2,
         maximum=50,
     ),
+    WikiEnvSpec(
+        name="ZOPEDIA_WIKI_COMMUNITY_MAX_SIZE",
+        kind="int",
+        default="0",
+        description="Communities larger than this are recursively split into sub-communities. 0 disables splitting.",
+        minimum=0,
+        maximum=10000,
+    ),
 )
 
 _WIKI_ENV_SPECS_BY_NAME = {spec.name: spec for spec in WIKI_ENV_SPECS}
@@ -329,6 +337,8 @@ def collect_wiki_env_state() -> list[dict[str, Any]]:
 
 
 def update_wiki_env_values(values: dict[str, Optional[str]]) -> dict[str, Any]:
+    from core.wiki.bridge import ZOPEDIA_TO_UNSLOTH_MAP, apply_defaults
+
     overrides = load_wiki_env_overrides()
     updated: list[str] = []
     cleared: list[str] = []
@@ -343,6 +353,9 @@ def update_wiki_env_values(values: dict[str, Optional[str]]) -> dict[str, Any]:
             had_value = name in os.environ or name in overrides
             overrides.pop(name, None)
             os.environ.pop(name, None)
+            # Also clear the UNSLOTH_* equivalent so apply_defaults can reset its default
+            if name in ZOPEDIA_TO_UNSLOTH_MAP:
+                os.environ.pop(ZOPEDIA_TO_UNSLOTH_MAP[name], None)
             if had_value:
                 cleared.append(name)
             continue
@@ -353,8 +366,13 @@ def update_wiki_env_values(values: dict[str, Optional[str]]) -> dict[str, Any]:
             continue
         overrides[name] = normalized
         os.environ[name] = normalized
+        # Propagate to UNSLOTH_* equivalent so the engine sees the change at runtime
+        if name in ZOPEDIA_TO_UNSLOTH_MAP:
+            os.environ[ZOPEDIA_TO_UNSLOTH_MAP[name]] = normalized
         updated.append(name)
 
+    # Re-apply all defaults so cleared vars get their UNSLOTH_* defaults back
+    apply_defaults()
     overrides_path = persist_wiki_env_overrides(overrides)
     return {
         "updated": sorted(set(updated)),

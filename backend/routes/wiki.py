@@ -596,6 +596,22 @@ async def wiki_rebuild_index(payload: WikiAnalysisBacklinksRequest, current_subj
     )
 
 
+# ── Wiki Warnings ──────────────────────────────────────────────────
+
+
+@router.get("/wiki/warnings")
+async def wiki_warnings():
+    """Return any active wiki warnings (e.g. godnodes rebuild needed)."""
+    manager, _ = get_wiki_components()
+    warning_file = manager.engine.godnodes_warning_file
+    if warning_file.is_file():
+        try:
+            return json.loads(warning_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            pass
+    return {}
+
+
 # ── Wiki Merge Maintenance ─────────────────────────────────────────
 
 @router.post("/wiki/merge-maintenance", response_model=WikiMergeMaintenanceResponse)

@@ -6,6 +6,7 @@ import {
   type ModelOption,
 } from "@/components/assistant-ui/model-selector";
 import { UpstreamConfigButton } from "@/components/upstream-config-button";
+import { WikiWarningIndicator } from "@/components/wiki-warning-indicator";
 import { Thread } from "@/components/assistant-ui/thread";
 import { cn } from "@/lib/utils";
 import { GuidedTour, useGuidedTourController } from "@/features/tour";
@@ -911,6 +912,7 @@ export function ChatPage(): ReactElement {
             {view.mode !== "compare" && (
               <UpstreamConfigButton variant="ghost" className="max-w-[62vw] sm:max-w-none !h-[34px]" />
             )}
+            <WikiWarningIndicator />
             {loadingModel && loadToastDismissed ? (
               <ModelLoadInlineStatus
                 label={

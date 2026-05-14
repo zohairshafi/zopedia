@@ -894,6 +894,7 @@ class LLMWikiEngine:
         self.index_file = self.wiki_dir / "index.md"
         self.index_concise_file = self.wiki_dir / "index-concise.md"
         self.index_godnodes_file = self.wiki_dir / "index-godnodes.md"
+        self.godnodes_warning_file = self.wiki_dir / ".godnodes_warning.json"
         self.log_file = self.wiki_dir / "log.md"
 
         self._ensure_layout()
@@ -6648,24 +6649,16 @@ class LLMWikiEngine:
         new_entities = sorted(set(entity_pages) - covered)
         new_concepts = sorted(set(concept_pages) - covered)
 
-        # Auto-trigger full community rebuild when too many pages are uncovered
-        # in either entities or concepts. Backlinks are refreshed first so the
-        # bipartite projection has accurate edges.
+        # Warn when too many pages are uncovered in either entities or concepts,
+        # instead of auto-triggering an expensive full community rebuild.
         threshold = max(50, int(os.getenv("UNSLOTH_WIKI_GODNODES_REBUILD_THRESHOLD", "50")))
         if len(new_entities) > threshold or len(new_concepts) > threshold:
             logger.info(
                 "Godnodes uncovered pages (entities=%d, concepts=%d) exceeds "
-                "threshold (%d), refreshing backlinks then rebuilding communities.",
+                "threshold (%d), writing warning flag.",
                 len(new_entities), len(new_concepts), threshold,
             )
-            try:
-                self.refresh_analysis_backlinks(dry_run=False)
-            except Exception as exc:
-                logger.warning("Backlinks refresh before godnodes rebuild failed: %s", exc)
-            try:
-                self._rebuild_index_godnodes()
-            except Exception as exc:
-                logger.warning("Auto-triggered godnodes rebuild failed: %s", exc)
+            self._write_godnodes_warning(len(new_entities), len(new_concepts), threshold)
             return
 
         if not new_entities and not new_concepts:
@@ -6746,6 +6739,27 @@ class LLMWikiEngine:
             )
             self.index_godnodes_file.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
 
+    def _write_godnodes_warning(self, new_entities: int, new_concepts: int, threshold: int) -> None:
+        """Write a warning flag so the UI can prompt the user to rebuild the index."""
+        import json
+        self.godnodes_warning_file.parent.mkdir(parents=True, exist_ok=True)
+        self.godnodes_warning_file.write_text(
+            json.dumps({
+                "warning": "godnodes_uncovered",
+                "entities_uncovered": new_entities,
+                "concepts_uncovered": new_concepts,
+                "threshold": threshold,
+            }),
+            encoding="utf-8",
+        )
+
+    def _clear_godnodes_warning(self) -> None:
+        """Clear the godnodes warning after a successful rebuild."""
+        try:
+            self.godnodes_warning_file.unlink(missing_ok=True)
+        except OSError:
+            pass
+
     def _rebuild_index_godnodes(self) -> None:
         """Build a hierarchical index using community detection on bipartite projections.
 
@@ -6761,7 +6775,9 @@ class LLMWikiEngine:
         Config vars:
         - ZOPEDIA_WIKI_COMMUNITY_CUTOFF (default 20): max number of communities (higher = more granular)
         - ZOPEDIA_WIKI_COMMUNITY_MIN_SIZE (default 4): communities below this go to Other
+        - ZOPEDIA_WIKI_COMMUNITY_MAX_SIZE (default 0): recursively split communities above this size (0=disabled)
         """
+        self._clear_godnodes_warning()
         try:
             import networkx as nx
             from networkx.algorithms import bipartite
@@ -6772,6 +6788,7 @@ class LLMWikiEngine:
 
         cutoff = max(1, int(os.getenv("UNSLOTH_WIKI_COMMUNITY_CUTOFF", "20")))
         min_size = max(2, int(os.getenv("UNSLOTH_WIKI_COMMUNITY_MIN_SIZE", "4")))
+        max_size = int(os.getenv("UNSLOTH_WIKI_COMMUNITY_MAX_SIZE", "0"))
 
         all_pages = self._all_wiki_pages()
         if not all_pages:
@@ -6847,12 +6864,50 @@ class LLMWikiEngine:
 
             effective_cutoff = min(cutoff, max(1, projection.number_of_nodes()))
             raw_communities = list(greedy_modularity_communities(
-                projection, cutoff=effective_cutoff, weight="weight"
+                projection, cutoff=effective_cutoff, weight="weight", resolution=0.9 # Smaller resolution for splits (less granular larger communities)
             ))
             # Filter by min_size
             communities = [c for c in raw_communities if len(c) >= min_size]
+
+            # Recursively split oversized communities
+            if max_size > 0:
+                communities = _split_large(communities, projection)
+
             all_in_communities = frozenset().union(*communities) if communities else frozenset()
             return communities, all_in_communities
+
+        def _split_large(
+            communities: list[frozenset[str]],
+            projection: "nx.Graph",
+        ) -> list[frozenset[str]]:
+            """Recursively split communities larger than max_size via induced subgraphs."""
+            if max_size <= 0:
+                return communities
+
+            result: list[frozenset[str]] = []
+            for community in communities:
+                if len(community) <= max_size:
+                    result.append(community)
+                    continue
+
+                sub_proj = projection.subgraph(community)
+                if sub_proj.number_of_edges() == 0:
+                    result.append(community)
+                    continue
+
+                eff = min(cutoff, max(1, sub_proj.number_of_nodes()))
+                raw_sub = list(greedy_modularity_communities(
+                    sub_proj, cutoff=eff, weight="weight", resolution=0.7 # Smaller resolution for splits (less granular larger communities)
+                ))
+                sub_comms = [c for c in raw_sub if len(c) >= min_size]
+
+                if len(sub_comms) <= 1:
+                    # Can't split further — accept the large community as-is
+                    result.append(community)
+                else:
+                    result.extend(_split_large(sub_comms, projection))
+
+            return result
 
         entity_communities, entity_covered = _build_projection(entity_nodes, "entity")
         concept_communities, concept_covered = _build_projection(concept_nodes, "concept")
@@ -9785,7 +9840,7 @@ class LLMWikiEngine:
             )
         else:
             merge_context_budget = max(
-                6000, int(max(1200, context_window_chars) * 0.70)
+                10000, int(max(1200, context_window_chars) * 0.70)
             )
             context_blocks: List[str] = []
             remaining_budget = merge_context_budget
@@ -10330,6 +10385,9 @@ class LLMWikiEngine:
             f"- Prioritize [[{source_rel}]] over unrelated pages\n"
             "This might be a chunked version of the source, so be mindful that some information might be missing. Focus on what's present in the text and avoid making assumptions about missing content."
             "Be very detailed. Capture as much of the source content as possible in the answer, while still being concise and specific. The goal is to create a comprehensive summary that reflects the source accurately and is useful for wiki readers without having to refer to the original source."
+            "If the source is an acadmic paper, try to capture the key contributions, methods, results, and implications in detail, as well as any important equations or data points."
+            "If it's a conversation, try to capture the main points of discussion, differing viewpoints, and any conclusions reached."
+            "If it's a blog post or news article or video transcript, try to capture the main events, claims, or insights presented, as well as any important context or background information. Be aware these might have advertisements or strong opinions so be objective."
         )
 
     def _compact_saved_question(self, question: str) -> str:
