@@ -6864,7 +6864,7 @@ class LLMWikiEngine:
 
             effective_cutoff = min(cutoff, max(1, projection.number_of_nodes()))
             raw_communities = list(greedy_modularity_communities(
-                projection, cutoff=effective_cutoff, weight="weight", resolution=0.9 # Smaller resolution for splits (less granular larger communities)
+                projection, cutoff=effective_cutoff, weight="weight", resolution=0.9,  # <1 favors slightly larger communities
             ))
             # Filter by min_size
             communities = [c for c in raw_communities if len(c) >= min_size]
@@ -6897,7 +6897,7 @@ class LLMWikiEngine:
 
                 eff = min(cutoff, max(1, sub_proj.number_of_nodes()))
                 raw_sub = list(greedy_modularity_communities(
-                    sub_proj, cutoff=eff, weight="weight", resolution=0.7 # Smaller resolution for splits (less granular larger communities)
+                    sub_proj, cutoff=eff, weight="weight", resolution=1.2,  # >1 favors smaller communities for splitting
                 ))
                 sub_comms = [c for c in raw_sub if len(c) >= min_size]
 
@@ -6911,6 +6911,59 @@ class LLMWikiEngine:
 
         entity_communities, entity_covered = _build_projection(entity_nodes, "entity")
         concept_communities, concept_covered = _build_projection(concept_nodes, "concept")
+
+        # ── Second pass: detect communities among leftover nodes ────
+        # Nodes not covered by the first pass get a second chance with
+        # lower resolution to find looser but still meaningful clusters.
+        for _ckind, _ec_nodes, _communities in [
+            ("entity", entity_nodes, entity_communities),
+            ("concept", concept_nodes, concept_communities),
+        ]:
+            _covered = entity_covered if _ckind == "entity" else concept_covered
+            _remaining = sorted(set(_ec_nodes) - _covered)
+            if len(_remaining) < 2:
+                continue
+
+            _bg2 = nx.Graph()
+            _bg2.add_nodes_from(_remaining, bipartite=0)
+            _bg2.add_nodes_from(bridge_nodes, bipartite=1)
+
+            _edges2: list[tuple[str, str]] = []
+            for _node, _neighbors in all_edges.items():
+                if _node in _remaining:
+                    for _nb in _neighbors:
+                        if _nb in bridge_nodes:
+                            _edges2.append((_node, _nb))
+                elif _node in bridge_nodes:
+                    for _nb in _neighbors:
+                        if _nb in _remaining:
+                            _edges2.append((_nb, _node))
+            _bg2.add_edges_from(_edges2)
+
+            if _bg2.number_of_edges() == 0:
+                continue
+
+            _proj2 = bipartite.projected_graph(_bg2, _remaining)
+            if _proj2.number_of_edges() == 0:
+                continue
+
+            _eff2 = min(cutoff, max(1, _proj2.number_of_nodes()))
+            _raw2 = list(greedy_modularity_communities(
+                _proj2, cutoff=_eff2, weight="weight", resolution=0.6,
+            ))
+            min_cutoff_size = 5  # Lower min size for second pass to find looser clusters
+            _comms2 = [c for c in _raw2 if len(c) >= min_cutoff_size]
+
+            if max_size > 0:
+                _comms2 = _split_large(_comms2, _proj2)
+
+            if _comms2:
+                _communities.extend(_comms2)
+                _new_covered = frozenset().union(*_comms2)
+                if _ckind == "entity":
+                    entity_covered = frozenset(entity_covered | _new_covered)
+                else:
+                    concept_covered = frozenset(concept_covered | _new_covered)
 
         # ── Describe communities and generate stable slugs ────────────
         def _member_label(rel: str) -> str:
