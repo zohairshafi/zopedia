@@ -96,51 +96,29 @@ function editableBaselineValue(item: WikiEnvVariable): string {
 }
 
 function categoryForVariable(name: string): WikiVariableCategory {
-  if (name.startsWith("UNSLOTH_LLM_UPSTREAM_")) {
+  if (name.startsWith("ZOPEDIA_LLM_")) {
     return "Upstream API";
   }
-  if (name.startsWith("UNSLOTH_WIKI_LLM_")) {
+  if (name.startsWith("ZOPEDIA_WIKI_LLM_")) {
     return "Wiki LLM";
   }
   if (
-    name.includes("ENGINE_ENRICH_WEB") ||
-    name.includes("ENGINE_ENRICH_FILL") ||
-    name.includes("ENGINE_ENRICH_LLM_SELECTOR")
+    name.includes("COMMUNITY_") ||
+    name.includes("GODNODES_")
   ) {
-    return "Web Enrichment";
-  }
-  if (name.includes("AUTO_ANALYSIS")) {
-    return "Auto Analysis";
+    return "Index & Communities";
   }
   if (
-    name.includes("LOW_UNIQUE") ||
-    name.includes("AUTO_RETRY_FALLBACK_ANALYSES") ||
+    name.includes("AUTO_RETRY_FALLBACK") ||
     name.includes("MERGE_MAINTENANCE") ||
     name.includes("KNOWLEDGE_MAX_INCREMENTAL") ||
-    name.includes("COMPACTION_MAX_PAGES") ||
-    name.includes("ENRICH_REFRESH_OLDEST_NON_FALLBACK") ||
-    name.includes("ENRICH_REPAIR_ANSWER_LINKS")
+    name.includes("COMPACTION_MAX") ||
+    name.includes("MAX_ANALYSIS_PAGES")
   ) {
     return "Quality & Maintenance";
   }
   if (
-    name.includes("COMMUNITY_CUTOFF") ||
-    name.includes("COMMUNITY_MIN_SIZE") ||
-    name.includes("COMMUNITY_MAX_SIZE")
-  ) {
-    return "Index & Communities";
-  }
-  if (name.includes("ENGINE_RANKING") || name.includes("ENGINE_LLM_RERANK")) {
-    return "Ranking";
-  }
-  if (name.includes("ENGINE_")) {
-    return "Engine Context";
-  }
-  if (
-    name.includes("_RAG_") ||
-    name.includes("_INDEX_") ||
-    name.includes("LOG_INJECTED") ||
-    name.includes("LLM_MAX_TOKENS") ||
+    name.includes("TOOL_RETRIEVAL") ||
     name.includes("MAX_TOOL_TURNS") ||
     name.includes("MAX_READS_PER_TURN") ||
     name.includes("MAX_CHARS_PER_READ") ||
@@ -151,7 +129,6 @@ function categoryForVariable(name: string): WikiVariableCategory {
   if (
     name.includes("_WATCHER") ||
     name.includes("AUTO_QUERY") ||
-    name.includes("CHAT_HISTORY") ||
     name.includes("PENDING_INGEST") ||
     name.includes("AUTO_LINT") ||
     name.includes("WIKI_VAULT")

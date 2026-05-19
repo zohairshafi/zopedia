@@ -501,6 +501,60 @@ async def openai_chat_completions(request: Request):
         return result
 
 
+# ── Title generation ────────────────────────────────────────────────
+
+
+@router.post("/api/chat/generate-title")
+async def generate_title(body: dict):
+    """Generate a concise chat title from the first user message.
+
+    Calls the upstream LLM directly — no wiki injection, no tools.
+    """
+    if not llm_available():
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="No upstream LLM configured.")
+
+    user_text = (body.get("userText") or "").strip()
+    if not user_text:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="userText is required")
+
+    assistant_text = (body.get("assistantText") or "").strip()
+
+    context = f"User: {user_text[:400]}"
+    if assistant_text:
+        context += f"\nAssistant response begins: {assistant_text[:300]}"
+
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "Write a concise chat title (3-8 words) summarizing what the user is asking about. "
+                "Be specific — use topic names, proper nouns, and technical terms. "
+                "Output only the title, no quotes, no prefixes, no punctuation at the end."
+            ),
+        },
+        {"role": "user", "content": context},
+    ]
+
+    result = await chat_completions_non_streaming(
+        messages,
+        temperature=0.2,
+        max_tokens=32,
+    )
+
+    if "error" in result:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=result["error"])
+
+    raw = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+    title = (raw or "").split("\n", 1)[0].strip()
+    # Strip common prefixes the model might emit
+    title = title.replace("Title:", "").replace("title:", "").strip()
+    title = title.strip("\"'`")
+    if not title:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Model returned empty title")
+
+    return {"title": title}
+
+
 # ── OpenAI-compatible /v1 passthrough ──────────────────────────────
 
 

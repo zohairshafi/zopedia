@@ -312,7 +312,8 @@ npm run build               # Output to frontend/dist/
 
 - **Backend**: FastAPI, Uvicorn, httpx, networkx, PyMuPDF (PDF ingestion), ddgs (web search), watchdog
 - **Frontend**: React 19, Vite, TypeScript, assistant-ui, Tailwind CSS, shadcn/ui, Dexie (IndexedDB)
-- **Graph analysis**: NetworkX for community detection, graphify for code-aware ingestion
+- **Graph analysis**: NetworkX for community detection
+- **Ingestion**: graphify, markitdown
 
 ---
 

@@ -204,6 +204,14 @@ WIKI_ENV_SPECS: tuple[WikiEnvSpec, ...] = (
         minimum=0,
         maximum=10000,
     ),
+    WikiEnvSpec(
+        name="ZOPEDIA_WIKI_GODNODES_REBUILD_THRESHOLD",
+        kind="int",
+        default="50",
+        description="Rebuild god-nodes index after this many new pages are added (delta threshold).",
+        minimum=10,
+        maximum=10000,
+    ),
 )
 
 _WIKI_ENV_SPECS_BY_NAME = {spec.name: spec for spec in WIKI_ENV_SPECS}

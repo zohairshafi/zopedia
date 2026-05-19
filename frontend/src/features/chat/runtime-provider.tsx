@@ -53,14 +53,6 @@ const DEFAULT_SUGGESTIONS = [
   },
 ];
 
-type TitleResponse = {
-  choices?: Array<{
-    message?: {
-      content?: string;
-    };
-  }>;
-};
-
 class VisionImageAdapter implements AttachmentAdapter {
   accept = "image/jpeg,image/png,image/webp,image/gif";
 
@@ -247,12 +239,6 @@ class DocxAttachmentAdapter implements AttachmentAdapter {
   }
 }
 
-function clip(input: string, maxLen: number): string {
-  const text = input.replace(/\s+/g, " ").trim();
-  if (text.length <= maxLen) return text;
-  return text.slice(0, maxLen).trimEnd();
-}
-
 function extractTextParts(m: ThreadMessage | undefined): string {
   if (!m) return "";
   const content = Array.isArray(m.content) ? m.content : [];
@@ -267,68 +253,18 @@ async function generateTitleWithModel(payload: {
   userText: string;
   assistantText?: string;
 }): Promise<string | null> {
-  const store = useChatRuntimeStore.getState();
-  const params = store.params;
-  const useUpstream = store.useUpstream;
-  if (!params.checkpoint && !useUpstream) return null;
-
-  const user = clip(payload.userText, 400);
-  let context = `User: ${user}`;
-  if (payload.assistantText) {
-    const assistantPreview = clip(payload.assistantText, 300);
-    context += `\nAssistant response begins: ${assistantPreview}`;
-  }
-
-  function normalizeTitle(raw: string): string | null {
-    let title = raw.split(/\r?\n/, 1)[0] ?? "";
-    title = title.replace(/^\s*(title|chat title|Thread title)\s*:?\s*/i, "");
-    // Allow unicode for non-English topics, strip control chars
-    title = title.replace(/[\x00-\x1f\x7f]+/g, " ");
-    title = title.replace(/["'`]+/g, "");
-    title = title.replace(/[.!?:;,]+/g, " ");
-    title = title.replace(/\s+/g, " ").trim();
-
-    // Model echo fail-safe.
-    if (/\b(user|base|lora|assistant)\s*:/i.test(title)) {
-      return null;
-    }
-
-    const words = title.split(" ").filter(Boolean).slice(0, 8);
-    const joined = words.join(" ").trim();
-    if (!joined) return null;
-    return joined.length > 80 ? joined.slice(0, 80).trimEnd() : joined;
-  }
-
-  const response = await authFetch("/v1/chat/completions", {
+  const response = await authFetch("/api/chat/generate-title", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: useUpstream ? "default" : params.checkpoint,
-      stream: false,
-      temperature: 0.2,
-      top_p: 0.9,
-      max_tokens: 32,
-      top_k: 20,
-      repetition_penalty: 1.0,
-      ...(useUpstream ? { use_upstream: true } : {}),
-      messages: [
-        {
-          role: "system",
-          content:
-            "Write a concise chat title (3-8 words) summarizing what the user is asking about. "
-            + "Be specific — use topic names, proper nouns, and technical terms. "
-            + "Output only the title, no quotes, no prefixes, no punctuation at the end.",
-        },
-        { role: "user", content: context },
-      ],
+      userText: payload.userText,
+      assistantText: payload.assistantText,
     }),
   });
 
-  const body = (await response.json().catch(() => null)) as TitleResponse | null;
   if (!response.ok) return null;
-  const raw: string | undefined = body?.choices?.[0]?.message?.content;
-  if (!raw) return null;
-  return normalizeTitle(raw);
+  const body = await response.json().catch(() => null);
+  return (body?.title as string) || null;
 }
 
 const inflightTitleByKey = new Set<string>();

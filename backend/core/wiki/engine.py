@@ -5,6 +5,7 @@ from pathlib import Path
 import hashlib
 import html
 import json
+import math
 import os
 import shutil
 import re
@@ -878,10 +879,92 @@ class WikiConfig:
         )
 
 
+@dataclass
+class WikiBM25:
+    """BM25 scorer with precomputed IDF over the wiki page corpus.
+
+    For query-time ranking, use score_from_counts() with full page text.
+    For short-text comparisons (titles, labels) where TF is always 1 and
+    document lengths are negligible, use idf_weighted_overlap() instead —
+    it is what BM25 reduces to in that regime.
+    """
+
+    doc_freq: Dict[str, int] = field(default_factory=dict)
+    N: int = 0
+    avg_doc_len: float = 0.0
+    k1: float = 1.5
+    b: float = 0.75
+
+    def idf(self, term: str) -> float:
+        df = self.doc_freq.get(term, 0)
+        if df <= 0:
+            return 0.0
+        return math.log((self.N - df + 0.5) / (df + 0.5) + 1.0)
+
+    def score_from_counts(
+        self,
+        query_terms: Set[str],
+        term_counts: Dict[str, int],
+        doc_len: int,
+    ) -> float:
+        """BM25 score given precomputed term-frequency dict for a document."""
+        if not query_terms or doc_len <= 0:
+            return 0.0
+        total = 0.0
+        for term in query_terms:
+            tf = term_counts.get(term, 0)
+            if tf <= 0:
+                continue
+            idf_val = self.idf(term)
+            tf_norm = (tf * (self.k1 + 1)) / (
+                tf
+                + self.k1
+                * (1.0 - self.b + self.b * doc_len / max(1, self.avg_doc_len))
+            )
+            total += idf_val * tf_norm
+        return total
+
+    def idf_weighted_overlap(self, query_terms: Set[str], doc_terms: Set[str]) -> float:
+        """Sum of IDF values for terms in the intersection.
+
+        This is the correct measure for ranking short texts (titles, labels)
+        against a query — it is what BM25 reduces to when TF ∈ {0,1} and
+        all documents have near-identical length.
+        """
+        return sum(self.idf(t) for t in query_terms.intersection(doc_terms))
+
+    @classmethod
+    def build(cls, engine: "LLMWikiEngine") -> "WikiBM25":
+        doc_freq: Dict[str, int] = {}
+        N = 0
+        total_len = 0
+
+        for rel in engine._all_wiki_pages():
+            if rel in {"index.md", "log.md"}:
+                continue
+            try:
+                text = (engine.wiki_dir / rel).read_text(
+                    encoding="utf-8", errors="ignore"
+                )
+            except (FileNotFoundError, OSError):
+                continue
+            terms = engine._terms(text)
+            if not terms:
+                continue
+            N += 1
+            total_len += len(text)
+            for term in terms:
+                doc_freq[term] = doc_freq.get(term, 0) + 1
+
+        avg_doc_len = total_len / max(1, N)
+        return cls(doc_freq=doc_freq, N=N, avg_doc_len=avg_doc_len)
+
+
 class LLMWikiEngine:
     def __init__(self, cfg: WikiConfig, llm_fn: LLMFn):
         self.cfg = cfg
         self.llm_fn = llm_fn
+        self._bm25: Optional[WikiBM25] = None
 
         self.raw_dir = self.cfg.vault_root / self.cfg.raw_dirname
         self.wiki_dir = self.cfg.vault_root / self.cfg.wiki_dirname
@@ -5478,6 +5561,7 @@ class LLMWikiEngine:
                 for right in range(left + 1, len(ordered)):
                     candidate_pairs.add((ordered[left], ordered[right]))
 
+        bm25 = self._get_bm25()
         candidates: List[Dict[str, Any]] = []
         for left_idx, right_idx in sorted(candidate_pairs):
             left = pages[left_idx]
@@ -5489,9 +5573,17 @@ class LLMWikiEngine:
             if not common:
                 continue
 
-            min_overlap = len(common) / max(1, min(len(left_terms), len(right_terms)))
-            jaccard = len(common) / max(1, len(left_terms.union(right_terms)))
-            similarity = max(min_overlap, jaccard)
+            idf_common = sum(bm25.idf(t) for t in common)
+            idf_union = sum(bm25.idf(t) for t in left_terms.union(right_terms))
+            idf_min_side = sum(
+                bm25.idf(t)
+                for t in (
+                    left_terms if len(left_terms) <= len(right_terms) else right_terms
+                )
+            )
+            weighted_min_overlap = idf_common / max(0.001, idf_min_side)
+            weighted_jaccard = idf_common / max(0.001, idf_union)
+            similarity = max(weighted_min_overlap, weighted_jaccard)
             if similarity < similarity_threshold:
                 continue
 
@@ -6481,6 +6573,7 @@ class LLMWikiEngine:
         return rewritten, replaced_count
 
     def _rebuild_index(self) -> None:
+        self._bm25 = None  # invalidate BM25 cache; corpus has changed
         sections = [
             ("Sources", "sources"),
             ("Entities", "entities"),
@@ -6864,7 +6957,7 @@ class LLMWikiEngine:
 
             effective_cutoff = min(cutoff, max(1, projection.number_of_nodes()))
             raw_communities = list(greedy_modularity_communities(
-                projection, cutoff=effective_cutoff, weight="weight", resolution=0.9,  # <1 favors slightly larger communities
+                projection, cutoff=effective_cutoff, weight="weight", resolution=0.8,  # <1 favors slightly larger communities
             ))
             # Filter by min_size
             communities = [c for c in raw_communities if len(c) >= min_size]
@@ -8310,7 +8403,8 @@ class LLMWikiEngine:
 
         analysis_lower = analysis_text.lower()
         analysis_terms = self._terms(analysis_text)
-        scored: List[Tuple[int, str]] = []
+        bm25 = self._get_bm25()
+        scored: List[Tuple[float, str]] = []
 
         for candidate in candidates:
             normalized = candidate.strip().replace("\\", "/")
@@ -8326,12 +8420,13 @@ class LLMWikiEngine:
                 continue
 
             phrase_match = bool(phrase) and phrase in analysis_lower
-            overlap = len(set(candidate_terms).intersection(analysis_terms))
+            raw_overlap_count = len(set(candidate_terms).intersection(analysis_terms))
             required_overlap = max(1, min(2, len(set(candidate_terms))))
 
-            if not phrase_match and overlap < required_overlap:
+            if not phrase_match and raw_overlap_count < required_overlap:
                 continue
 
+            overlap = bm25.idf_weighted_overlap(set(candidate_terms), analysis_terms)
             score = overlap + (3 if phrase_match else 0)
             scored.append((score, normalized))
 
@@ -8365,9 +8460,10 @@ class LLMWikiEngine:
 
         analysis_lower = analysis_preview.lower()
         analysis_terms = self._terms(analysis_preview)
+        bm25 = self._get_bm25()
         candidate_cap = max(limit, int(self.cfg.enrichment_llm_selector_max_candidates))
 
-        scored: List[Tuple[int, str, int, bool]] = []
+        scored: List[Tuple[float, str, float, bool]] = []
         for candidate in candidates:
             normalized = str(candidate).strip().replace("\\", "/")
             if not normalized:
@@ -8376,7 +8472,9 @@ class LLMWikiEngine:
             label = normalized.split("/", 1)[-1]
             phrase = label.replace("-", " ").replace("_", " ").strip().lower()
             candidate_terms = [term for term in self._terms(phrase) if len(term) >= 3]
-            overlap = len(set(candidate_terms).intersection(analysis_terms))
+            overlap = bm25.idf_weighted_overlap(
+                set(candidate_terms), analysis_terms
+            )
             phrase_match = bool(phrase) and phrase in analysis_lower
             score_hint = overlap + (2 if phrase_match else 0)
             if god_nodes and normalized in god_nodes:
@@ -8408,7 +8506,7 @@ class LLMWikiEngine:
                         summary = self._first_nonempty_content_line(page_text)
             summary = self._normalize_web_text(summary, 180)
             lines.append(
-                f"{cid} | {rel} | overlap_terms: {overlap} | phrase_match: {'yes' if phrase_match else 'no'} | brief: {summary or '(no summary)'}"
+                f"{cid} | {rel} | overlap_terms: {overlap:.1f} | phrase_match: {'yes' if phrase_match else 'no'} | brief: {summary or '(no summary)'}"
             )
 
         group_label = self._normalize_web_text(
@@ -9237,6 +9335,8 @@ class LLMWikiEngine:
 
         scores: List[Tuple[str, float]] = []
         if q_terms:
+            bm25 = self._get_bm25()
+            bm25_norm = sum(bm25.idf(t) for t in q_terms)
             for rel in all_pages:
                 if rel in {"index.md", "log.md"}:
                     continue
@@ -9269,9 +9369,10 @@ class LLMWikiEngine:
                 if not page_terms and not text_for_ranking.strip():
                     continue
 
-                matched_terms = q_terms.intersection(page_terms)
-                text_hits = sum(min(2, term_counts.get(term, 0)) for term in matched_terms)
-                text_relevance = text_hits / max(1, len(q_terms))
+                bm25_score = bm25.score_from_counts(
+                    q_terms, term_counts, len(text_for_ranking)
+                )
+                text_relevance = bm25_score / max(0.001, bm25_norm)
 
                 rel_norm = (
                     rel.lower()
@@ -10793,6 +10894,11 @@ class LLMWikiEngine:
         ):
             term = term[:-1]
         return term
+
+    def _get_bm25(self) -> WikiBM25:
+        if self._bm25 is None:
+            self._bm25 = WikiBM25.build(self)
+        return self._bm25
 
     def _tokenize_terms(self, s: str) -> List[str]:
         raw_tokens = re.findall(r"[a-zA-Z0-9]{2,}", s.lower())
