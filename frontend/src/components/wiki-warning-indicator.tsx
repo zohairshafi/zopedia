@@ -22,8 +22,6 @@ export function WikiWarningIndicator() {
 
   useEffect(() => {
     fetchWarnings();
-    const interval = setInterval(fetchWarnings, 60_000);
-    return () => clearInterval(interval);
   }, [fetchWarnings]);
 
   const rebuild = useCallback(async () => {

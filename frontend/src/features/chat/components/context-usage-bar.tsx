@@ -28,37 +28,44 @@ function getSeverityColor(percent: number): {
 
 export const ContextUsageBar: FC<{
   used: number;
-  total: number;
+  total?: number;
   cached?: number;
   promptTokens?: number;
   completionTokens?: number;
   className?: string;
 }> = ({ used, total, cached, promptTokens, completionTokens, className }) => {
-  if (total <= 0) return null;
-
-  const percent = Math.min((used / total) * 100, 100);
-  const severity = getSeverityColor(percent);
+  const hasTotal = total != null && total > 0;
+  const percent = hasTotal ? Math.min((used / total) * 100, 100) : 0;
+  const severity = hasTotal ? getSeverityColor(percent) : getSeverityColor(0);
 
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <button
           type="button"
-          aria-label={`Context usage: ${formatTokenCount(used)} of ${formatTokenCount(total)} tokens`}
+          aria-label={
+            hasTotal
+              ? `Context usage: ${formatTokenCount(used)} of ${formatTokenCount(total)} tokens`
+              : `Context usage: ${formatTokenCount(used)} tokens`
+          }
           className={cn(
             "flex items-center gap-2 rounded-md px-2 py-1 text-xs font-mono tabular-nums text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground",
             className,
           )}
         >
           <span>
-            {formatTokenCount(used)} / {formatTokenCount(total)}
+            {hasTotal
+              ? `${formatTokenCount(used)} / ${formatTokenCount(total)}`
+              : formatTokenCount(used)}
           </span>
-          <div className="h-1.5 w-16 rounded-full bg-muted overflow-hidden">
-            <div
-              className={cn("h-full rounded-full transition-all", severity.bar)}
-              style={{ width: `${percent}%` }}
-            />
-          </div>
+          {hasTotal && (
+            <div className="h-1.5 w-16 rounded-full bg-muted overflow-hidden">
+              <div
+                className={cn("h-full rounded-full transition-all", severity.bar)}
+                style={{ width: `${percent}%` }}
+              />
+            </div>
+          )}
         </button>
       </TooltipTrigger>
       <TooltipContent
@@ -70,7 +77,7 @@ export const ContextUsageBar: FC<{
           <div className="flex items-center justify-between gap-4">
             <span className="text-muted-foreground">Context usage</span>
             <span className={cn("font-mono tabular-nums font-medium", severity.text)}>
-              {percent.toFixed(1)}%
+              {hasTotal ? `${percent.toFixed(1)}%` : "—"}
             </span>
           </div>
           {promptTokens !== undefined && (
@@ -101,10 +108,12 @@ export const ContextUsageBar: FC<{
           <div className="flex items-center justify-between gap-4">
             <span className="text-muted-foreground">Total</span>
             <span className="font-mono tabular-nums">
-              {formatTokenCountFull(used)} / {formatTokenCountFull(total)}
+              {hasTotal
+                ? `${formatTokenCountFull(used)} / ${formatTokenCountFull(total)}`
+                : formatTokenCountFull(used)}
             </span>
           </div>
-          {percent > 85 && (
+          {hasTotal && percent > 85 && (
             <div className="mt-1 max-w-64 text-[11px] leading-snug text-muted-foreground/90">
               Close to the context limit. Generation will stop at 100%.
               Increase <span className="font-medium">Context Length</span> in

@@ -527,6 +527,9 @@ export function ChatPage(): ReactElement {
   const ggufContextLength = useChatRuntimeStore(
     (state) => state.ggufContextLength,
   );
+  const customContextLength = useChatRuntimeStore(
+    (state) => state.customContextLength,
+  );
   const contextUsage = useChatRuntimeStore((state) => state.contextUsage);
   const autoTitle = useChatRuntimeStore((state) => state.autoTitle);
   const setAutoTitle = useChatRuntimeStore((state) => state.setAutoTitle);
@@ -941,10 +944,10 @@ export function ChatPage(): ReactElement {
             </div>
           )}
           <div className="ml-auto flex items-center gap-2">
-            {view.mode === "single" && ggufContextLength && contextUsage ? (
+            {view.mode === "single" && contextUsage ? (
               <ContextUsageBar
                 used={contextUsage.totalTokens}
-                total={ggufContextLength}
+                total={customContextLength ?? ggufContextLength ?? undefined}
                 cached={contextUsage.cachedTokens}
                 promptTokens={contextUsage.promptTokens}
                 completionTokens={contextUsage.completionTokens}

@@ -258,6 +258,7 @@ async def chat_completions_stream(
                 return
 
             tool_calls_acc: dict[int, dict[str, Any]] = {}
+            last_usage: dict[str, Any] | None = None
             async for line in response.aiter_lines():
                 if not line.startswith("data: "):
                     continue
@@ -268,6 +269,9 @@ async def chat_completions_stream(
                     data = json.loads(data_str)
                 except json.JSONDecodeError:
                     continue
+
+                if data.get("usage"):
+                    last_usage = data["usage"]
 
                 choices = data.get("choices") or []
                 for choice in choices:
@@ -312,6 +316,9 @@ async def chat_completions_stream(
                 for tc_entry in sorted(tool_calls_acc.values(), key=lambda x: x.get("id", "")):
                     yield {"type": "tool_call", "tool_call": tc_entry}
 
+            if last_usage:
+                yield {"type": "usage", "usage": last_usage}
+
 
 async def chat_completions_non_streaming(
     messages: list[dict[str, Any]],
@@ -321,6 +328,7 @@ async def chat_completions_non_streaming(
     max_tokens: int = 4096,
     tools: list[dict[str, Any]] | None = None,
     response_format: dict[str, Any] | None = None,
+    thinking: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Non-streaming chat completion from upstream API."""
     if not llm_available():
@@ -340,6 +348,8 @@ async def chat_completions_non_streaming(
         body["tools"] = tools
     if response_format:
         body["response_format"] = response_format
+    if thinking:
+        body["thinking"] = thinking
 
     async with httpx.AsyncClient(timeout=_LLM_TIMEOUT_SECONDS) as client:
         response = await client.post(target_url, json=body, headers=_headers())

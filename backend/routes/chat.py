@@ -466,6 +466,8 @@ async def openai_chat_completions(request: Request):
                         yield f"data: {json.dumps({'id': chunk_id, 'object': 'chat.completion.chunk', 'created': created, 'model': resolved_model, 'choices': [{'index': 0, 'delta': {'content': event['content']}, 'finish_reason': None}]})}\n\n"
                     elif event["type"] == "error":
                         yield f"data: {json.dumps({'error': event['message']})}\n\n"
+                    elif event["type"] == "usage":
+                        yield f"data: {json.dumps({'id': chunk_id, 'object': 'chat.completion.chunk', 'created': created, 'model': resolved_model, 'choices': [], 'usage': event['usage']})}\n\n"
                 # Remove ephemeral synthesis instruction so it doesn't leak into next turn
                 if messages and messages[-1].get("_ephemeral"):
                     messages.pop()
@@ -539,6 +541,7 @@ async def generate_title(body: dict):
         messages,
         temperature=0.2,
         max_tokens=32,
+        thinking={"type": "disabled"},
     )
 
     if "error" in result:

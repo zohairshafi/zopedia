@@ -253,7 +253,7 @@ async function generateTitleWithModel(payload: {
   userText: string;
   assistantText?: string;
 }): Promise<string | null> {
-  const response = await authFetch("/api/chat/generate-title", {
+  const response = await authFetch("/v1/api/chat/generate-title", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -515,8 +515,6 @@ function ThreadHistoryProvider({
         const store = useChatRuntimeStore.getState();
         if (
           savedUsage &&
-          store.ggufContextLength &&
-          savedUsage.totalTokens <= store.ggufContextLength &&
           (!savedUsage.modelId || savedUsage.modelId === store.params.checkpoint)
         ) {
           store.setContextUsage(savedUsage);
