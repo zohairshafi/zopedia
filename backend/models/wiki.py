@@ -197,7 +197,7 @@ class WikiEnrichRequest(BaseModel):
     max_web_gap_queries: Optional[int] = Field(None, ge=1, le=100)
     refresh_non_fallback_oldest_pages: Optional[int] = Field(None, ge=0, le=1000)
     repair_answer_links: Optional[bool] = Field(None)
-    compact_knowledge_pages: bool = Field(False)
+    compact_knowledge_pages: bool = Field(True)
     max_incremental_updates: int = Field(_WIKI_KNOWLEDGE_MAX_INCREMENTAL_UPDATES_DEFAULT, ge=1, le=256)
 
 
@@ -263,7 +263,7 @@ class WikiMergeMaintenanceRequest(BaseModel):
     max_merges: int = Field(_WIKI_MERGE_MAINTENANCE_MAX_MERGES_DEFAULT, ge=1, le=512)
     semantic_concept_merge: bool = Field(True)
     semantic_merge_writeback: bool = Field(True)
-    compact_knowledge_pages: bool = Field(False)
+    compact_knowledge_pages: bool = Field(True)
     max_incremental_updates: int = Field(_WIKI_KNOWLEDGE_MAX_INCREMENTAL_UPDATES_DEFAULT, ge=1, le=256)
 
 

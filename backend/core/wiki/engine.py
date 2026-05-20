@@ -4951,6 +4951,7 @@ class LLMWikiEngine:
             "Rules:\n"
             "- Be source-grounded and thorough\n"
             "- Keep facts concise (one sentence each)\n"
+            "- If information is time sensitive, include the relevant dates\n"
             "- ALWAYS extract at least 2-5 concepts. Every document discusses concepts — look for the underlying ideas, methods, and themes.\n"
             "- If you genuinely cannot find ANY concepts, explain why in the summary\n"
             "- Entities can be empty only if the source mentions no specific named things\n\n"
@@ -5496,6 +5497,7 @@ class LLMWikiEngine:
         combined_updates = self._trim_incremental_updates_text(
             combined_updates,
             max_incremental_updates = self.cfg.knowledge_max_incremental_updates,
+            full_page_text = merged_base,
         )
 
         final_text = f"{merged_base}\n\n## Incremental Updates\n\n{combined_updates}\n"
@@ -6182,6 +6184,7 @@ class LLMWikiEngine:
         self,
         updates_text: str,
         max_incremental_updates: int,
+        full_page_text: str = "",
     ) -> str:
         limit = max(1, int(max_incremental_updates))
         blocks = self._split_incremental_update_blocks(updates_text)
@@ -6194,11 +6197,11 @@ class LLMWikiEngine:
         overflow = blocks[:-limit + 1] if limit > 1 else blocks[:-limit]
         kept = blocks[-limit + 1:] if limit > 1 else blocks[-limit:]
 
-        summary = self._llm_summarize_updates(overflow)
+        summary = self._llm_summarize_updates(overflow, full_page_text)
         result = [summary] + kept
         return "\n\n".join(result).strip()
 
-    def _llm_summarize_updates(self, blocks: list) -> str:
+    def _llm_summarize_updates(self, blocks: list, full_page_text: str = "") -> str:
         """Use the LLM to condense multiple incremental update blocks into one summary."""
         if not blocks:
             return ""
@@ -6207,8 +6210,18 @@ class LLMWikiEngine:
 
         combined = "\n\n---\n\n".join(blocks)
         # Truncate if excessively long
-        if len(combined) > 12000:
-            combined = combined[:12000] + "\n\n...(truncated)"
+        if len(combined) > 20000:
+            combined = combined[:20000] + "\n\n...(truncated)"
+
+        context_block = ""
+        if full_page_text and full_page_text.strip():
+            truncated = full_page_text.strip()
+            if len(truncated) > 15000:
+                truncated = truncated[:15000] + "\n\n...(truncated)"
+            context_block = (
+                "FULL PAGE CONTENT (for context — the summary should be consistent with this page):\n\n"
+                f"{truncated}\n\n"
+            )
 
         prompt = (
             "You are maintaining a wiki knowledge page. Below are several older incremental update blocks "
@@ -6216,6 +6229,7 @@ class LLMWikiEngine:
             "that preserves all key facts, changes, and insights. Drop redundant or superseded information. "
             "Keep the same markdown format (bullet points, links, etc.). "
             "Start with '### Summarised Updates' as a heading.\n\n"
+            f"{context_block}"
             f"OLDER UPDATES TO CONDENSE:\n\n{combined}"
         )
         raw = str(self.llm_fn(prompt) or "").strip()
@@ -6280,10 +6294,10 @@ class LLMWikiEngine:
 
         # Build the rewrite prompt
         updates_text = "\n\n---\n\n".join(
-            b[:2000] for b in incremental_blocks
+            b[:20000] for b in incremental_blocks
         )
-        if len(updates_text) > 16000:
-            updates_text = updates_text[:16000] + "\n\n...(older updates truncated)"
+        if len(updates_text) > 20000:
+            updates_text = updates_text[:20000] + "\n\n...(older updates truncated)"
 
         # Keep the last few updates for a Recent Changes section
         recent_updates = "\n\n---\n\n".join(
@@ -6312,7 +6326,7 @@ class LLMWikiEngine:
             "- Keep the same markdown structure: ## Section, ### Subsection.\n"
             "- No markdown fences. Output the rewritten page directly.\n\n"
             "## ORIGINAL PAGE\n"
-            f"{text[:8000]}\n\n"
+            f"{text[:20000]}\n\n"
             "## INCREMENTAL UPDATES TO MERGE\n"
             f"{updates_text}\n\n"
             "## RECENT UPDATES (preserve verbatim at end)\n"
