@@ -94,6 +94,25 @@ export ZOPEDIA_AUTH_DISABLED=false
 
 When auth is enabled, chat history syncs to the server. Log in from any browser — your threads follow you. When auth is disabled, everything stays in browser IndexedDB (current behavior).
 
+### Adding Users
+
+Only the `zopedia` admin can create new users. Use the `/api/auth/register` endpoint:
+
+```bash
+# Login as admin to get a token
+TOKEN=$(curl -s -X POST http://localhost:8000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"zopedia","password":"YOUR_ADMIN_PASSWORD"}' | jq -r '.access_token')
+
+# Register a new user (password must be at least 8 characters)
+curl -X POST http://localhost:8000/api/auth/register \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"username":"newuser","password":"their-password-here"}'
+```
+
+To switch users, use the **Logout** button in the sidebar footer dropdown, then log in with different credentials.
+
 ---
 
 ## Providers & Local LLMs
