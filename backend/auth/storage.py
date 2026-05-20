@@ -13,8 +13,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Tuple
 
+from utils.auth_root import get_auth_root
+
+
 def _auth_root() -> Path:
-    return Path.home() / ".unsloth" / "studio" / "auth"
+    return get_auth_root()
 
 
 def _ensure_dir(path: Path) -> Path:

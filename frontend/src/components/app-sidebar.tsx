@@ -30,7 +30,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useAnimatedThemeToggle } from "@/components/ui/animated-theme-toggler";
 import { cn } from "@/lib/utils";
-import { authFetch } from "@/features/auth";
+import { authFetch, logout } from "@/features/auth";
+import { db } from "@/features/chat/db";
 import {
   Book03Icon,
   ChefHatIcon,
@@ -40,6 +41,7 @@ import {
   Download03Icon,
   FolderUploadIcon,
   GemIcon,
+  Logout03Icon,
   MessageSearch01Icon,
   Search01Icon,
   NewReleasesIcon,
@@ -356,6 +358,12 @@ export function AppSidebar() {
         description: error instanceof Error ? error.message : "Unknown error",
       });
     }
+  }
+
+  async function handleLogout(): Promise<void> {
+    logout();
+    await db.delete();
+    window.location.href = "/login";
   }
 
   async function handleWikiLint(): Promise<void> {
@@ -967,6 +975,10 @@ export function AppSidebar() {
                   </DropdownMenuItem>
                 </DropdownMenuGroup>
                 <DropdownMenuSeparator className="mx-2.5! my-2.5! h-0! border-t border-border/70 bg-transparent!" />
+                <DropdownMenuItem onSelect={() => void handleLogout()}>
+                  <HugeiconsIcon icon={Logout03Icon} strokeWidth={1.75} className="size-[18px]" />
+                  <span>Logout</span>
+                </DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => setShutdownOpen(true)}>
                   <HugeiconsIcon icon={EcoPowerIcon} className="size-4" />
                   <span>Shutdown</span>
