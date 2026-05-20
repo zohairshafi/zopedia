@@ -14,15 +14,9 @@ async function getAuthToken(): Promise<string | null> {
   }
 }
 
-function isAuthDisabled(): boolean {
-  const token = localStorage.getItem("unsloth_auth_token");
-  return token === "zopedia-local";
-}
-
 // ── Server API calls ─────────────────────────────────────────────────
 
 async function fetchServerThreads(): Promise<Array<{ id: string; title: string; created_at: string; updated_at: string; message_count: number }>> {
-  if (isAuthDisabled()) return [];
   try {
     const res = await authFetch("/api/chat/threads");
     if (!res.ok) return [];
@@ -34,7 +28,6 @@ async function fetchServerThreads(): Promise<Array<{ id: string; title: string; 
 }
 
 async function fetchServerThread(threadId: string): Promise<{ thread: any; messages: any[] } | null> {
-  if (isAuthDisabled()) return null;
   try {
     const res = await authFetch(`/api/chat/threads/${encodeURIComponent(threadId)}`);
     if (!res.ok) return null;
@@ -50,7 +43,6 @@ async function saveThreadToServer(
   messages: Array<{ id: string; role: string; content: any; reasoning_content?: string; parent_id?: string | null; created_at?: string }>,
   createdAt?: number,
 ): Promise<void> {
-  if (isAuthDisabled()) return;
   try {
     const body: Record<string, unknown> = { thread_id: threadId, title, messages };
     if (createdAt) body.created_at = new Date(createdAt).toISOString();
@@ -65,7 +57,6 @@ async function saveThreadToServer(
 }
 
 export async function deleteThreadFromServer(threadId: string): Promise<void> {
-  if (isAuthDisabled()) return;
   try {
     await authFetch(`/api/chat/threads/${encodeURIComponent(threadId)}`, { method: "DELETE" });
   } catch {
@@ -83,8 +74,9 @@ export async function syncThreadListFromServer(): Promise<void> {
     // Skip server threads with no messages — they're empty shells
     if (!st.message_count) continue;
     const local = await db.threads.get(st.id);
-    if (!local || (st.updated_at > new Date(local.createdAt).toISOString())) {
-      await db.threads.put({
+    // Always sync from server — server is the source of truth.
+    // Preserve local createdAt if available (more accurate than server's).
+    await db.threads.put({
         id: st.id,
         title: st.title ?? "New Chat",
         modelType: (local?.modelType ?? "base") as any,
@@ -94,7 +86,16 @@ export async function syncThreadListFromServer(): Promise<void> {
         createdAt: local?.createdAt ?? (st.created_at ? new Date(st.created_at).getTime() : Date.now()),
         messageCount: st.message_count ?? local?.messageCount ?? 0,
         syncedFromServer: true,
-      });
+    });
+  }
+
+  // Remove local threads that no longer exist on the server
+  const serverIds = new Set(serverThreads.map((st) => st.id));
+  const allLocalThreads = await db.threads.toArray();
+  for (const t of allLocalThreads) {
+    if (t.syncedFromServer && !serverIds.has(t.id)) {
+      await db.messages.where("threadId").equals(t.id).delete();
+      await db.threads.delete(t.id);
     }
   }
 }
@@ -168,7 +169,6 @@ export async function deleteThreadFromBoth(threadId: string): Promise<void> {
 // ── Migration ────────────────────────────────────────────────────────
 
 export async function maybeMigrateLocalToServer(): Promise<boolean> {
-  if (isAuthDisabled()) return false;
   const serverThreads = await fetchServerThreads();
   if (serverThreads.length > 0) return false;
 

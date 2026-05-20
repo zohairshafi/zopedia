@@ -511,8 +511,9 @@ function ThreadHistoryProvider({
         };
         let msgs = await db.messages.where("threadId").equals(remoteId).toArray();
 
-        // If local is empty, try server sync
-        if (msgs.length === 0) {
+        // Sync from server if local is empty or stale (server has more messages)
+        const thread = await db.threads.get(remoteId);
+        if (msgs.length === 0 || ((thread?.messageCount ?? 0) > msgs.length)) {
           await syncThreadMessagesFromServer(remoteId);
           msgs = await db.messages.where("threadId").equals(remoteId).toArray();
         }
