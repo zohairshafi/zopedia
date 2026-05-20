@@ -79,7 +79,7 @@ export async function requireAuth(): Promise<void> {
   }
 
   if (status.requires_password_change || mustChangePassword()) {
-    authRedirect("/change-password");
+    authRedirect("/login");
   }
   // initialized=false means first run — redirect to set password
   authRedirect(status.initialized ? "/login" : "/change-password");

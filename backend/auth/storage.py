@@ -10,11 +10,23 @@ import os
 import secrets
 import sqlite3
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional, Tuple
 
-from utils.paths import auth_db_path, ensure_dir
+def _auth_root() -> Path:
+    return Path.home() / ".unsloth" / "studio" / "auth"
 
-DB_PATH = auth_db_path()
+
+def _ensure_dir(path: Path) -> Path:
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _auth_db_path() -> Path:
+    return _auth_root() / "auth.db"
+
+
+DB_PATH = _auth_db_path()
 DEFAULT_ADMIN_USERNAME = "zopedia"
 
 # Plaintext bootstrap password file — lives beside auth.db, deleted on
@@ -53,7 +65,7 @@ def generate_bootstrap_password() -> str:
 
     # Persist so the *same* passphrase is used if the server restarts
     # before the user changes the password.
-    ensure_dir(_BOOTSTRAP_PW_PATH.parent)
+    _ensure_dir(_BOOTSTRAP_PW_PATH.parent)
     _BOOTSTRAP_PW_PATH.write_text(_bootstrap_password)
     try:
         os.chmod(_BOOTSTRAP_PW_PATH, 0o600)
@@ -109,7 +121,7 @@ def _hash_token(token: str) -> str:
 
 def get_connection() -> sqlite3.Connection:
     """Get a connection to the auth database, creating tables if needed."""
-    ensure_dir(DB_PATH.parent)
+    _ensure_dir(DB_PATH.parent)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute(

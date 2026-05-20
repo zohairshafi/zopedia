@@ -78,6 +78,22 @@ cd ../backend && python main.py
 
 Drop files into `backend/wiki_data/raw/` or use the **Upload Files** button in the sidebar under Wiki Options.
 
+### Multi-User Setup
+
+```bash
+# Enable real auth (default is single-user)
+export ZOPEDIA_AUTH_DISABLED=false
+
+# First startup creates "zopedia" admin with a diceware passphrase
+# Check server logs for the bootstrap password:
+#   INFO: Default admin 'zopedia' seeded. Bootstrap password: <4-word-passphrase>
+#
+# Log in at http://localhost:8000 with username "zopedia" and the bootstrap password.
+# You'll be prompted to change the password on first login.
+```
+
+When auth is enabled, chat history syncs to the server. Log in from any browser — your threads follow you. When auth is disabled, everything stays in browser IndexedDB (current behavior).
+
 ---
 
 ## Providers & Local LLMs
@@ -174,6 +190,18 @@ All triggered automatically by the file watcher or manually via sidebar buttons.
 - **Upload dialog** — drag-and-drop files directly into the wiki raw/ folder
 - **Sidebar controls**: Run Lint, Refresh Index, Run Maintenance (with/without web fill), View/Edit Wiki Data, Upload Files
 
+### Multi-User & Chat History Sync
+
+When `ZOPEDIA_AUTH_DISABLED=false`, Zopedia supports multiple users with isolated chat histories and a shared wiki knowledge base:
+
+- **Real JWT auth**: Username + password login, PBKDF2 password hashing, 60-min access tokens, 7-day refresh tokens, API key support
+- **Server-side chat history**: Threads and messages persisted to SQLite, scoped by username. Survives browser cache clears. Syncs automatically across devices.
+- **Automatic sync**: Frontend merges with server on load, saves on message append (debounced 2s). Local IndexedDB remains the primary store for responsiveness.
+- **Seamless migration**: First login with existing local chats → auto-import to server. No data loss.
+- **Graceful degradation**: Set `ZOPEDIA_AUTH_DISABLED=true` to return to single-user, IndexedDB-only mode. Zero config change needed.
+- **Shared wiki**: All users share the same wiki vault, entities, concepts, and knowledge base. Chat histories and auth are the only per-user data.
+- **User-scoped exports**: Manual "Log chat history" saves to `raw/users/{username}/` when auth is enabled.
+
 ---
 
 ## Architecture
@@ -197,7 +225,8 @@ zopedia/
 │   │   ├── chat.py          # /v1/chat/completions — tool-calling + streaming
 │   │   └── wiki.py          # Wiki management endpoints (17 endpoints)
 │   ├── models/wiki.py       # Pydantic models
-│   └── auth/                # JWT auth (disabled by default, single-user mode)
+│   ├── auth/                # JWT auth (router, storage, authentication, hashing)
+│   └── chat_history_store.py  # Server-side chat history (SQLite, per-user)
 ├── frontend/                # React + Vite + TypeScript (assistant-ui)
 ├── graphify/                # Graph analysis library (minimal — 7 files)
 ├── notebooks/               # Jupyter notebooks for graph exploration
@@ -255,7 +284,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for full prompt table, maintenance lifecy
 | Variable | Default | Description |
 |---|---|---|
 | `ZOPEDIA_LLM_TIMEOUT_SECONDS` | `300` | Timeout for upstream API calls |
-| `ZOPEDIA_AUTH_DISABLED` | `true` | Skip authentication (single-user mode) |
+| `ZOPEDIA_AUTH_DISABLED` | `true` | Skip auth — single-user mode, browser-only chat history. Set to `false` for multi-user JWT auth with server-side chat history sync |
 | `ZOPEDIA_PORT` | `8000` | Server port |
 
 ---
@@ -280,6 +309,23 @@ POST   /api/inference/wiki/merge-maintenance   Merge duplicate pages
 POST   /api/inference/wiki/chat-history/save   Save chat to wiki raw/
 GET    /api/inference/wiki/data-graph       Get knowledge graph data
 POST   /api/inference/wiki/delete-entries   Delete wiki entries
+```
+
+### Auth
+```
+GET  /api/auth/status            Auth status (initialized, requires_password_change)
+POST /api/auth/login             Login with username + password → JWT tokens
+POST /api/auth/refresh           Refresh access token
+POST /api/auth/change-password   Change password (requires auth)
+POST /api/auth/register          Register new user (admin only)
+```
+
+### Chat History (server-side, auth required)
+```
+GET    /v1/api/chat/threads          List threads for current user
+GET    /v1/api/chat/threads/{id}     Load thread + messages
+POST   /v1/api/chat/threads          Save thread + messages
+DELETE /v1/api/chat/threads/{id}     Delete thread
 ```
 
 ### Other
@@ -310,10 +356,11 @@ npm run build               # Output to frontend/dist/
 
 ### Key Dependencies
 
-- **Backend**: FastAPI, Uvicorn, httpx, networkx, PyMuPDF (PDF ingestion), ddgs (web search), watchdog
+- **Backend**: FastAPI, Uvicorn, httpx, networkx, PyMuPDF (PDF ingestion), ddgs (web search), watchdog, PyJWT, diceware
 - **Frontend**: React 19, Vite, TypeScript, assistant-ui, Tailwind CSS, shadcn/ui, Dexie (IndexedDB)
 - **Graph analysis**: NetworkX for community detection
 - **Ingestion**: graphify, markitdown
+- **Auth & Sync**: PBKDF2-HMAC-SHA256 password hashing, JWT (HS256), SQLite (chat history + user store)
 
 ---
 

@@ -16,11 +16,9 @@ import json
 import logging
 import os
 import time
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 
 from core.llm import (
@@ -39,7 +37,6 @@ from routes.wiki import (
     _LAST_RAG_DEBUG,
     _live_route_rag_limits,
     _loggable_rag_context,
-    _optional_subject,
     _WIKI_LOG_INJECTED_CONTEXT,
     _WIKI_PENDING_INGEST_MAX_FILES_PER_CHAT,
     get_wiki_components,

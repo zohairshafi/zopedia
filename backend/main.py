@@ -58,11 +58,37 @@ apply_defaults()
 async def _get_current_subject(request: Request) -> str:
     if _AUTH_DISABLED:
         return "local-user"
-    # Delegate to real auth if enabled
+    # Real auth: extract Bearer token, validate JWT/API key, return subject
     try:
-        from auth.authentication import get_current_subject as real_auth
+        from auth.authentication import _decode_subject_without_verification
+        from auth.storage import get_user_and_secret, validate_api_key, API_KEY_PREFIX
+        import jwt as _jwt
 
-        return await real_auth(request)
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header.startswith("Bearer "):
+            return "local-user"
+        token = auth_header[7:]
+
+        # API key path
+        if token.startswith(API_KEY_PREFIX):
+            username = validate_api_key(token)
+            return username or "local-user"
+
+        # JWT path
+        subject = _decode_subject_without_verification(token)
+        if subject is None:
+            return "local-user"
+        record = get_user_and_secret(subject)
+        if record is None:
+            return "local-user"
+        _salt, _pwd_hash, jwt_secret, _must_change = record
+        try:
+            payload = _jwt.decode(token, jwt_secret, algorithms=["HS256"])
+            if payload.get("sub") == subject:
+                return subject
+        except Exception:
+            pass
+        return "local-user"
     except Exception:
         return "local-user"
 
@@ -74,6 +100,20 @@ async def _get_current_subject(request: Request) -> str:
 async def lifespan(app: FastAPI):
     """Startup: initialize wiki watcher. Shutdown: stop watcher."""
     logger.info("Starting Zopedia...")
+
+    # Seed default admin account when auth is enabled
+    if not _AUTH_DISABLED:
+        try:
+            from auth.storage import ensure_default_admin, get_bootstrap_password
+
+            created = ensure_default_admin()
+            if created:
+                bootstrap = get_bootstrap_password()
+                logger.info("Default admin 'zopedia' seeded. Bootstrap password: %s", bootstrap)
+            else:
+                logger.info("Auth initialized with existing users.")
+        except Exception as exc:
+            logger.warning("Auth bootstrap failed: %s", exc)
 
     # Start wiki watcher
     try:
@@ -168,6 +208,75 @@ app.include_router(wiki_router, prefix="/api/inference")
 from routes.chat import router as chat_router
 
 app.include_router(chat_router, prefix="/v1")
+
+
+# ── Chat History API (server-side, per-user) ────────────────────────
+
+from fastapi import APIRouter as _APIRouter, HTTPException
+from pydantic import BaseModel as _BaseModel
+
+_chat_history_router = _APIRouter()
+
+
+class _ChatHistoryThread(_BaseModel):
+    thread_id: str
+    title: Optional[str] = None
+    messages: list[dict]
+    created_at: Optional[str] = None
+
+
+@_chat_history_router.get("/chat/threads")
+async def _chat_history_list_threads(request: Request):
+    from chat_history_store import list_threads
+
+    current_subject = await _get_current_subject(request)
+    threads = list_threads(current_subject)
+    return {"threads": threads}
+
+
+@_chat_history_router.get("/chat/threads/{thread_id}")
+async def _chat_history_get_thread(thread_id: str, request: Request):
+    from chat_history_store import get_thread, get_thread_messages
+
+    current_subject = await _get_current_subject(request)
+    thread = get_thread(thread_id, current_subject)
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    messages = get_thread_messages(thread_id, current_subject)
+    return {"thread": thread, "messages": messages}
+
+
+@_chat_history_router.post("/chat/threads")
+async def _chat_history_save_thread(body: _ChatHistoryThread, request: Request):
+    from datetime import datetime, timezone
+    from chat_history_store import upsert_thread
+
+    current_subject = await _get_current_subject(request)
+    now = datetime.now(timezone.utc).isoformat()
+    created_at = body.created_at or now
+    upsert_thread(
+        thread_id=body.thread_id,
+        username=current_subject,
+        title=body.title,
+        created_at=created_at,
+        updated_at=now,
+        messages=body.messages,
+    )
+    return {"status": "ok", "thread_id": body.thread_id}
+
+
+@_chat_history_router.delete("/chat/threads/{thread_id}")
+async def _chat_history_delete_thread(thread_id: str, request: Request):
+    from chat_history_store import delete_thread
+
+    current_subject = await _get_current_subject(request)
+    deleted = delete_thread(thread_id, current_subject)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    return {"status": "ok"}
+
+
+app.include_router(_chat_history_router, prefix="/api")
 
 
 # ── Shutdown ────────────────────────────────────────────────────────
@@ -277,7 +386,6 @@ async def health():
 
 if _AUTH_DISABLED:
     from fastapi import APIRouter as _APIRouter
-    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
 
     _auth_stub = _APIRouter()
 
@@ -310,6 +418,10 @@ if _AUTH_DISABLED:
         }
 
     app.include_router(_auth_stub, prefix="/api")
+else:
+    from auth.router import router as _auth_router
+
+    app.include_router(_auth_router, prefix="/api")
 
 
 # ── Model API stubs (return empty to keep UI happy) ─────────────────

@@ -4,6 +4,7 @@
 import { db, useLiveQuery } from "../db";
 import { useChatRuntimeStore } from "../stores/chat-runtime-store";
 import type { ThreadRecord } from "../types";
+import { deleteThreadFromServer } from "../chat-server-sync";
 
 export interface SidebarItem {
   type: "single" | "compare";
@@ -50,7 +51,13 @@ export function useChatSidebarItems() {
       (await db.messages.orderBy("threadId").uniqueKeys()) as string[],
     );
     const rows = await db.threads.orderBy("createdAt").reverse().toArray();
-    return rows.filter((t) => !t.archived && threadIdsWithMessage.has(t.id));
+    return rows.filter(
+      (t) => !t.archived && (
+        (t.messageCount ?? 0) > 0 ||
+        threadIdsWithMessage.has(t.id) ||
+        t.syncedFromServer
+      ),
+    );
   }, []);
   const items = groupThreads(allThreads ?? []);
   const canCompare = useChatRuntimeStore((s) => Boolean(s.params.checkpoint));
@@ -87,6 +94,11 @@ export async function deleteChatItem(
       await db.threads.delete(id);
     }
   });
+
+  // Also delete from server so it doesn't re-sync on next load
+  for (const id of threadIds) {
+    void deleteThreadFromServer(id);
+  }
 
   if (activeId === item.id) {
     useChatRuntimeStore.getState().setActiveThreadId(null);

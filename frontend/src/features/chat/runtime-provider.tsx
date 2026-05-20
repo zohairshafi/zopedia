@@ -29,6 +29,13 @@ import { createOpenAIStreamAdapter } from "./api/chat-adapter";
 import { db } from "./db";
 import { useChatRuntimeStore } from "./stores/chat-runtime-store";
 import type { MessageRecord, ModelType } from "./types";
+import {
+  syncThreadListFromServer,
+  syncThreadMessagesFromServer,
+  debouncedSaveThreadToServer,
+  deleteThreadFromBoth,
+  maybeMigrateLocalToServer,
+} from "./chat-server-sync";
 
 const DEFAULT_SUGGESTIONS = [
   {
@@ -348,6 +355,10 @@ function createDexieAdapter(
     },
 
     async list() {
+      // Sync server threads before querying local so new browsers see existing data
+      await syncThreadListFromServer();
+      void maybeMigrateLocalToServer();
+
       const threads = await db.threads
         .where("modelType")
         .equals(modelType)
@@ -375,6 +386,7 @@ function createDexieAdapter(
         pairId,
         archived: false,
         createdAt: Date.now(),
+        messageCount: 0,
       });
       return { remoteId: threadId, externalId: undefined };
     },
@@ -392,8 +404,7 @@ function createDexieAdapter(
     },
 
     async delete(remoteId: string) {
-      await db.messages.where("threadId").equals(remoteId).delete();
-      await db.threads.delete(remoteId);
+      await deleteThreadFromBoth(remoteId);
     },
 
     async generateTitle(remoteId: string, messages: readonly ThreadMessage[]) {
@@ -498,7 +509,13 @@ function ThreadHistoryProvider({
           user: 1,
           assistant: 2,
         };
-        const msgs = await db.messages.where("threadId").equals(remoteId).toArray();
+        let msgs = await db.messages.where("threadId").equals(remoteId).toArray();
+
+        // If local is empty, try server sync
+        if (msgs.length === 0) {
+          await syncThreadMessagesFromServer(remoteId);
+          msgs = await db.messages.where("threadId").equals(remoteId).toArray();
+        }
         msgs.sort((a, b) => {
           if (a.createdAt !== b.createdAt) return a.createdAt - b.createdAt;
           const aOrder = roleOrder[a.role] ?? 99;
@@ -575,6 +592,9 @@ function ThreadHistoryProvider({
           ...(custom && Object.keys(custom).length > 0 && { metadata: custom }),
           createdAt,
         });
+
+        // Debounced server sync
+        debouncedSaveThreadToServer(remoteId);
       },
     }),
     [aui],

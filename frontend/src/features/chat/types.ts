@@ -15,6 +15,8 @@ export interface ThreadRecord {
   pairId?: string;
   archived: boolean;
   createdAt: number;
+  messageCount?: number;
+  syncedFromServer?: boolean;
 }
 
 export interface MessageRecord {

@@ -1,0 +1,197 @@
+import { authFetch } from "@/features/auth";
+import { db } from "./db";
+import type { MessageRecord, ThreadRecord } from "./types";
+
+const DEBOUNCE_MS = 2000;
+const debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+async function getAuthToken(): Promise<string | null> {
+  try {
+    const { getAuthToken: getToken } = await import("@/features/auth/session");
+    return getToken();
+  } catch {
+    return null;
+  }
+}
+
+function isAuthDisabled(): boolean {
+  const token = localStorage.getItem("unsloth_auth_token");
+  return token === "zopedia-local";
+}
+
+// ── Server API calls ─────────────────────────────────────────────────
+
+async function fetchServerThreads(): Promise<Array<{ id: string; title: string; created_at: string; updated_at: string; message_count: number }>> {
+  if (isAuthDisabled()) return [];
+  try {
+    const res = await authFetch("/api/chat/threads");
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.threads ?? [];
+  } catch {
+    return [];
+  }
+}
+
+async function fetchServerThread(threadId: string): Promise<{ thread: any; messages: any[] } | null> {
+  if (isAuthDisabled()) return null;
+  try {
+    const res = await authFetch(`/api/chat/threads/${encodeURIComponent(threadId)}`);
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+async function saveThreadToServer(
+  threadId: string,
+  title: string,
+  messages: Array<{ id: string; role: string; content: any; reasoning_content?: string; parent_id?: string | null; created_at?: string }>,
+  createdAt?: number,
+): Promise<void> {
+  if (isAuthDisabled()) return;
+  try {
+    const body: Record<string, unknown> = { thread_id: threadId, title, messages };
+    if (createdAt) body.created_at = new Date(createdAt).toISOString();
+    await authFetch("/api/chat/threads", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  } catch {
+    // Silently fail — data stays in IndexedDB for next retry
+  }
+}
+
+export async function deleteThreadFromServer(threadId: string): Promise<void> {
+  if (isAuthDisabled()) return;
+  try {
+    await authFetch(`/api/chat/threads/${encodeURIComponent(threadId)}`, { method: "DELETE" });
+  } catch {
+    // Silently fail
+  }
+}
+
+// ── Sync operations ──────────────────────────────────────────────────
+
+export async function syncThreadListFromServer(): Promise<void> {
+  const serverThreads = await fetchServerThreads();
+  if (serverThreads.length === 0) return;
+
+  for (const st of serverThreads) {
+    // Skip server threads with no messages — they're empty shells
+    if (!st.message_count) continue;
+    const local = await db.threads.get(st.id);
+    if (!local || (st.updated_at > new Date(local.createdAt).toISOString())) {
+      await db.threads.put({
+        id: st.id,
+        title: st.title ?? "New Chat",
+        modelType: (local?.modelType ?? "base") as any,
+        modelId: local?.modelId ?? "",
+        pairId: local?.pairId,
+        archived: false,
+        createdAt: local?.createdAt ?? (st.created_at ? new Date(st.created_at).getTime() : Date.now()),
+        messageCount: st.message_count ?? local?.messageCount ?? 0,
+        syncedFromServer: true,
+      });
+    }
+  }
+}
+
+function parseStoredContent(content: unknown): unknown {
+  if (typeof content !== "string") return content;
+  try {
+    return JSON.parse(content);
+  } catch {
+    return content;
+  }
+}
+
+export async function syncThreadMessagesFromServer(threadId: string): Promise<void> {
+  const result = await fetchServerThread(threadId);
+  if (!result?.messages?.length) return;
+
+  const existingIds = new Set(
+    (await db.messages.where("threadId").equals(threadId).toArray()).map((m) => m.id)
+  );
+  for (const msg of result.messages) {
+    if (!existingIds.has(msg.id)) {
+      await db.messages.put({
+        id: msg.id,
+        threadId,
+        role: msg.role,
+        content: parseStoredContent(msg.content) as MessageRecord["content"],
+        attachments: undefined,
+        metadata: msg.reasoning_content ? { reasoning_content: msg.reasoning_content } : undefined,
+        parentId: msg.parent_id ?? null,
+        createdAt: new Date(msg.created_at).getTime(),
+      });
+    }
+  }
+}
+
+export function debouncedSaveThreadToServer(threadId: string): void {
+  const existing = debounceTimers.get(threadId);
+  if (existing) clearTimeout(existing);
+
+  debounceTimers.set(
+    threadId,
+    setTimeout(async () => {
+      debounceTimers.delete(threadId);
+      const thread = await db.threads.get(threadId);
+      const msgs = await db.messages.where("threadId").equals(threadId).sortBy("createdAt");
+      if (!thread || msgs.length === 0) return;
+      await saveThreadToServer(
+        threadId,
+        thread.title,
+        msgs.map((m) => ({
+          id: m.id,
+          role: m.role,
+          content: m.content,
+          reasoning_content: (m.metadata as any)?.reasoning_content,
+          parent_id: m.parentId,
+          created_at: new Date(m.createdAt).toISOString(),
+        })),
+        thread.createdAt,
+      );
+    }, DEBOUNCE_MS)
+  );
+}
+
+export async function deleteThreadFromBoth(threadId: string): Promise<void> {
+  await deleteThreadFromServer(threadId);
+  await db.messages.where("threadId").equals(threadId).delete();
+  await db.threads.delete(threadId);
+}
+
+// ── Migration ────────────────────────────────────────────────────────
+
+export async function maybeMigrateLocalToServer(): Promise<boolean> {
+  if (isAuthDisabled()) return false;
+  const serverThreads = await fetchServerThreads();
+  if (serverThreads.length > 0) return false;
+
+  const localThreads = await db.threads.toArray();
+  if (localThreads.length === 0) return false;
+
+  // Import all local threads to server (skip empty threads)
+  for (const thread of localThreads) {
+    const msgs = await db.messages.where("threadId").equals(thread.id).sortBy("createdAt");
+    if (msgs.length === 0) continue;
+    await saveThreadToServer(
+      thread.id,
+      thread.title,
+      msgs.map((m) => ({
+        id: m.id,
+        role: m.role,
+        content: m.content,
+        reasoning_content: (m.metadata as any)?.reasoning_content,
+        parent_id: m.parentId,
+        created_at: new Date(m.createdAt).toISOString(),
+      })),
+      thread.createdAt,
+    );
+  }
+  return true;
+}

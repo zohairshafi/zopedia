@@ -73,13 +73,11 @@ type AuthFormProps = {
   mode: AuthMode;
 };
 
-const HIDDEN_LOGIN_USERNAME = "zopedia";
-
 export function AuthForm({ mode }: AuthFormProps): ReactElement | null {
   const navigate = useNavigate();
   const isLoginMode = mode === "login";
   const [showPassword, setShowPassword] = useState(false);
-  const username = HIDDEN_LOGIN_USERNAME;
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -104,11 +102,6 @@ export function AuthForm({ mode }: AuthFormProps): ReactElement | null {
           setInitialized(result.initialized);
           setRequiresPasswordChange(result.requires_password_change);
 
-          // Redirect between login ↔ change-password based on server state
-          if (mode === "login" && result.requires_password_change) {
-            navigate({ to: "/change-password" });
-            return;
-          }
           if (mode === "change-password" && !result.requires_password_change && !mustChangePassword()) {
             navigate({ to: "/login" });
             return;
@@ -161,7 +154,6 @@ export function AuthForm({ mode }: AuthFormProps): ReactElement | null {
 
   const blockedByState =
     initialized === false ||
-    (mode === "login" && requiresPasswordChange) ||
     (mode === "change-password" && !requiresPasswordChange && !mustChangePassword());
 
   let helperText: string | null = null;
@@ -172,19 +164,23 @@ export function AuthForm({ mode }: AuthFormProps): ReactElement | null {
   } else if (!isLoginMode && !requiresPasswordChange && !mustChangePassword()) {
     helperText = "Password already updated. Use the login screen.";
   }
-  const title = isLoginMode ? "Welcome back" : "Setup your account";
-  const subtitle = isLoginMode  
+  const title = isLoginMode ? "Welcome back" : "Change your password";
+  const subtitle = isLoginMode
     ? "Sign in with your password."
-    : "Choose a new password";
+    : "Enter your current password and choose a new one.";
   const submitLabel = isLoginMode ? "Login" : "Change password";
   const showSwitchLink = !isLoginMode;
-  const switchText = "Password already setup? ";
+  const switchText = "Password already set? ";
   const switchLinkTo = "/login";
   const switchLinkText = "Back to login";
-  const currentPassword = password || window.__UNSLOTH_BOOTSTRAP__?.password || "";
+  const hasSession = hasAuthToken();
+  const showCredentialsOnChange = !isLoginMode && !hasSession;
+  const showCurrentPasswordOnChange = !isLoginMode && (!hasSession || !mustChangePassword());
+  const currentPassword = password;
+  const requiresCurrentPassword = !isLoginMode && (!hasSession || !mustChangePassword());
   const invalidChangePasswordForm =
     !isLoginMode &&
-    (newPassword.length < 8 || newPassword !== confirmPassword || currentPassword === newPassword);
+    (newPassword.length < 8 || newPassword !== confirmPassword || (requiresCurrentPassword && currentPassword === newPassword));
   const showPasswordMismatchWarning =
     !isLoginMode &&
     newPassword.length > 0 &&
@@ -196,20 +192,20 @@ export function AuthForm({ mode }: AuthFormProps): ReactElement | null {
     setError(null);
 
     if (!isLoginMode) {
-      if (!currentPassword) {
-        setError("Unable to initialize setup. Reload the page and try again.");
+      if (requiresCurrentPassword && !currentPassword) {
+        setError("Please enter your current password.");
         return;
       }
       if (newPassword.length < 8) {
         setError("New password must be at least 8 characters.");
         return;
       }
-      if (newPassword !== confirmPassword) {
-        setError("Passwords do not match.");
+      if (requiresCurrentPassword && currentPassword === newPassword) {
+        setError("New password must be different from your current password.");
         return;
       }
-      if (currentPassword === newPassword) {
-        setError("New password must be different from your current password.");
+      if (newPassword !== confirmPassword) {
+        setError("Passwords do not match.");
         return;
       }
     }
@@ -309,7 +305,19 @@ export function AuthForm({ mode }: AuthFormProps): ReactElement | null {
       </div>
       <form className="space-y-5" onSubmit={handleSubmit}>
         {isLoginMode && (
-          <div className="space-y-2">
+          <>
+            <div className="space-y-2">
+              <Label htmlFor="username">Username</Label>
+              <Input
+                id="username"
+                type="text"
+                autoComplete="username"
+                value={username}
+                onChange={(event) => setUsername(event.target.value)}
+                required
+              />
+            </div>
+            <div className="space-y-2">
             <Label htmlFor="password">Password</Label>
             <div className="relative">
               <Input
@@ -337,10 +345,54 @@ export function AuthForm({ mode }: AuthFormProps): ReactElement | null {
               </Button>
             </div>
           </div>
+          </>
         )}
 
         {!isLoginMode && (
           <>
+            {showCredentialsOnChange && (
+              <div className="space-y-2">
+                <Label htmlFor="username">Username</Label>
+                <Input
+                  id="username"
+                  type="text"
+                  autoComplete="username"
+                  value={username}
+                  onChange={(event) => setUsername(event.target.value)}
+                  required
+                />
+              </div>
+            )}
+            {showCurrentPasswordOnChange && (
+              <div className="space-y-2">
+                <Label htmlFor="password">Current password</Label>
+              <div className="relative">
+                <Input
+                  id="password"
+                  type={showPassword ? "text" : "password"}
+                  className="pr-10"
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  minLength={8}
+                  required
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="absolute right-0 top-0 h-full px-3 text-muted-foreground hover:bg-transparent"
+                  onClick={() => setShowPassword((prev) => !prev)}
+                >
+                  {showPassword ? (
+                    <EyeOff className="h-4 w-4" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
+                </Button>
+              </div>
+            </div>
+            )}
             <div className="space-y-2">
               <Label htmlFor="new-password">New password</Label>
               <div className="relative">
@@ -406,7 +458,7 @@ export function AuthForm({ mode }: AuthFormProps): ReactElement | null {
             loading ||
             statusLoading ||
             blockedByState ||
-            (isLoginMode && password.length < 8) ||
+            (isLoginMode && (username.trim().length === 0 || password.length < 8)) ||
             invalidChangePasswordForm
           }
         >

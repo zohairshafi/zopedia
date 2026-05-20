@@ -717,7 +717,11 @@ async def wiki_export_graphify_wiki(payload: WikiGraphifyExportRequest, current_
 @router.post("/wiki/chat-history/save", response_model=WikiChatHistorySaveResponse)
 async def wiki_save_chat_history(payload: WikiChatHistorySaveRequest, current_subject: str = Depends(_optional_subject)):
     """Save chat history markdown to the wiki raw/ folder for ingestion."""
-    raw_dir = _WIKI_VAULT / "raw"
+    # User-scoped path when auth is enabled
+    if current_subject and current_subject != "local-user":
+        raw_dir = _WIKI_VAULT / "raw" / "users" / current_subject
+    else:
+        raw_dir = _WIKI_VAULT / "raw"
     try:
         raw_dir.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
@@ -769,7 +773,10 @@ async def wiki_save_chat_history(payload: WikiChatHistorySaveRequest, current_su
     except OSError as exc:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to write chat history: {exc}")
 
-    relative_path = f"raw/{filename}"
+    if current_subject and current_subject != "local-user":
+        relative_path = f"raw/users/{current_subject}/{filename}"
+    else:
+        relative_path = f"raw/{filename}"
     watcher_enabled = _WIKI_WATCHER_ENABLED
     ingested = False
 

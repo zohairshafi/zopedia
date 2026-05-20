@@ -57,7 +57,8 @@ zopedia/
 │   │   ├── chat.py          # /v1/chat/completions with tool-calling + dynamic system prompt
 │   │   └── wiki.py          # Wiki management endpoints (17 endpoints)
 │   ├── models/wiki.py       # Pydantic models
-│   └── auth/                # Stub auth (disabled by default)
+│   ├── auth/                # JWT auth (router, storage, authentication, hashing)
+│   └── chat_history_store.py  # Server-side chat history (SQLite, per-user)
 ├── frontend/                # React + Vite + TypeScript
 ├── graphify/                # Standalone graph analysis library (copied as-is)
 └── notebooks/               # Jupyter notebooks for graph exploration
@@ -214,6 +215,65 @@ The Search button in the chat composer controls only `web_search`. Wiki (`read_w
    - `_rebuild_index()` → `index.md` + `index-concise.md` + `_sync_godnodes_other()`
 4. Optional auto-analysis: watcher calls `query_rag()` to generate `analysis/` page
 
+## Authentication & Multi-User
+
+### Single-User Mode (default)
+
+`ZOPEDIA_AUTH_DISABLED=true` — the current default. All requests are treated as `"local-user"`. Auth endpoints return hardcoded tokens. Chat history lives entirely in the browser's IndexedDB. No server-side persistence.
+
+### Multi-User Mode
+
+Set `ZOPEDIA_AUTH_DISABLED=false` to enable real authentication:
+
+```
+First startup → bootstrap creates "zopedia" admin with diceware passphrase
+              → passphrase printed to server logs
+User visits   → login form with username + password fields
+              → JWT access token (60 min) + refresh token (7 days) returned
+              → all API calls include Authorization: Bearer <token>
+              → current_subject extracted from JWT, used to scope data
+```
+
+**Auth backend** (`backend/auth/`):
+- `router.py` — Login, refresh, change-password, register (admin-only) endpoints
+- `storage.py` — SQLite-backed user store (`auth_user`, `refresh_tokens`, `api_keys` tables)
+- `authentication.py` — JWT creation/validation (HS256), API key support, refresh token flow
+- `hashing.py` — PBKDF2-HMAC-SHA256 (100k iterations)
+
+**Chat history store** (`backend/chat_history_store.py`):
+- SQLite database alongside `auth.db` at `~/.unsloth/studio/auth/chat_history.db`
+- Tables: `chat_threads` (id, username, title, timestamps) and `chat_messages` (id, thread_id, username, role, content, reasoning_content, parent_id)
+- All queries scoped by `username` — each user sees only their own threads
+- Message content capped at 100KB to prevent SQLite bloat from tool call results
+
+**Frontend sync** (`frontend/src/features/chat/chat-server-sync.ts`):
+- Thread list: fire-and-forget merge from server on `list()` (server wins on `updated_at`)
+- Thread load: if local IndexedDB is empty, fetch messages from server
+- Message append: debounced 2s POST to server after each local write
+- Migration: on first sync, if server is empty but IndexedDB has data, auto-import all local threads
+- `isAuthDisabled()` guard: all sync operations are no-ops when auth is disabled (token === `"zopedia-local"`)
+
+**Wiki chat history export**: Files saved to `raw/users/{username}/` when auth enabled, `raw/` when disabled. The watcher (`recursive=True`) picks up files from both paths automatically.
+
+### Auth API Endpoints
+
+| Method | Path | Auth Required | Purpose |
+|---|---|---|---|
+| `GET` | `/api/auth/status` | No | Returns initialized, requires_password_change, auth_disabled |
+| `POST` | `/api/auth/login` | No | Validates username/password, returns JWT pair |
+| `POST` | `/api/auth/refresh` | No | Validates refresh token, returns new JWT pair |
+| `POST` | `/api/auth/change-password` | Yes (allow-pw-change) | Changes password, rotates JWT secret |
+| `POST` | `/api/auth/register` | Yes (admin only) | Creates new user (only `"zopedia"` admin) |
+
+### Chat History API Endpoints
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/v1/api/chat/threads` | List threads for current user |
+| `GET` | `/v1/api/chat/threads/{id}` | Load thread + messages |
+| `POST` | `/v1/api/chat/threads` | Upsert thread + replace all messages |
+| `DELETE` | `/v1/api/chat/threads/{id}` | Delete thread |
+
 ## All LLM Prompt Locations
 
 | File | Method | Purpose |
@@ -250,4 +310,6 @@ The Search button in the chat composer controls only `web_search`. Wiki (`read_w
 
 7. **DeepSeek reasoning_content**: All assistant messages preserve `reasoning_content` for DeepSeek compatibility.
 
-8. **Auth disabled by default**: `ZOPEDIA_AUTH_DISABLED=true`. Stub endpoints return fake tokens.
+8. **Auth disabled by default**: `ZOPEDIA_AUTH_DISABLED=true`. Stub endpoints return fake tokens, all requests treated as `"local-user"`. Chat history stays in browser IndexedDB. When enabled, real JWT auth with SQLite-backed users kicks in, chat history syncs to the server, and data is scoped per-user.
+
+9. **Server-side chat history sync**: When auth is enabled, chat threads and messages are persisted to `chat_history.db` (SQLite, stored alongside `auth.db`). The frontend syncs on thread list load (fire-and-forget merge from server), on thread open (if local is empty), and on message append (debounced 2s POST). Local IndexedDB remains the primary store for responsiveness; the server is the durable copy. Migration from local-only to server is automatic on first sync.
