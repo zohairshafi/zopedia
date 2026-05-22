@@ -1106,17 +1106,15 @@ export function createOpenAIStreamAdapter(): ChatModelAdapter {
         }
         runtime.setThreadRunning(threadKey, false);
 
-        if (completedSuccessfully && document.visibilityState === "hidden") {
+        if (
+          completedSuccessfully &&
+          document.visibilityState === "hidden" &&
+          "Notification" in window &&
+          Notification.permission === "granted"
+        ) {
           const store = useChatRuntimeStore.getState();
-          if (store.notifyOnComplete && "Notification" in window) {
-            if (Notification.permission === "granted") {
-              new Notification("Zopedia", { body: "Response ready" });
-            } else if (Notification.permission === "default") {
-              const granted = await Notification.requestPermission();
-              if (granted === "granted") {
-                new Notification("Zopedia", { body: "Response ready" });
-              }
-            }
+          if (store.notifyOnComplete) {
+            new Notification("Zopedia", { body: "Response ready" });
           }
         }
       }

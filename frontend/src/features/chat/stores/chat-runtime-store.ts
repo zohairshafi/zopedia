@@ -286,7 +286,7 @@ export const useChatRuntimeStore = create<ChatRuntimeStore>((set) => ({
   runningByThreadId: {},
   cancelByThreadId: {},
   autoTitle: loadBool(AUTO_TITLE_KEY, false),
-  notifyOnComplete: loadBool(NOTIFY_ON_COMPLETE_KEY, false),
+  notifyOnComplete: loadBool(NOTIFY_ON_COMPLETE_KEY, true),
   useUpstream: initialUseUpstream,
   upstreamAutoStreamFallback: loadBool(UPSTREAM_AUTO_STREAM_FALLBACK_KEY, true),
   hfToken: loadString(HF_TOKEN_KEY, ""),

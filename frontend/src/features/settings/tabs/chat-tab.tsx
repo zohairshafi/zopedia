@@ -28,6 +28,13 @@ export function ChatTab() {
   const setAutoTitle = useChatRuntimeStore((s) => s.setAutoTitle);
   const notifyOnComplete = useChatRuntimeStore((s) => s.notifyOnComplete);
   const setNotifyOnComplete = useChatRuntimeStore((s) => s.setNotifyOnComplete);
+
+  function handleNotifyToggle(on: boolean) {
+    setNotifyOnComplete(on);
+    if (on && "Notification" in window && Notification.permission === "default") {
+      void Notification.requestPermission();
+    }
+  }
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [count, setCount] = useState<number | null>(null);
   const [exporting, setExporting] = useState(false);
@@ -36,6 +43,12 @@ export function ChatTab() {
   useEffect(() => {
     void countAllChats().then(setCount);
   }, []);
+
+  useEffect(() => {
+    if (notifyOnComplete && "Notification" in window && Notification.permission === "default") {
+      void Notification.requestPermission();
+    }
+  }, [notifyOnComplete]);
 
   const handleExport = async () => {
     setExporting(true);
@@ -77,7 +90,7 @@ export function ChatTab() {
           label="Notify when complete"
           description="Show a browser notification when a response finishes and this tab is in the background."
         >
-          <Switch checked={notifyOnComplete} onCheckedChange={setNotifyOnComplete} />
+          <Switch checked={notifyOnComplete} onCheckedChange={handleNotifyToggle} />
         </SettingsRow>
       </SettingsSection>
 
