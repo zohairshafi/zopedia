@@ -1114,7 +1114,7 @@ export function createOpenAIStreamAdapter(): ChatModelAdapter {
         ) {
           const store = useChatRuntimeStore.getState();
           if (store.notifyOnComplete) {
-            new Notification("Zopedia", { body: "Response ready" });
+            new Notification("Zopedia", { body: "Response ready", icon: "/circle-logo-small-light.png" });
           }
         }
       }

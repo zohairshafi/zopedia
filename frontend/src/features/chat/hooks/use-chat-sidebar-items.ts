@@ -117,8 +117,8 @@ export async function deleteChatItem(
     }
   });
 
-  // Also delete from server so it doesn't re-sync on next load
-  await Promise.all(threadIds.map((id) => deleteThreadFromServer(id)));
+  // Delete from server in background — don't block UI responsiveness.
+  void Promise.all(threadIds.map((id) => deleteThreadFromServer(id)));
 
   if (activeId === item.id) {
     useChatRuntimeStore.getState().setActiveThreadId(null);
