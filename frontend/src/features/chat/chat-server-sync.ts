@@ -5,6 +5,41 @@ import type { MessageRecord, ThreadRecord } from "./types";
 const DEBOUNCE_MS = 2000;
 const debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
+function flushPendingSaves() {
+  for (const [threadId, timer] of debounceTimers) {
+    clearTimeout(timer);
+    debounceTimers.delete(threadId);
+    void (async () => {
+      const thread = await db.threads.get(threadId);
+      if (!thread) return;
+      const msgCount = await db.messages.count();
+      const msgs = msgCount === 0
+        ? []
+        : await db.messages.where("threadId").equals(threadId).sortBy("createdAt");
+      if (msgs.length === 0) return;
+      await saveThreadToServer(
+        threadId,
+        thread.title,
+        msgs.map((m) => ({
+          id: m.id,
+          role: m.role,
+          content: m.content,
+          reasoning_content: (m.metadata as any)?.reasoning_content,
+          parent_id: m.parentId,
+          created_at: new Date(m.createdAt).toISOString(),
+        })),
+        thread.createdAt,
+      );
+    })();
+  }
+}
+
+if (typeof document !== "undefined") {
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") flushPendingSaves();
+  });
+}
+
 async function getAuthToken(): Promise<string | null> {
   try {
     const { getAuthToken: getToken } = await import("@/features/auth/session");
@@ -51,13 +86,14 @@ async function saveThreadToServer(
   try {
     const body: Record<string, unknown> = { thread_id: threadId, title, messages };
     if (createdAt) body.created_at = new Date(createdAt).toISOString();
-    await authFetch("/api/chat/threads", {
+    const res = await authFetch("/api/chat/threads", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-  } catch {
-    // Silently fail — data stays in IndexedDB for next retry
+    console.log("[sync] saveThreadToServer:", res.status, { threadId, msgCount: messages.length });
+  } catch (err) {
+    console.error("[sync] saveThreadToServer failed:", err);
   }
 }
 
