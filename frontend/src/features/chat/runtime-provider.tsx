@@ -613,6 +613,9 @@ function ThreadHistoryProvider({
           createdAt,
         });
 
+        // Bump thread to top of recents
+        await db.threads.update(remoteId, { createdAt: Date.now() });
+
         // Debounced server sync
         debouncedSaveThreadToServer(remoteId);
       },

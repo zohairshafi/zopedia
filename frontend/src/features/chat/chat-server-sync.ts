@@ -129,7 +129,7 @@ export async function syncThreadListFromServer(): Promise<void> {
         modelId: local?.modelId ?? "",
         pairId: local?.pairId,
         archived: false,
-        createdAt: local?.createdAt ?? (st.created_at ? new Date(st.created_at).getTime() : Date.now()),
+        createdAt: local?.createdAt ?? (st.updated_at ? new Date(st.updated_at).getTime() : (st.created_at ? new Date(st.created_at).getTime() : Date.now())),
         messageCount: st.message_count ?? local?.messageCount ?? 0,
         syncedFromServer: true,
     });
