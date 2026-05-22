@@ -313,7 +313,7 @@ export function AppSidebar() {
 
   const { displayTitle, avatarDataUrl } = useEffectiveProfile();
 
-  const { items: chatItems } = useChatSidebarItems();
+  const { items: chatItems, loading: chatItemsLoading } = useChatSidebarItems();
   const storeThreadId = useChatRuntimeStore((s) => s.activeThreadId);
   const setActiveThreadId = useChatRuntimeStore((s) => s.setActiveThreadId);
   const activeThreadId = isChatRoute
@@ -362,7 +362,23 @@ export function AppSidebar() {
 
   async function handleLogout(): Promise<void> {
     logout();
-    await db.delete();
+    // Clear all IndexedDB data instead of deleting the database.
+    // indexedDB.deleteDatabase() can leave the DB stuck in Safari.
+    try {
+      await db.transaction("rw", db.threads, db.messages, async () => {
+        await db.threads.clear();
+        await db.messages.clear();
+      });
+    } catch {
+      // If the transaction fails (e.g., liveQuery holds connections),
+      // fall back to the raw API which force-closes connections.
+      try { db.close(); } catch { /* ok */ }
+      await new Promise<void>((resolve) => {
+        const req = indexedDB.deleteDatabase("unsloth-chat");
+        req.onsuccess = () => resolve();
+        req.onerror = () => resolve();
+      });
+    }
     window.location.href = "/login";
   }
 
@@ -863,7 +879,7 @@ export function AppSidebar() {
         </Collapsible>
 
         {/* Recent Chats — hide on Studio only (Eyera fac13); chatOpen = ec695 clickability */}
-        {!isStudioRoute && chatItems.length > 0 && (
+        {!isStudioRoute && (chatItemsLoading || chatItems.length > 0) && (
           <Collapsible open={chatOpen} onOpenChange={setChatOpen} asChild>
           <SidebarGroup className="group-data-[collapsible=icon]:hidden overflow-hidden px-2 py-0">
             <SidebarGroupLabel className="pt-2 pb-1.5 pl-2.5 pr-2 text-[12.5px]! font-normal normal-case tracking-normal text-[#62605a] dark:text-[#9d9fa5] focus-visible:ring-0! focus-visible:outline-none" asChild>
@@ -875,7 +891,20 @@ export function AppSidebar() {
             <CollapsibleContent>
             <SidebarGroupContent>
               <SidebarMenu>
-                {chatItems.map((item) => (
+                {chatItemsLoading ? (
+                  <>
+                    <SidebarMenuItem>
+                      <div className="h-[32px] rounded-[10px] mx-0.5 animate-pulse bg-muted/60" />
+                    </SidebarMenuItem>
+                    <SidebarMenuItem>
+                      <div className="h-[32px] rounded-[10px] mx-0.5 animate-pulse bg-muted/60" style={{ animationDelay: "0.1s" }} />
+                    </SidebarMenuItem>
+                    <SidebarMenuItem>
+                      <div className="h-[32px] rounded-[10px] mx-0.5 animate-pulse bg-muted/60" style={{ animationDelay: "0.2s" }} />
+                    </SidebarMenuItem>
+                  </>
+                ) : (
+                  chatItems.map((item) => (
                   <SidebarMenuItem key={item.id} className="group/recent-item relative">
                     <SidebarMenuButton
                       isActive={activeThreadId === item.id}
@@ -918,8 +947,8 @@ export function AppSidebar() {
                       </button>
                     </div>
                   </SidebarMenuItem>
-                ))}
-              </SidebarMenu>
+                )))}
+                </SidebarMenu>
             </SidebarGroupContent>
             </CollapsibleContent>
           </SidebarGroup>

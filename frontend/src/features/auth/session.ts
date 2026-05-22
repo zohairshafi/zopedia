@@ -44,6 +44,7 @@ export function storeAuthTokens(
   localStorage.setItem(AUTH_TOKEN_KEY, accessToken);
   localStorage.setItem(AUTH_REFRESH_TOKEN_KEY, refreshToken);
   localStorage.setItem(AUTH_MUST_CHANGE_PASSWORD_KEY, String(mustChangePassword));
+  window.dispatchEvent(new CustomEvent("auth-tokens-updated"));
 }
 
 export function clearAuthTokens(): void {

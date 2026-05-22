@@ -18,18 +18,23 @@ async function getAuthToken(): Promise<string | null> {
 
 async function fetchServerThreads(): Promise<Array<{ id: string; title: string; created_at: string; updated_at: string; message_count: number }>> {
   try {
-    const res = await authFetch("/api/chat/threads");
-    if (!res.ok) return [];
+    const res = await authFetch("/api/chat/threads", { cache: "no-store" });
+    if (!res.ok) {
+      console.log("[sync] fetchServerThreads: not ok", { status: res.status });
+      return [];
+    }
     const data = await res.json();
+    console.log("[sync] fetchServerThreads: got threads", { count: data.threads?.length ?? 0 });
     return data.threads ?? [];
-  } catch {
+  } catch (err) {
+    console.log("[sync] fetchServerThreads: error", err);
     return [];
   }
 }
 
 async function fetchServerThread(threadId: string): Promise<{ thread: any; messages: any[] } | null> {
   try {
-    const res = await authFetch(`/api/chat/threads/${encodeURIComponent(threadId)}`);
+    const res = await authFetch(`/api/chat/threads/${encodeURIComponent(threadId)}`, { cache: "no-store" });
     if (!res.ok) return null;
     return await res.json();
   } catch {
@@ -67,9 +72,14 @@ export async function deleteThreadFromServer(threadId: string): Promise<void> {
 // ── Sync operations ──────────────────────────────────────────────────
 
 export async function syncThreadListFromServer(): Promise<void> {
+  console.log("[sync] syncThreadListFromServer: start");
   const serverThreads = await fetchServerThreads();
-  if (serverThreads.length === 0) return;
+  if (serverThreads.length === 0) {
+    console.log("[sync] syncThreadListFromServer: no threads from server, returning");
+    return;
+  }
 
+  console.log("[sync] syncThreadListFromServer: writing threads to DB", { count: serverThreads.length });
   for (const st of serverThreads) {
     // Skip server threads with no messages — they're empty shells
     if (!st.message_count) continue;
@@ -91,7 +101,8 @@ export async function syncThreadListFromServer(): Promise<void> {
 
   // Remove local threads that no longer exist on the server
   const serverIds = new Set(serverThreads.map((st) => st.id));
-  const allLocalThreads = await db.threads.toArray();
+  const threadCount = await db.threads.count();
+  const allLocalThreads = threadCount === 0 ? [] : await db.threads.toArray();
   for (const t of allLocalThreads) {
     if (t.syncedFromServer && !serverIds.has(t.id)) {
       await db.messages.where("threadId").equals(t.id).delete();
@@ -113,8 +124,11 @@ export async function syncThreadMessagesFromServer(threadId: string): Promise<vo
   const result = await fetchServerThread(threadId);
   if (!result?.messages?.length) return;
 
+  const msgCount = await db.messages.count();
   const existingIds = new Set(
-    (await db.messages.where("threadId").equals(threadId).toArray()).map((m) => m.id)
+    msgCount === 0
+      ? []
+      : (await db.messages.where("threadId").equals(threadId).toArray()).map((m) => m.id),
   );
   for (const msg of result.messages) {
     if (!existingIds.has(msg.id)) {
@@ -141,8 +155,12 @@ export function debouncedSaveThreadToServer(threadId: string): void {
     setTimeout(async () => {
       debounceTimers.delete(threadId);
       const thread = await db.threads.get(threadId);
-      const msgs = await db.messages.where("threadId").equals(threadId).sortBy("createdAt");
-      if (!thread || msgs.length === 0) return;
+      if (!thread) return;
+      const msgCount = await db.messages.count();
+      const msgs = msgCount === 0
+        ? []
+        : await db.messages.where("threadId").equals(threadId).sortBy("createdAt");
+      if (msgs.length === 0) return;
       await saveThreadToServer(
         threadId,
         thread.title,
@@ -172,12 +190,16 @@ export async function maybeMigrateLocalToServer(): Promise<boolean> {
   const serverThreads = await fetchServerThreads();
   if (serverThreads.length > 0) return false;
 
-  const localThreads = await db.threads.toArray();
+  const threadCount = await db.threads.count();
+  const localThreads = threadCount === 0 ? [] : await db.threads.toArray();
   if (localThreads.length === 0) return false;
 
   // Import all local threads to server (skip empty threads)
   for (const thread of localThreads) {
-    const msgs = await db.messages.where("threadId").equals(thread.id).sortBy("createdAt");
+    const msgCount = await db.messages.count();
+    const msgs = msgCount === 0
+      ? []
+      : await db.messages.where("threadId").equals(thread.id).sortBy("createdAt");
     if (msgs.length === 0) continue;
     await saveThreadToServer(
       thread.id,

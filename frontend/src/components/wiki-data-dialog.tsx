@@ -132,7 +132,7 @@ const KIND_STYLE: Record<
 };
 
 const DEFAULT_KIND_FILTERS: WikiDataNodeFilters = {
-  source: true,
+  source: false,
   analysis: true,
   entity: true,
   concept: true,

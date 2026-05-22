@@ -26,7 +26,7 @@ import { type ReactElement, type ReactNode, useEffect, useMemo } from "react";
 import { extractText, getDocumentProxy } from "unpdf";
 import { authFetch } from "@/features/auth";
 import { createOpenAIStreamAdapter } from "./api/chat-adapter";
-import { db } from "./db";
+import { db, resetAndReload } from "./db";
 import { useChatRuntimeStore } from "./stores/chat-runtime-store";
 import type { MessageRecord, ModelType } from "./types";
 import {
@@ -355,24 +355,37 @@ function createDexieAdapter(
     },
 
     async list() {
-      // Sync server threads before querying local so new browsers see existing data
-      await syncThreadListFromServer();
-      void maybeMigrateLocalToServer();
+      try {
+        // Sync server threads before querying local so new browsers see existing data
+        await syncThreadListFromServer();
+        void maybeMigrateLocalToServer();
 
-      const threads = await db.threads
-        .where("modelType")
-        .equals(modelType)
-        .reverse()
-        .sortBy("createdAt");
-      return {
-        threads: threads.map((t) => ({
-          status: (t.archived ? "archived" : "regular") as
-            | "archived"
-            | "regular",
-          remoteId: t.id,
-          title: t.title,
-        })),
-      };
+        const threadCount = await db.threads.count();
+        const threads = threadCount === 0
+          ? []
+          : await db.threads
+              .where("modelType")
+              .equals(modelType)
+              .reverse()
+              .sortBy("createdAt");
+        return {
+          threads: threads.map((t) => ({
+            status: (t.archived ? "archived" : "regular") as
+              | "archived"
+              | "regular",
+            remoteId: t.id,
+            title: t.title,
+          })),
+        };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.includes("Unable to open cursor")) {
+          void resetAndReload();
+        } else {
+          console.error("list() adapter failed:", err);
+        }
+        return { threads: [] };
+      }
     },
 
     async initialize(threadId: string) {
@@ -509,13 +522,19 @@ function ThreadHistoryProvider({
           user: 1,
           assistant: 2,
         };
-        let msgs = await db.messages.where("threadId").equals(remoteId).toArray();
+        const msgCount = await db.messages.count();
+        let msgs = msgCount === 0
+          ? []
+          : await db.messages.where("threadId").equals(remoteId).toArray();
 
         // Sync from server if local is empty or stale (server has more messages)
         const thread = await db.threads.get(remoteId);
         if (msgs.length === 0 || ((thread?.messageCount ?? 0) > msgs.length)) {
           await syncThreadMessagesFromServer(remoteId);
-          msgs = await db.messages.where("threadId").equals(remoteId).toArray();
+          const postSyncCount = await db.messages.count();
+          msgs = postSyncCount === 0
+            ? []
+            : await db.messages.where("threadId").equals(remoteId).toArray();
         }
         msgs.sort((a, b) => {
           if (a.createdAt !== b.createdAt) return a.createdAt - b.createdAt;
@@ -760,6 +779,13 @@ export function ChatRuntimeProvider({
   const aui = useAui({
     suggestions: Suggestions(DEFAULT_SUGGESTIONS),
   });
+
+  // Sync threads from server on mount so the sidebar populates even
+  // when the remote-thread-list runtime hasn't called list() yet.
+  useEffect(() => {
+    void syncThreadListFromServer();
+    void maybeMigrateLocalToServer();
+  }, []);
 
   return (
     <AssistantRuntimeProvider runtime={runtime} aui={aui}>

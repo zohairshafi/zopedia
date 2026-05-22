@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026-present the Zopedia team. All rights reserved. See /studio/LICENSE.AGPL-3.0
 
+import { useEffect, useState } from "react";
 import { db, useLiveQuery } from "../db";
 import { useChatRuntimeStore } from "../stores/chat-runtime-store";
 import type { ThreadRecord } from "../types";
-import { deleteThreadFromServer } from "../chat-server-sync";
+import { debouncedSaveThreadToServer, deleteThreadFromServer } from "../chat-server-sync";
+
+const LOADING_TIMEOUT_MS = 6000;
 
 export interface SidebarItem {
   type: "single" | "compare";
@@ -47,10 +50,18 @@ export function groupThreads(threads: ThreadRecord[]): SidebarItem[] {
 
 export function useChatSidebarItems() {
   const allThreads = useLiveQuery(async () => {
-    const threadIdsWithMessage = new Set(
-      (await db.messages.orderBy("threadId").uniqueKeys()) as string[],
+    // Guard empty-table cursor ops: Safari throws "Unable to open cursor"
+    // when uniqueKeys/toArray use IDBCursor on an empty object store.
+    const msgCount = await db.messages.count();
+    const threadIdsWithMessage = new Set<string>(
+      msgCount === 0
+        ? []
+        : ((await db.messages.orderBy("threadId").uniqueKeys()) as string[]),
     );
-    const rows = await db.threads.orderBy("createdAt").reverse().toArray();
+    const threadCount = await db.threads.count();
+    const rows = threadCount === 0
+      ? []
+      : await db.threads.orderBy("createdAt").reverse().toArray();
     return rows.filter(
       (t) => !t.archived && (
         (t.messageCount ?? 0) > 0 ||
@@ -59,10 +70,21 @@ export function useChatSidebarItems() {
       ),
     );
   }, []);
+
   const items = groupThreads(allThreads ?? []);
+
+  // Stay in loading state until data arrives (server sync may not have
+  // completed by the first poll) or a timeout expires (genuinely empty).
+  const [timedOut, setTimedOut] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setTimedOut(true), LOADING_TIMEOUT_MS);
+    return () => clearTimeout(t);
+  }, []);
+  const loading = items.length === 0 && !timedOut;
+
   const canCompare = useChatRuntimeStore((s) => Boolean(s.params.checkpoint));
 
-  return { items, canCompare };
+  return { items, loading, canCompare };
 }
 
 function cancelIfRunning(threadId: string): void {
@@ -115,13 +137,19 @@ export async function renameChatItem(
 
   if (item.type === "single") {
     await db.threads.update(item.id, { title });
+    debouncedSaveThreadToServer(item.id);
     return;
   }
 
+  const threadIds: string[] = [];
   await db.transaction("rw", db.threads, async () => {
     const pairThreads = await db.threads.where("pairId").equals(item.id).toArray();
     for (const thread of pairThreads) {
       await db.threads.update(thread.id, { title });
+      threadIds.push(thread.id);
     }
   });
+  for (const id of threadIds) {
+    debouncedSaveThreadToServer(id);
+  }
 }

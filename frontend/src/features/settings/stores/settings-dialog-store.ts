@@ -9,6 +9,7 @@ export type SettingsTab =
   | "appearance"
   | "chat"
   | "api-keys"
+  | "users"
   | "about";
 
 interface SettingsDialogState {
@@ -29,7 +30,7 @@ function loadInitialTab(): SettingsTab {
   } catch {
     return "general";
   }
-  const valid: SettingsTab[] = ["general", "profile", "appearance", "chat", "api-keys", "about"];
+  const valid: SettingsTab[] = ["general", "profile", "appearance", "chat", "api-keys", "users", "about"];
   return valid.includes(stored as SettingsTab) ? (stored as SettingsTab) : "general";
 }
 

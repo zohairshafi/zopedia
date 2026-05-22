@@ -10,14 +10,13 @@ import { Camera } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { decodeJwtSubject } from "../utils/jwt-subject";
 import { resizeImageFileToDataUrl } from "../utils/resize-image-file";
-import { useUserProfileStore } from "../stores/user-profile-store";
+import { getProfileStorageKey, useUserProfileStore } from "../stores/user-profile-store";
 import { UserAvatar } from "./user-avatar";
-
-const PROFILE_STORAGE_KEY = "unsloth_user_profile";
 
 function readPersistedProfile(): { displayName: string; avatarDataUrl: string | null } | null {
   try {
-    const raw = window.localStorage.getItem(PROFILE_STORAGE_KEY);
+    const key = getProfileStorageKey();
+    const raw = window.localStorage.getItem(key);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as unknown;
     if (!parsed || typeof parsed !== "object") return null;
@@ -34,6 +33,25 @@ function readPersistedProfile(): { displayName: string; avatarDataUrl: string | 
   } catch {
     return null;
   }
+}
+
+function persistProfile(patch: { displayName?: string; avatarDataUrl?: string | null }): { displayName: string; avatarDataUrl: string | null } {
+  const key = getProfileStorageKey();
+  const existing = readPersistedProfile();
+  const next = {
+    displayName: patch.displayName ?? existing?.displayName ?? "",
+    avatarDataUrl: patch.avatarDataUrl !== undefined ? patch.avatarDataUrl : (existing?.avatarDataUrl ?? null),
+  };
+  try {
+    localStorage.setItem(key, JSON.stringify({ state: next, version: 0 }));
+    console.log("[profile] persistProfile written", { key, displayName: next.displayName });
+    // Verify immediately
+    const verify = localStorage.getItem(key);
+    console.log("[profile] persistProfile verify", { key, found: !!verify, raw: verify?.substring(0, 80) });
+  } catch (e) {
+    console.error("[profile] persistProfile failed", e);
+  }
+  return next;
 }
 
 export function ProfilePersonalizationPanel() {
@@ -57,16 +75,9 @@ export function ProfilePersonalizationPanel() {
     const trimmed = draftName.trim();
     if (trimmed !== draftName) setDraftName(trimmed);
     if (trimmed !== displayName) {
+      persistProfile({ displayName: trimmed });
       setDisplayName(trimmed);
-      const persisted = readPersistedProfile();
-      if (persisted && persisted.displayName === trimmed) {
-        toastSuccess("Profile name saved");
-      } else {
-        toastError(
-          "Could not persist profile name",
-          "Name updated for this session, but may not persist after reload.",
-        );
-      }
+      toastSuccess("Profile name saved");
     }
   };
 
@@ -75,16 +86,9 @@ export function ProfilePersonalizationPanel() {
     setImageError(null);
     try {
       const dataUrl = await resizeImageFileToDataUrl(file);
+      persistProfile({ avatarDataUrl: dataUrl });
       setAvatarDataUrl(dataUrl);
-      const persisted = readPersistedProfile();
-      if (persisted && persisted.avatarDataUrl === dataUrl) {
-        toastSuccess("Profile photo updated");
-      } else {
-        toastError(
-          "Could not persist profile photo",
-          "Photo updated for this session, but may not persist after reload.",
-        );
-      }
+      toastSuccess("Profile photo updated");
     } catch (e) {
       const message = e instanceof Error ? e.message : "Could not use this image.";
       setImageError(message);

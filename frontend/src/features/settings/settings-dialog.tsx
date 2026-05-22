@@ -15,6 +15,7 @@ import {
   PaintBrush02Icon,
   Settings02Icon,
   SparklesIcon,
+  UserAdd02Icon,
   UserIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -26,6 +27,7 @@ import { AppearanceTab } from "./tabs/appearance-tab";
 import { ChatTab } from "./tabs/chat-tab";
 import { GeneralTab } from "./tabs/general-tab";
 import { ProfileTab } from "./tabs/profile-tab";
+import { UsersTab } from "./tabs/users-tab";
 
 interface TabDef {
   id: SettingsTab;
@@ -39,6 +41,7 @@ const TABS: TabDef[] = [
   { id: "appearance", label: "Appearance", icon: PaintBrush02Icon },
   { id: "chat", label: "Chat", icon: Message01Icon },
   { id: "api-keys", label: "API Keys", icon: Key01Icon },
+  { id: "users", label: "Users", icon: UserAdd02Icon },
   { id: "about", label: "About", icon: SparklesIcon },
 ];
 
@@ -54,6 +57,8 @@ function renderTab(tab: SettingsTab) {
       return <ChatTab />;
     case "api-keys":
       return <ApiKeysTab />;
+    case "users":
+      return <UsersTab />;
     case "about":
       return <AboutTab />;
   }
