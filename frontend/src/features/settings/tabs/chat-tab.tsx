@@ -26,6 +26,8 @@ import { SettingsSection } from "../components/settings-section";
 export function ChatTab() {
   const autoTitle = useChatRuntimeStore((s) => s.autoTitle);
   const setAutoTitle = useChatRuntimeStore((s) => s.setAutoTitle);
+  const notifyOnComplete = useChatRuntimeStore((s) => s.notifyOnComplete);
+  const setNotifyOnComplete = useChatRuntimeStore((s) => s.setNotifyOnComplete);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [count, setCount] = useState<number | null>(null);
   const [exporting, setExporting] = useState(false);
@@ -70,6 +72,12 @@ export function ChatTab() {
           description="Generate a short title from the first message."
         >
           <Switch checked={autoTitle} onCheckedChange={setAutoTitle} />
+        </SettingsRow>
+        <SettingsRow
+          label="Notify when complete"
+          description="Show a browser notification when a response finishes and this tab is in the background."
+        >
+          <Switch checked={notifyOnComplete} onCheckedChange={setNotifyOnComplete} />
         </SettingsRow>
       </SettingsSection>
 

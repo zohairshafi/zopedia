@@ -11,6 +11,7 @@ import {
 } from "../types/runtime";
 
 const AUTO_TITLE_KEY = "unsloth_chat_auto_title";
+const NOTIFY_ON_COMPLETE_KEY = "unsloth_chat_notify_on_complete";
 const USE_UPSTREAM_KEY = "unsloth_chat_use_upstream";
 const REASONING_EFFORT_HIGH_KEY = "unsloth_chat_reasoning_effort_high";
 const UPSTREAM_AUTO_STREAM_FALLBACK_KEY = "unsloth_upstream_auto_stream_fallback";
@@ -195,6 +196,7 @@ type ChatRuntimeStore = {
   runningByThreadId: Record<string, boolean>;
   cancelByThreadId: Record<string, () => void>;
   autoTitle: boolean;
+  notifyOnComplete: boolean;
   useUpstream: boolean;
   upstreamAutoStreamFallback: boolean;
   hfToken: string;
@@ -246,6 +248,7 @@ type ChatRuntimeStore = {
   registerThreadCancel: (threadId: string, cancel: () => void) => void;
   clearThreadCancel: (threadId: string) => void;
   setAutoTitle: (enabled: boolean) => void;
+  setNotifyOnComplete: (enabled: boolean) => void;
   setUseUpstream: (enabled: boolean) => void;
   setUpstreamAutoStreamFallback: (enabled: boolean) => void;
   setHfToken: (token: string) => void;
@@ -283,6 +286,7 @@ export const useChatRuntimeStore = create<ChatRuntimeStore>((set) => ({
   runningByThreadId: {},
   cancelByThreadId: {},
   autoTitle: loadBool(AUTO_TITLE_KEY, false),
+  notifyOnComplete: loadBool(NOTIFY_ON_COMPLETE_KEY, false),
   useUpstream: initialUseUpstream,
   upstreamAutoStreamFallback: loadBool(UPSTREAM_AUTO_STREAM_FALLBACK_KEY, true),
   hfToken: loadString(HF_TOKEN_KEY, ""),
@@ -364,6 +368,11 @@ export const useChatRuntimeStore = create<ChatRuntimeStore>((set) => ({
     set(() => {
       saveBool(AUTO_TITLE_KEY, autoTitle);
       return { autoTitle };
+    }),
+  setNotifyOnComplete: (notifyOnComplete) =>
+    set(() => {
+      saveBool(NOTIFY_ON_COMPLETE_KEY, notifyOnComplete);
+      return { notifyOnComplete };
     }),
   setUseUpstream: (useUpstream) =>
     set(() => {

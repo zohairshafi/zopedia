@@ -810,6 +810,7 @@ export function createOpenAIStreamAdapter(): ChatModelAdapter {
         runtime.setGeneratingStatus("waiting");
       }, warmupDelayMs);
       runtime.setThreadRunning(threadKey, true);
+      let completedSuccessfully = false;
       let cumulativeText = "";
       let reasoningStartAt: number | null = null;
       let reasoningDuration = 0;
@@ -1042,6 +1043,7 @@ export function createOpenAIStreamAdapter(): ChatModelAdapter {
           finalTokPerSec,
         );
 
+        completedSuccessfully = true;
         yield {
           content: [
             ...toolCallParts,
@@ -1103,6 +1105,20 @@ export function createOpenAIStreamAdapter(): ChatModelAdapter {
           }
         }
         runtime.setThreadRunning(threadKey, false);
+
+        if (completedSuccessfully && document.visibilityState === "hidden") {
+          const store = useChatRuntimeStore.getState();
+          if (store.notifyOnComplete && "Notification" in window) {
+            if (Notification.permission === "granted") {
+              new Notification("Zopedia", { body: "Response ready" });
+            } else if (Notification.permission === "default") {
+              const granted = await Notification.requestPermission();
+              if (granted === "granted") {
+                new Notification("Zopedia", { body: "Response ready" });
+              }
+            }
+          }
+        }
       }
     },
   };
