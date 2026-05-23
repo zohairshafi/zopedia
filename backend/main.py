@@ -171,11 +171,46 @@ async def lifespan(app: FastAPI):
     # Wire auth dependency
     app.state.get_current_subject = _get_current_subject
 
-    # Wire restart support for wiki env editing
+    # Wire restart support for wiki env editing.
+    # Does an in-process soft reload: re-applies stored env overrides and
+    # bridge defaults, then refreshes all module-level constants and wiki
+    # components so changes take effect without killing the process.
     def _trigger_restart():
-        logger.info("Restart requested via API — exiting to allow process manager to restart.")
-        import signal
-        os.kill(os.getpid(), signal.SIGTERM)
+        global _AUTH_DISABLED
+        logger.info("Soft reload requested — re-applying wiki env overrides in-process.")
+        from core.wiki.runtime_env import apply_stored_wiki_env_overrides
+        from core.wiki.bridge import apply_defaults
+        from core.llm import refresh_llm_config
+        from routes.wiki import refresh_wiki_components, _ROUTE_WIKI_INGESTOR
+
+        try:
+            applied = apply_stored_wiki_env_overrides(override_existing=True)
+            logger.info("Re-applied %d wiki env override(s).", len(applied))
+        except Exception as exc:
+            logger.warning("Failed to re-apply stored wiki env overrides: %s", exc)
+
+        try:
+            apply_defaults()
+            logger.info("Re-applied ZOPEDIA_* → UNSLOTH_* bridge defaults.")
+        except Exception as exc:
+            logger.warning("Failed to re-apply bridge defaults: %s", exc)
+
+        try:
+            refresh_llm_config()
+            logger.info("LLM config refreshed.")
+        except Exception as exc:
+            logger.warning("Failed to refresh LLM config: %s", exc)
+
+        try:
+            new_manager = refresh_wiki_components()
+            app.state.wiki_manager = new_manager
+            app.state.wiki_ingestor = _ROUTE_WIKI_INGESTOR
+            logger.info("Wiki components refreshed (vault=%s).", new_manager.vault_root)
+        except Exception as exc:
+            logger.warning("Failed to refresh wiki components: %s", exc)
+
+        _AUTH_DISABLED = _env_bool("ZOPEDIA_AUTH_DISABLED", True)
+        logger.info("Auth flag refreshed: _AUTH_DISABLED=%s", _AUTH_DISABLED)
 
     app.state.trigger_restart = _trigger_restart
 

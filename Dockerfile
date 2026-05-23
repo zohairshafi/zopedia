@@ -18,10 +18,12 @@ COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY backend/ .
+COPY graphify/graphify/ ./graphify/
 
 COPY --from=frontend-build /src/frontend/dist ./frontend/dist
 
 ENV ZOPEDIA_FRONTEND_DIR=/app/frontend/dist
+ENV ZOPEDIA_WIKI_VAULT=/app/wiki_data
 ENV ZOPEDIA_PORT=8000
 
 RUN useradd --create-home --shell /bin/bash zopedia && chown -R zopedia:zopedia /app

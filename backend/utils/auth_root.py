@@ -1,13 +1,15 @@
 """Shared auth root path with migration from legacy Unsloth Studio location."""
 
 import logging
+import os
 import shutil
 from pathlib import Path
 
 logger = logging.getLogger("zopedia")
 
+_ZOPEDIA_HOME = os.getenv("ZOPEDIA_HOME", str(Path.home()))
 OLD_ROOT = Path.home() / ".unsloth" / "studio" / "auth"
-NEW_ROOT = Path.home() / ".zopedia" / "auth"
+NEW_ROOT = Path(_ZOPEDIA_HOME) / ".zopedia" / "auth"
 
 _migrated = False
 

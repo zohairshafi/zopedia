@@ -222,7 +222,8 @@ def wiki_env_overrides_file() -> Path:
     configured = os.getenv("ZOPEDIA_WIKI_ENV_OVERRIDES_FILE")
     if configured and configured.strip():
         return Path(configured).expanduser()
-    return Path.home() / ".zopedia" / "wiki_env_overrides.json"
+    zopedia_home = os.getenv("ZOPEDIA_HOME", str(Path.home()))
+    return Path(zopedia_home) / ".zopedia" / "wiki_env_overrides.json"
 
 
 def _validate_numeric_bounds(spec: WikiEnvSpec, value: float) -> None:

@@ -44,6 +44,16 @@ _LLM_TIMEOUT_SECONDS = _env_int("ZOPEDIA_LLM_TIMEOUT_SECONDS", 300)
 _WIKI_LLM_MAX_TOKENS = _env_int("ZOPEDIA_WIKI_LLM_MAX_TOKENS", 6000)
 
 
+def refresh_llm_config():
+    """Re-read LLM config from os.environ (for soft reload after Apply and Restart)."""
+    global _LLM_BASE_URL, _LLM_API_KEY, _LLM_MODEL, _LLM_TIMEOUT_SECONDS, _WIKI_LLM_MAX_TOKENS
+    _LLM_BASE_URL = _env_str("ZOPEDIA_LLM_BASE_URL")
+    _LLM_API_KEY = _env_str("ZOPEDIA_LLM_API_KEY")
+    _LLM_MODEL = _env_str("ZOPEDIA_LLM_MODEL", "default")
+    _LLM_TIMEOUT_SECONDS = _env_int("ZOPEDIA_LLM_TIMEOUT_SECONDS", 300)
+    _WIKI_LLM_MAX_TOKENS = _env_int("ZOPEDIA_WIKI_LLM_MAX_TOKENS", 6000)
+
+
 def _normalize_base_url(url: str) -> str:
     normalized = url.rstrip("/")
     if not normalized:

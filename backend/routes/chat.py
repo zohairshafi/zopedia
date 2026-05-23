@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import time
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request, status
@@ -359,12 +360,13 @@ async def openai_chat_completions(request: Request):
         prompt_parts = []
 
         # Intro line
+        today = datetime.now(timezone.utc).strftime("%A, %B %d, %Y")
         if has_wiki and has_web:
-            prompt_parts.append("You have access to a personal wiki and web search.\n")
+            prompt_parts.append(f"Today's date is {today}. You have access to a personal wiki and web search.\n")
         elif has_wiki:
-            prompt_parts.append("You have access to a personal wiki.\n")
+            prompt_parts.append(f"Today's date is {today}. You have access to a personal wiki.\n")
         elif has_web:
-            prompt_parts.append("You have access to web search.\n")
+            prompt_parts.append(f"Today's date is {today}. You have access to web search.\n")
 
         # Budget info (only relevant when wiki is enabled)
         if has_wiki:

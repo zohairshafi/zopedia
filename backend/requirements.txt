@@ -7,3 +7,5 @@ ddgs>=7.0.0
 networkx>=3.0
 markitdown[all]>=0.1.0
 openai>=1.0.0
+pyjwt>=2.0
+diceware>=1.0

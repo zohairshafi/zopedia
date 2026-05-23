@@ -407,7 +407,7 @@ modal secret create zopedia-env \
     ZOPEDIA_LLM_MODEL=deepseek-v4-flash
 
 # 4. Deploy
-modal deploy modal.py
+modal deploy zopedia_modal.py
 ```
 
 Your app will be available at `https://<your-username>--zopedia-serve.modal.run`. The wiki volume persists across deploys — redeploy without losing data.
@@ -417,7 +417,7 @@ To pull your wiki back down:
 modal volume get zopedia-wiki-data /app/wiki_data/ ./local-backup/
 ```
 
-See [modal.py](modal.py) for the full configuration (concurrency, timeout, idle shutdown).
+See [zopedia_modal.py](zopedia_modal.py) for the full configuration (concurrency, timeout, idle shutdown).
 
 ### Docker
 

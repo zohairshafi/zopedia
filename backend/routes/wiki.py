@@ -114,6 +114,73 @@ def get_wiki_components() -> tuple[WikiManager, WikiIngestor]:
     return _ROUTE_WIKI_MANAGER, _ROUTE_WIKI_INGESTOR
 
 
+def _refresh_module_constants():
+    """Re-read all module-level env-derived constants from os.environ.
+
+    Called by the soft-reload path after env overrides are re-applied,
+    so changes to variables like ZOPEDIA_WIKI_WATCHER or ZOPEDIA_LLM_BASE_URL
+    take effect without killing the process.
+    """
+    global \
+        _WIKI_VAULT, \
+        _WIKI_WATCHER_ENABLED, \
+        _WIKI_AUTO_QUERY_ON_INGEST, \
+        _WIKI_AUTO_QUERY_CHAT_HISTORY, \
+        _WIKI_AUTO_LINT_EVERY, \
+        _WIKI_AUTO_RETRY_FALLBACK_MAX_PAGES, \
+        _WIKI_RAG_MAX_PAGES, \
+        _WIKI_RAG_MAX_CHARS_PER_PAGE, \
+        _WIKI_RAG_MAX_TOTAL_CHARS, \
+        _WIKI_RAG_INCLUDE_SOURCE_PAGES, \
+        _WIKI_LOG_INJECTED_CONTEXT, \
+        _WIKI_LOG_INJECTED_CONTEXT_MAX_CHARS, \
+        _WIKI_PENDING_INGEST_INTERVAL_SECONDS, \
+        _WIKI_PENDING_INGEST_MAX_FILES_PER_CHAT
+
+    _WIKI_VAULT = Path(_env_str("ZOPEDIA_WIKI_VAULT", "./wiki_data")).expanduser()
+    _WIKI_WATCHER_ENABLED = _env_bool("ZOPEDIA_WIKI_WATCHER", True)
+    _WIKI_AUTO_QUERY_ON_INGEST = _env_bool("ZOPEDIA_WIKI_AUTO_QUERY_ON_INGEST", True)
+    _WIKI_AUTO_QUERY_CHAT_HISTORY = _env_bool("ZOPEDIA_WIKI_AUTO_QUERY_CHAT_HISTORY", False)
+    _WIKI_AUTO_LINT_EVERY = _env_int("ZOPEDIA_WIKI_AUTO_LINT_EVERY", 10)
+    _WIKI_AUTO_RETRY_FALLBACK_MAX_PAGES = _env_int("ZOPEDIA_WIKI_AUTO_RETRY_FALLBACK_ANALYSES_MAX_PAGES", 24)
+    _WIKI_RAG_MAX_PAGES = _env_int("ZOPEDIA_WIKI_RAG_MAX_PAGES", 8)
+    _WIKI_RAG_MAX_CHARS_PER_PAGE = _env_int("ZOPEDIA_WIKI_RAG_MAX_CHARS_PER_PAGE", 1800)
+    _WIKI_RAG_MAX_TOTAL_CHARS = _env_int("ZOPEDIA_WIKI_RAG_MAX_TOTAL_CHARS", 12000)
+    _WIKI_RAG_INCLUDE_SOURCE_PAGES = _env_bool("ZOPEDIA_WIKI_RAG_INCLUDE_SOURCE_PAGES", True)
+    _WIKI_LOG_INJECTED_CONTEXT = _env_bool("ZOPEDIA_WIKI_LOG_INJECTED_CONTEXT", True)
+    _WIKI_LOG_INJECTED_CONTEXT_MAX_CHARS = _env_int("ZOPEDIA_WIKI_LOG_INJECTED_CONTEXT_MAX_CHARS", 12000)
+    _WIKI_PENDING_INGEST_INTERVAL_SECONDS = _env_int("ZOPEDIA_WIKI_PENDING_INGEST_INTERVAL_SECONDS", 45)
+    _WIKI_PENDING_INGEST_MAX_FILES_PER_CHAT = _env_int("ZOPEDIA_WIKI_PENDING_INGEST_MAX_FILES_PER_CHAT", 1)
+
+
+def refresh_wiki_components() -> WikiManager:
+    """Re-read all wiki config from env and recreate wiki components if needed.
+
+    Called by the soft-reload path so the wiki vault can be switched without
+    killing the process.  Returns the new (or existing) WikiManager.
+    """
+    global _ROUTE_WIKI_MANAGER, _ROUTE_WIKI_INGESTOR
+
+    old_vault = _WIKI_VAULT
+    _refresh_module_constants()
+    new_vault = _WIKI_VAULT
+    logger.info("refresh_wiki_components: old=%s new=%s", old_vault, new_vault)
+
+    if new_vault == old_vault and _ROUTE_WIKI_MANAGER is not None:
+        return _ROUTE_WIKI_MANAGER
+
+    _ROUTE_WIKI_MANAGER = WikiManager.create(_WIKI_VAULT, wiki_llm_fn)
+    _ROUTE_WIKI_INGESTOR = WikiIngestor(_ROUTE_WIKI_MANAGER, _WIKI_VAULT / "raw")
+
+    try:
+        _ROUTE_WIKI_MANAGER.engine._rebuild_index()
+        logger.info("Wiki index rebuilt after vault path change.")
+    except Exception as exc:
+        logger.warning("Wiki index rebuild failed after vault path change: %s", exc)
+
+    return _ROUTE_WIKI_MANAGER
+
+
 # ── Auth dependency (override in main.py for optional auth) ────────
 
 async def _optional_subject(request: Request) -> str:
