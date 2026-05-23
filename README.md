@@ -387,6 +387,57 @@ Built on the idea that your knowledge base should compound — every question an
 
 ---
 
+## Deployment
+
+### Modal (serverless)
+
+Deploy Zopedia on [Modal](https://modal.com) — no GPU needed, scales to zero when idle.
+
+```bash
+# 1. Create a volume for persistent wiki storage
+modal volume create zopedia-wiki-data
+
+# 2. (Optional) Upload your existing wiki
+modal volume put zopedia-wiki-data backend/wiki_data/ /app/wiki_data/
+
+# 3. Set environment secrets
+modal secret create zopedia-env \
+    ZOPEDIA_LLM_BASE_URL=https://api.deepseek.com/v1 \
+    ZOPEDIA_LLM_API_KEY=sk-your-key \
+    ZOPEDIA_LLM_MODEL=deepseek-v4-flash
+
+# 4. Deploy
+modal deploy modal.py
+```
+
+Your app will be available at `https://<your-username>--zopedia-serve.modal.run`. The wiki volume persists across deploys — redeploy without losing data.
+
+To pull your wiki back down:
+```bash
+modal volume get zopedia-wiki-data /app/wiki_data/ ./local-backup/
+```
+
+See [modal.py](modal.py) for the full configuration (concurrency, timeout, idle shutdown).
+
+### Docker
+
+```bash
+# Build
+docker build -t zopedia .
+
+# Run
+docker run -p 8000:8000 \
+    -v $(pwd)/backend/wiki_data:/app/wiki_data \
+    -e ZOPEDIA_LLM_BASE_URL=https://api.deepseek.com/v1 \
+    -e ZOPEDIA_LLM_API_KEY=sk-your-key \
+    -e ZOPEDIA_LLM_MODEL=deepseek-v4-flash \
+    zopedia
+```
+
+Open `http://localhost:8000`. Mount a host directory to `/app/wiki_data` to persist your wiki across container restarts.
+
+For per-user isolated instances (Azure Container Apps, etc.), the container is self-contained — each instance gets its own wiki and SQLite store. No shared state. See [Dockerfile](Dockerfile) for the multi-stage build (Node 22 frontend → Python 3.12 slim runtime).
+
 ## License & Attribution
 
 Zopedia is built on top of [Unsloth Studio](https://github.com/unslothai/unsloth), an open-source platform for local LLM fine-tuning and chat. Unsloth Studio is licensed under AGPL-3.0, and Zopedia retains the same license. The core wiki engine, ingestion pipeline, and frontend UI framework were adapted from Unsloth Studio — with training, model serving, and fine-tuning features removed, and community-based index pagination, maintenance lifecycle improvements, and an upstream-API-only chat flow added on top. Zopedia also borrows from the [Graphify](https://github.com/safishamsi/graphify/) and the [markitdown](https://github.com/microsoft/markitdown) libraries for ingestion. 
