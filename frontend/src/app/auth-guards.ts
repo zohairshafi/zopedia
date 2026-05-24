@@ -57,6 +57,8 @@ function authRedirect(to: "/login" | "/change-password"): never {
 }
 
 export async function requireAuth(): Promise<void> {
+  console.log("[requireAuth] called, isTauri:", isTauri);
+
   if (isTauri) {
     await tauriAutoAuth();
     return;
@@ -74,7 +76,9 @@ export async function requireAuth(): Promise<void> {
 
   // Auth disabled: auto-login and skip the login screen entirely
   if (status.auth_disabled) {
+    console.log("[requireAuth] auth disabled, auto-logging in");
     await autoLogin();
+    console.log("[requireAuth] auto-login complete");
     return;
   }
 

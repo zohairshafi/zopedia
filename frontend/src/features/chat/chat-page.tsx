@@ -477,6 +477,9 @@ const GeneralCompareContent = memo(function GeneralCompareContent({
 export function ChatPage(): ReactElement {
   const search = useSearch({ from: "/chat" });
   const navigate = useNavigate();
+  const fallbackNonce = useRef(crypto.randomUUID());
+
+  console.log("[ChatPage] search params:", JSON.stringify(search), "pathname:", window.location.pathname);
 
   const settingsOpen = useChatRuntimeStore((s) => s.settingsPanelOpen);
   const setSettingsOpen = useChatRuntimeStore((s) => s.setSettingsPanelOpen);
@@ -559,22 +562,18 @@ export function ChatPage(): ReactElement {
 
   // Derive view from URL search params
   const view = useMemo<ChatView>(() => {
+    let v: ChatView;
     if (search.compare) {
-      return {
-        mode: "compare",
-        pairId: search.compare,
-      };
+      v = { mode: "compare", pairId: search.compare };
+    } else if (search.thread) {
+      v = { mode: "single", threadId: search.thread };
+    } else if (activeThreadId && !activeThreadId.startsWith("__LOCALID_")) {
+      v = { mode: "single", threadId: activeThreadId };
+    } else {
+      v = { mode: "single", newThreadNonce: search.new || fallbackNonce.current };
     }
-    if (search.thread) {
-      return { mode: "single", threadId: search.thread };
-    }
-    if (activeThreadId && !activeThreadId.startsWith("__LOCALID_")) {
-      return { mode: "single", threadId: activeThreadId };
-    }
-    if (search.new) {
-      return { mode: "single", newThreadNonce: search.new };
-    }
-    return { mode: "single" };
+    console.log("[ChatPage] view:", JSON.stringify(v), "activeThreadId:", activeThreadId);
+    return v;
   }, [search.thread, search.compare, search.new, activeThreadId]);
 
   const handleCheckpointChange = useCallback(

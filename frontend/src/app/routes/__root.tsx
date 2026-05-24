@@ -33,11 +33,11 @@ function isChatOnlyAllowed(pathname: string): boolean {
 
 export const Route = createRootRoute({
   beforeLoad: async ({ location }) => {
-    // Ensure platform info is fetched before checking chat-only guard.
-    // fetchDeviceType caches after first call, so subsequent navigations are instant.
+    console.log("[rootRoute] beforeLoad pathname:", location.pathname, "search:", location.search);
     await fetchDeviceType();
     const chatOnly = usePlatformStore.getState().isChatOnly();
     if (chatOnly && !isChatOnlyAllowed(location.pathname)) {
+      console.log("[rootRoute] redirecting to /chat (chatOnly guard)");
       throw redirect({ to: "/chat" });
     }
   },

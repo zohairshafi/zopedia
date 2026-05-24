@@ -417,20 +417,27 @@ def load_jwt_secret() -> str:
 def ensure_default_admin() -> bool:
     """Seed the default admin account on first startup.
 
-    Uses a randomly generated diceware passphrase as the bootstrap password.
+    Uses a randomly generated diceware passphrase as the bootstrap password,
+    unless ZOPEDIA_ADMIN_PASSWORD is set in the environment.
     Returns True when the default admin was created in this call.
     """
     if get_user_and_secret(DEFAULT_ADMIN_USERNAME) is not None:
         _load_bootstrap_password()
         return False
 
-    bootstrap_pw = generate_bootstrap_password()
+    admin_password = os.environ.get("ZOPEDIA_ADMIN_PASSWORD", "")
+    if admin_password:
+        global _bootstrap_password
+        _bootstrap_password = admin_password
+        bootstrap_pw = admin_password
+    else:
+        bootstrap_pw = generate_bootstrap_password()
     try:
         create_initial_user(
             username = DEFAULT_ADMIN_USERNAME,
             password = bootstrap_pw,
             jwt_secret = secrets.token_urlsafe(64),
-            must_change_password = True,
+            must_change_password = not bool(admin_password),
         )
         return True
     except sqlite3.IntegrityError:

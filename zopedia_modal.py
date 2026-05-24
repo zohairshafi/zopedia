@@ -57,7 +57,7 @@ app = modal.App("zopedia", image=image)
     secrets=[modal.Secret.from_name("zopedia-env")],
     cpu=1,
     scaledown_window=300,
-    timeout=600,
+    timeout=7200,
 )
 @modal.concurrent(max_inputs=100)
 @modal.asgi_app()

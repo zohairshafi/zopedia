@@ -22,7 +22,7 @@ import {
 } from "@assistant-ui/react";
 import { createAssistantStream } from "assistant-stream";
 import mammoth from "mammoth";
-import { type ReactElement, type ReactNode, useEffect, useMemo } from "react";
+import { type ReactElement, type ReactNode, useEffect, useMemo, useRef } from "react";
 import { extractText, getDocumentProxy } from "unpdf";
 import { authFetch } from "@/features/auth";
 import { createOpenAIStreamAdapter } from "./api/chat-adapter";
@@ -698,13 +698,21 @@ function ThreadNewChatSwitch({
 }: { nonce: string }): ReactElement | null {
   const aui = useAui();
   const isLoading = useAuiState(({ threads }) => threads.isLoading);
+  const firedRef = useRef(false);
+
+  console.log("[ThreadNewChatSwitch] rendering, nonce:", nonce, "isLoading:", isLoading);
 
   useEffect(() => {
     if (isLoading) {
+      console.log("[ThreadNewChatSwitch] skipping — isLoading is true");
       return;
     }
-    // Switch to a fresh local thread without persisting it yet.
-    // Persistence still happens on first message append.
+    if (firedRef.current) {
+      console.log("[ThreadNewChatSwitch] skipping — already fired for this nonce");
+      return;
+    }
+    firedRef.current = true;
+    console.log("[ThreadNewChatSwitch] calling switchToNewThread()");
     void aui.threads().switchToNewThread();
     useChatRuntimeStore.getState().setActiveThreadId(null);
   }, [aui, isLoading, nonce]);
@@ -771,6 +779,8 @@ export function ChatRuntimeProvider({
   newThreadNonce?: string;
   syncActiveThreadId?: boolean;
 }): ReactElement {
+  console.log("[ChatRuntimeProvider] initialThreadId:", initialThreadId, "newThreadNonce:", newThreadNonce);
+
   const runtime = useRemoteThreadListRuntime({
     runtimeHook: useRuntimeHook,
     adapter: {

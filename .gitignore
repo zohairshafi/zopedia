@@ -24,3 +24,8 @@ SESSION_CONTEXT.md
 
 # Env
 .env
+
+# Packaging build artifacts
+.venv-packaging/
+build/
+dist/
