@@ -52,13 +52,32 @@ from core.wiki.bridge import apply_defaults  # noqa: E402
 apply_defaults()
 
 
-# ── Auth stub ──────────────────────────────────────────────────────
+# ── Auth helpers ──────────────────────────────────────────────────
 
 
 async def _get_current_subject(request: Request) -> str:
+    """Return the authenticated username, or 'local-user' if auth is disabled or fails."""
     if _AUTH_DISABLED:
         return "local-user"
-    # Real auth: extract Bearer token, validate JWT/API key, return subject
+    return await _resolve_subject(request)
+
+
+async def _require_valid_subject(request: Request) -> str:
+    """Return the authenticated username, or raise 401 if auth is enabled and token is invalid.
+
+    Use this for endpoints that MUST have a valid user identity (e.g. chat history).
+    The 401 triggers the frontend to refresh its JWT and retry.
+    """
+    if _AUTH_DISABLED:
+        return "local-user"
+    subject = await _resolve_subject(request)
+    if subject == "local-user":
+        raise HTTPException(status_code=401, detail="Valid authentication required for chat history.")
+    return subject
+
+
+async def _resolve_subject(request: Request) -> str:
+    """Extract and validate the JWT/API key. Returns 'local-user' on any failure."""
     try:
         from auth.authentication import _decode_subject_without_verification
         from auth.storage import get_user_and_secret, validate_api_key, API_KEY_PREFIX
@@ -97,7 +116,7 @@ async def _get_current_subject(request: Request) -> str:
             logger.warning("auth: JWT decode failed for subject=%r: %s", subject, exc)
         return "local-user"
     except Exception as exc:
-        logger.warning("auth: _get_current_subject error: %s", exc)
+        logger.warning("auth: _resolve_subject error: %s", exc)
         return "local-user"
 
 
@@ -272,7 +291,7 @@ class _ChatHistoryThread(_BaseModel):
 async def _chat_history_list_threads(request: Request):
     from chat_history_store import list_threads
 
-    current_subject = await _get_current_subject(request)
+    current_subject = await _require_valid_subject(request)
     threads = list_threads(current_subject)
     logger.info("chat_history: list_threads for %s → %d threads", current_subject, len(threads))
     return {"threads": threads}
@@ -282,7 +301,7 @@ async def _chat_history_list_threads(request: Request):
 async def _chat_history_get_thread(thread_id: str, request: Request):
     from chat_history_store import get_thread, get_thread_messages
 
-    current_subject = await _get_current_subject(request)
+    current_subject = await _require_valid_subject(request)
     thread = get_thread(thread_id, current_subject)
     if thread is None:
         raise HTTPException(status_code=404, detail="Thread not found")
@@ -295,7 +314,7 @@ async def _chat_history_save_thread(body: _ChatHistoryThread, request: Request):
     from datetime import datetime, timezone
     from chat_history_store import upsert_thread
 
-    current_subject = await _get_current_subject(request)
+    current_subject = await _require_valid_subject(request)
     logger.info(
         "chat_history: save_thread for %s thread_id=%s title=%r msgs=%d",
         current_subject, body.thread_id, body.title, len(body.messages),
@@ -317,7 +336,7 @@ async def _chat_history_save_thread(body: _ChatHistoryThread, request: Request):
 async def _chat_history_delete_thread(thread_id: str, request: Request):
     from chat_history_store import delete_thread
 
-    current_subject = await _get_current_subject(request)
+    current_subject = await _require_valid_subject(request)
     deleted = delete_thread(thread_id, current_subject)
     if not deleted:
         raise HTTPException(status_code=404, detail="Thread not found")
