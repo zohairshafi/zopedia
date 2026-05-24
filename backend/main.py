@@ -66,30 +66,38 @@ async def _get_current_subject(request: Request) -> str:
 
         auth_header = request.headers.get("Authorization", "")
         if not auth_header.startswith("Bearer "):
+            logger.debug("auth: no Bearer header for %s", request.url.path)
             return "local-user"
         token = auth_header[7:]
 
         # API key path
         if token.startswith(API_KEY_PREFIX):
             username = validate_api_key(token)
-            return username or "local-user"
+            if username:
+                return username
+            logger.warning("auth: invalid API key for %s", request.url.path)
+            return "local-user"
 
         # JWT path
         subject = _decode_subject_without_verification(token)
         if subject is None:
+            logger.warning("auth: could not decode subject from JWT for %s", request.url.path)
             return "local-user"
         record = get_user_and_secret(subject)
         if record is None:
+            logger.warning("auth: no user record for subject=%r path=%s", subject, request.url.path)
             return "local-user"
         _salt, _pwd_hash, jwt_secret, _must_change = record
         try:
             payload = _jwt.decode(token, jwt_secret, algorithms=["HS256"])
             if payload.get("sub") == subject:
                 return subject
-        except Exception:
-            pass
+            logger.warning("auth: JWT sub mismatch: expected=%r got=%r", subject, payload.get("sub"))
+        except Exception as exc:
+            logger.warning("auth: JWT decode failed for subject=%r: %s", subject, exc)
         return "local-user"
-    except Exception:
+    except Exception as exc:
+        logger.warning("auth: _get_current_subject error: %s", exc)
         return "local-user"
 
 
@@ -266,6 +274,7 @@ async def _chat_history_list_threads(request: Request):
 
     current_subject = await _get_current_subject(request)
     threads = list_threads(current_subject)
+    logger.info("chat_history: list_threads for %s → %d threads", current_subject, len(threads))
     return {"threads": threads}
 
 
@@ -287,6 +296,10 @@ async def _chat_history_save_thread(body: _ChatHistoryThread, request: Request):
     from chat_history_store import upsert_thread
 
     current_subject = await _get_current_subject(request)
+    logger.info(
+        "chat_history: save_thread for %s thread_id=%s title=%r msgs=%d",
+        current_subject, body.thread_id, body.title, len(body.messages),
+    )
     now = datetime.now(timezone.utc).isoformat()
     created_at = body.created_at or now
     upsert_thread(
