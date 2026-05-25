@@ -137,6 +137,28 @@ def _run_setup_server(port: int, config_path: str) -> None:
     server.server_close()
 
 
+def _check_existing_instance(port_file: Path) -> int | None:
+    """If a running instance exists, open its browser and return its port.
+    Returns None if no existing instance is found."""
+    if not port_file.is_file():
+        return None
+    try:
+        port = int(port_file.read_text().strip())
+    except (ValueError, OSError):
+        return None
+    if _wait_for_server("127.0.0.1", port, timeout=1.0):
+        import uuid
+        new_id = uuid.uuid4().hex[:12]
+        webbrowser.open(f"http://127.0.0.1:{port}/chat?new={new_id}")
+        return port
+    # Stale file — port not listening
+    try:
+        port_file.unlink()
+    except OSError:
+        pass
+    return None
+
+
 def main() -> None:
     import multiprocessing
     multiprocessing.freeze_support()
@@ -145,6 +167,12 @@ def main() -> None:
     from config import env_from_config
 
     cfg = load_cfg()
+
+    # ── Single-instance: check for already-running process ─────────────
+    _port_file = CONFIG_PATH.parent / ".port"
+    if _check_existing_instance(_port_file):
+        return  # another instance already running, browser opened
+
     port = _find_free_port()
 
     # ── First-run: serve setup page via temp HTTP server ──────────────
@@ -162,6 +190,10 @@ def main() -> None:
     if not os.environ.get("ZOPEDIA_WIKI_VAULT"):
         os.environ["ZOPEDIA_WIKI_VAULT"] = str(WIKI_DEFAULT)
     os.environ.setdefault("ZOPEDIA_HOME", str(WIKI_DEFAULT.parent))
+
+    # Ensure wiki directories exist
+    Path(os.environ["ZOPEDIA_WIKI_VAULT"]).mkdir(parents=True, exist_ok=True)
+    Path(os.environ["ZOPEDIA_HOME"]).mkdir(parents=True, exist_ok=True)
 
     backend = _resource_path("backend")
     if backend not in sys.path:
@@ -197,6 +229,9 @@ def main() -> None:
     server_thread = threading.Thread(target=_server_ref[0].run, daemon=True)
     server_thread.start()
 
+    # ── Write port file for single-instance detection ──────────────────
+    _port_file.write_text(str(port))
+
     # ── Open browser once server is listening ─────────────────────────
     url = f"http://127.0.0.1:{port}"
     if _wait_for_server("127.0.0.1", port):
@@ -215,6 +250,12 @@ def main() -> None:
 
     # Server thread will exit because should_exit was set
     server_thread.join()
+
+    # Clean up port file
+    try:
+        _port_file.unlink()
+    except OSError:
+        pass
 
 
 if __name__ == "__main__":

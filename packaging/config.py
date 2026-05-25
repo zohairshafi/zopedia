@@ -8,7 +8,7 @@ from platformdirs import PlatformDirs
 
 _dirs = PlatformDirs("Zopedia", "Zopedia")
 CONFIG_PATH = Path(_dirs.user_config_dir) / "config.json"
-WIKI_DEFAULT = Path(_dirs.user_data_dir) / "wiki_data"
+WIKI_DEFAULT = Path.home() / "zopedia"
 
 DEFAULTS: dict[str, object] = {
     "llm_base_url": "",

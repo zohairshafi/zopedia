@@ -70,7 +70,7 @@ SETUP_HTML = """\
 
     <label for="wiki">Wiki Directory (optional)</label>
     <input id="wiki" name="wiki_vault" type="text"
-           placeholder="Leave empty for default">
+           placeholder="~/zopedia">
 
     <hr>
     <div class="auth-section">

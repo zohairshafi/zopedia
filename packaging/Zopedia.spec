@@ -71,6 +71,27 @@ _hiddenimports = [
     "jwt",
     "diceware",
     "platformdirs",
+    # Lazy imports inside functions — missed by PyInstaller static analysis
+    # PDF / document parsing
+    "pypdf",
+    "pypdfium2",
+    "pdfminer",
+    "pdfminer.high_level",
+    "pdfplumber",
+    "pymupdf4llm",
+    # DOCX / PPTX / XLSX
+    "mammoth",
+    "pptx",
+    "pandas",
+    # YouTube transcript
+    "youtube_transcript_api",
+    # Audio transcription
+    "pydub",
+    "speech_recognition",
+    # Azure Document Intelligence
+    "azure.ai.documentintelligence",
+    "azure.core.credentials",
+    "azure.identity",
 ]
 
 # ── Data files ──────────────────────────────────────────────────────
@@ -84,6 +105,7 @@ _datas: list[tuple[str, str]] = [
     (str(_PROJECT / "packaging" / "config.py"), "config.py"),
     (str(_PROJECT / "packaging" / "setup_page.py"), "setup_page.py"),
     (str(_PROJECT / "packaging" / "tray.py"), "tray.py"),
+    (str(_PROJECT / "packaging" / "icon.png"), "icon.png"),
 ]
 
 # ── Excludes (shrink bundle) ────────────────────────────────────────
