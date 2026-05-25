@@ -79,6 +79,8 @@ _hiddenimports = [
     "pdfminer.high_level",
     "pdfplumber",
     "pymupdf4llm",
+    "pymupdf",
+    "pymupdf_layout",
     # DOCX / PPTX / XLSX
     "mammoth",
     "pptx",
