@@ -104,10 +104,10 @@ _datas: list[tuple[str, str]] = [
     # Graphify package (needs to be importable as graphify/)
     (str(_PROJECT / "graphify" / "graphify"), "graphify"),
     # Packaging modules (config, setup_page, tray — imported at runtime)
-    (str(_PROJECT / "packaging" / "config.py"), "config.py"),
-    (str(_PROJECT / "packaging" / "setup_page.py"), "setup_page.py"),
-    (str(_PROJECT / "packaging" / "tray.py"), "tray.py"),
-    (str(_PROJECT / "packaging" / "icon.png"), "icon.png"),
+    (str(_PROJECT / "packaging" / "config.py"), "."),
+    (str(_PROJECT / "packaging" / "setup_page.py"), "."),
+    (str(_PROJECT / "packaging" / "tray.py"), "."),
+    (str(_PROJECT / "packaging" / "icon.png"), "."),
     # Magika model & config files (used by markitdown for MIME detection)
     (str(_PROJECT / ".venv-packaging" / "lib" / "python3.10" / "site-packages" / "magika" / "models"), "magika/models"),
     (str(_PROJECT / ".venv-packaging" / "lib" / "python3.10" / "site-packages" / "magika" / "config"), "magika/config"),
