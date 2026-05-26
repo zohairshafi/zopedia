@@ -53,7 +53,12 @@ def _load_icon() -> NSImage | None:
     if icon_path.is_file():
         data = NSData.dataWithContentsOfFile_(str(icon_path))
         if data:
-            return NSImage.alloc().initWithData_(data)
+            image = NSImage.alloc().initWithData_(data)
+            if image:
+                # Scale to status-bar size (18pt); dock icon is unaffected
+                # because it comes from the .app bundle, not this code path.
+                image.setSize_((18, 18))
+            return image
     return None
 
 

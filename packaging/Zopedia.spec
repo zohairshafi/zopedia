@@ -86,6 +86,7 @@ _hiddenimports = [
     "pandas",
     # YouTube transcript
     "youtube_transcript_api",
+    "defusedxml",
     # Audio transcription
     "pydub",
     "speech_recognition",
@@ -135,7 +136,7 @@ a = Analysis(
     datas=_datas,
     hiddenimports=_hiddenimports,
     hookspath=[],
-    runtime_hooks=[],
+    runtime_hooks=[str(_PROJECT / "packaging" / "runtime_hook.py")],
     excludes=_excludes,
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
