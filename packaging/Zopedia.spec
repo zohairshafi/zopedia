@@ -47,7 +47,6 @@ _hiddenimports = [
     # Packaging modules (imported dynamically or via uvicorn string)
     "config",
     "setup_page",
-    "tray",
     # Graphify (lazy imports via importlib)
     "graphify",
     "graphify.ingest",
@@ -106,7 +105,7 @@ _datas: list[tuple[str, str]] = [
     # Packaging modules (config, setup_page, tray — imported at runtime)
     (str(_PROJECT / "packaging" / "config.py"), "."),
     (str(_PROJECT / "packaging" / "setup_page.py"), "."),
-    (str(_PROJECT / "packaging" / "tray.py"), "."),
+    # tray.py removed — menu bar icon was unreliable via PyObjC in PyInstaller
     (str(_PROJECT / "packaging" / "icon.png"), "."),
     # Magika model & config files (used by markitdown for MIME detection)
     (str(_PROJECT / ".venv-packaging" / "lib" / "python3.10" / "site-packages" / "magika" / "models"), "magika/models"),

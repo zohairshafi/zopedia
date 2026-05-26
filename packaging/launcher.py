@@ -239,16 +239,15 @@ def main() -> None:
         new_id = uuid.uuid4().hex[:12]
         webbrowser.open(f"{url}/chat?new={new_id}")
 
-    # ── Tray icon (runs on main thread, blocks until Quit) ────────────
-    from tray import run_tray
-
-    def _request_shutdown():
-        if _server_ref[0]:
-            _server_ref[0].should_exit = True
-
-    run_tray(port, _request_shutdown)
+    # ── Keep alive until shutdown ─────────────────────────────────────
+    try:
+        while not _server_ref[0].should_exit:
+            time.sleep(0.5)
+    except KeyboardInterrupt:
+        pass
 
     # Server thread will exit because should_exit was set
+    _server_ref[0].should_exit = True
     server_thread.join()
 
     # Clean up port file
