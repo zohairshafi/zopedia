@@ -11,8 +11,8 @@ Inspired by [Karpathy's vision for LLM-powered wikis](https://gist.github.com/ka
 ---
 
 ## Table of Contents
-
 - [How It Works](#how-it-works)
+- [Releases](https://github.com/zohairshafi/zopedia/releases)
 - [Quick Start](#quick-start)
 - [Features](#features)
 - [Architecture](#architecture)
@@ -58,6 +58,8 @@ Ask questions  →  Model reads index  →  Picks relevant community  →  Reads
 ---
 
 ## Quick Start
+
+For a downloadable .dmg file, please check [Releases](https://github.com/zohairshafi/zopedia/releases).
 
 ```bash
 # Clone and install
