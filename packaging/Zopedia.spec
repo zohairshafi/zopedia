@@ -80,7 +80,6 @@ _hiddenimports = [
     "pdfplumber",
     "pymupdf4llm",
     "pymupdf",
-    "pymupdf_layout",
     # DOCX / PPTX / XLSX
     "mammoth",
     "pptx",
@@ -108,6 +107,9 @@ _datas: list[tuple[str, str]] = [
     (str(_PROJECT / "packaging" / "setup_page.py"), "setup_page.py"),
     (str(_PROJECT / "packaging" / "tray.py"), "tray.py"),
     (str(_PROJECT / "packaging" / "icon.png"), "icon.png"),
+    # Magika model & config files (used by markitdown for MIME detection)
+    (str(_PROJECT / ".venv-packaging" / "lib" / "python3.10" / "site-packages" / "magika" / "models"), "magika/models"),
+    (str(_PROJECT / ".venv-packaging" / "lib" / "python3.10" / "site-packages" / "magika" / "config"), "magika/config"),
 ]
 
 # ── Excludes (shrink bundle) ────────────────────────────────────────
@@ -115,9 +117,7 @@ _datas: list[tuple[str, str]] = [
 _excludes = [
     "tkinter",
     "matplotlib",
-    "numpy",
     "scipy",
-    "pandas",
     "PIL._tkinter_finder",
 ]
 
