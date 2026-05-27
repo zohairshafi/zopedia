@@ -10060,7 +10060,8 @@ class LLMWikiEngine:
                 "- Section F: Assumptions (bullets)\n"
                 "- Section G: source or conversation\n"
                 "- Section H: Potential disputable claims\n"
-                "- Section I: Date/time sensitivity (with timestamp when relevant)\n\n"
+                "- Section I: Date/time sensitivity (with timestamp when relevant)\n"
+                "- Section J: Any related citations or references in detail that are key to this document\n\n"
                 "Requirements:\n"
                 "- Cite claims inline using wiki links.\n"
                 "- Prefer [[sources/...]] links, including chunk source pages.\n"
@@ -10280,7 +10281,8 @@ class LLMWikiEngine:
             "Section H:\n"
             f"- Potential disputable claims should be re-validated against [[{normalized_source_page}]] and chunk source pages.\n\n"
             "Section I:\n"
-            f"- Date/time sensitivity is unknown from fallback merge; verify timestamps directly in [[{normalized_source_page}]]."
+            f"- Date/time sensitivity is unknown from fallback merge; verify timestamps directly in [[{normalized_source_page}]].\n"
+            "- Section J: Any related citations or references in detail that are key to this document\n\n"
         )
 
     def _safe_json(self, text: str) -> Optional[Dict]:
@@ -10545,7 +10547,8 @@ class LLMWikiEngine:
             "- Section F: Any assumptions (bullets)\n"
             "- Section G: Is this a source or a conversation?\n"
             "- Section H: Any potential disputable claims?\n"
-            "- Section I: Is this information date/time sensitive? If yes, print timestamp.\n\n"
+            "- Section I: Is this information date/time sensitive? If yes, print timestamp.\n"
+            "- Section J: Any related citations or references in detail that are key to this document\n\n"
             "Requirements:\n"
             "- Cite claims inline with wiki links like [[sources/...]] [[entities/...]] [[concepts/...]]\n"
             "- Keep the response specific and avoid generic filler\n"
