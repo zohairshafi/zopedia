@@ -81,7 +81,9 @@ export function ResearchRunView({ config, sessionId, onNewResearch }: Props) {
           addRoundResult({
             round: event.round as number,
             sources_ingested: (event.sources_ingested as number) ?? 0,
+            sources_failed: (event.sources_failed as number) ?? 0,
             new_pages: (event.new_pages as string[]) ?? [],
+            failed_pages: (event.failed_pages as string[]) ?? [],
           });
           break;
         case "research_summarizing":

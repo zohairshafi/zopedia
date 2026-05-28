@@ -37,7 +37,9 @@ export type ResearchPhase =
 export interface RoundResult {
   round: number;
   sources_ingested: number;
+  sources_failed: number;
   new_pages: string[];
+  failed_pages: string[];
 }
 
 export interface ResearchState {

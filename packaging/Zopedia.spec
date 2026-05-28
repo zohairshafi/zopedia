@@ -41,9 +41,11 @@ _hiddenimports = [
     "core.wiki.bridge",
     "core.wiki.engine",
     "core.llm",
+    "core.research",
     # Routes
     "routes.wiki",
     "routes.chat",
+    "routes.research",
     # Packaging modules (imported dynamically or via uvicorn string)
     "config",
     "setup_page",

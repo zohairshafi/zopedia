@@ -298,7 +298,7 @@ class ResearchOrchestrator:
     # -- maintenance -------------------------------------------------------
 
     async def _run_maintenance(self) -> AsyncGenerator[tuple[str, dict], None]:
-        """Run the full 5-step maintenance cycle, yielding progress events."""
+        """Run the full 5-step maintenance cycle — only for the final round."""
         from core.wiki.manager import WikiManager
 
         manager = WikiManager.create(self._wiki_dir, self._llm_fn)
@@ -319,7 +319,21 @@ class ResearchOrchestrator:
             retry_result = {"error": str(exc)}
         yield ("retry_fallback", retry_result)
 
-        # Step 3: Enrichment
+        # Step 3-4: enrichment (includes godnodes) → backlinks
+        async for event in self._run_light_maintenance(manager):
+            yield event
+
+    async def _run_light_maintenance(self, manager=None) -> AsyncGenerator[tuple[str, dict], None]:
+        """Run enrichment + backlinks — fast, per-round maintenance.
+
+        Godnodes rebuild is handled internally by enrich_analysis_pages, so we
+        don't call it separately here."""
+        from core.wiki.manager import WikiManager
+
+        if manager is None:
+            manager = WikiManager.create(self._wiki_dir, self._llm_fn)
+
+        # Enrichment (includes godnodes rebuild internally)
         try:
             enrich_result = manager.enrich_analysis_pages(dry_run=False)
         except Exception as exc:
@@ -327,22 +341,13 @@ class ResearchOrchestrator:
             enrich_result = {"error": str(exc)}
         yield ("enrichment", enrich_result)
 
-        # Step 4: Backlinks
+        # Backlinks
         try:
             backlinks_result = manager.refresh_analysis_backlinks(dry_run=False)
         except Exception as exc:
             logger.warning("Research: backlinks failed: %s", exc)
             backlinks_result = {"error": str(exc)}
         yield ("backlinks", backlinks_result)
-
-        # Step 5: Godnodes index
-        try:
-            manager.engine._rebuild_index_godnodes()
-            godnodes_result = {"status": "rebuilt"}
-        except Exception as exc:
-            logger.warning("Research: godnodes rebuild failed: %s", exc)
-            godnodes_result = {"error": str(exc)}
-        yield ("godnodes", godnodes_result)
 
     # -- final summary -----------------------------------------------------
 
@@ -446,6 +451,7 @@ class ResearchOrchestrator:
                     _research_sessions.pop(session_id, None)
 
                 # Phase 4: Ingest
+                results: list[dict] = []
                 if approved_urls:
                     for url in approved_urls:
                         if _research_cancelled.get(session_id):
@@ -462,20 +468,30 @@ class ResearchOrchestrator:
                         url="", title="", status="skipped",
                         message="No sources approved for ingestion.")
 
-                # Phase 5: Maintenance
-                yield _make_event("research_maintenance_start", step="lint")
-                async for step_name, step_result in self._run_maintenance():
-                    if _research_cancelled.get(session_id):
-                        break
-                    yield _make_event("research_maintenance_progress",
-                        step=step_name, details=step_result)
-                yield _make_event("research_maintenance_complete",
-                    summary={"steps_completed": 5})
+                # Phase 5: Maintenance — skip if nothing was ingested this round
+                ingested_this_round = [r for r in results if r.get("status") == "ingested"]
+                failed_this_round = [r for r in results if r.get("status") == "failed"]
+
+                if ingested_this_round:
+                    is_final_round = round_num == config.rounds
+                    yield _make_event("research_maintenance_start",
+                        step="enrichment" if not is_final_round else "lint")
+                    maintenance = self._run_maintenance() if is_final_round else self._run_light_maintenance()
+                    async for step_name, step_result in maintenance:
+                        if _research_cancelled.get(session_id):
+                            break
+                        yield _make_event("research_maintenance_progress",
+                            step=step_name, details=step_result)
+                    step_count = 4 if is_final_round else 2
+                    yield _make_event("research_maintenance_complete",
+                        summary={"steps_completed": step_count})
 
                 yield _make_event("research_round_complete",
                     round=round_num,
-                    sources_ingested=len([r for r in approved_urls]),
-                    new_pages=[r.get("url", "") for r in all_ingested[-len(approved_urls):]])
+                    sources_ingested=len(ingested_this_round),
+                    sources_failed=len(failed_this_round),
+                    new_pages=[r.get("url", "") for r in ingested_this_round],
+                    failed_pages=[r.get("url", "") for r in failed_this_round])
 
             # Phase 6: Final summary
             yield _make_event("research_summarizing", message="Generating final report...")
