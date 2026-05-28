@@ -4,12 +4,14 @@ import { Route as chatRoute } from "./routes/chat";
 import { Route as indexRoute } from "./routes/index";
 import { Route as loginRoute } from "./routes/login";
 import { Route as changePasswordRoute } from "./routes/change-password";
+import { Route as researchRoute } from "./routes/research";
 
 const routeTree = rootRoute.addChildren([
   indexRoute,
   loginRoute,
   changePasswordRoute,
   chatRoute,
+  researchRoute,
 ]);
 
 export const router = createRouter({ routeTree });

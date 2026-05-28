@@ -51,6 +51,7 @@ import {
   LayoutAlignLeftIcon,
   Settings02Icon,
   ZapIcon,
+  Chemistry01Icon,
 } from "@hugeicons/core-free-icons";
 import {
   Tooltip,
@@ -730,6 +731,18 @@ export function AppSidebar() {
               onClick={() => {
                 if (chatDisabled) return;
                 useChatSearchStore.getState().open();
+                closeMobileIfOpen();
+              }}
+            />
+            <NavItem
+              icon={Chemistry01Icon}
+              label="New Research"
+              active={false}
+              onClick={() => {
+                navigate({
+                  to: "/research",
+                  search: { new: createNavigationNonce() },
+                });
                 closeMobileIfOpen();
               }}
             />

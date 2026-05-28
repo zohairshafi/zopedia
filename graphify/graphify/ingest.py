@@ -323,11 +323,28 @@ Source: {url}
     return content, filename
 
 
+_PDF_MAGIC = b"%PDF"
+
+
 def _download_binary(url: str, suffix: str, target_dir: Path) -> Path:
     """Download a binary file (PDF, image) directly."""
     filename = _safe_filename(url, suffix)
     out_path = target_dir / filename
-    out_path.write_bytes(safe_fetch(url))
+    data = safe_fetch(url)
+
+    if suffix == ".pdf" and not data.startswith(_PDF_MAGIC):
+        preview = data[:512].decode("utf-8", errors="replace").strip()
+        if re.search(r"<!DOCTYPE\s+html|<html", preview, re.IGNORECASE):
+            raise RuntimeError(
+                f"Expected PDF but received HTML from {url!r} "
+                f"(likely paywall or login redirect)"
+            )
+        raise RuntimeError(
+            f"Expected PDF but received unrecognized content from {url!r} "
+            f"(starts with: {preview[:80]})"
+        )
+
+    out_path.write_bytes(data)
     return out_path
 
 

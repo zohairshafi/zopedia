@@ -345,6 +345,9 @@ async def _chat_history_delete_thread(thread_id: str, request: Request):
 
 app.include_router(_chat_history_router, prefix="/api")
 
+# Research mode
+from routes.research import router as research_router
+app.include_router(research_router, prefix="")
 
 # ── Shutdown ────────────────────────────────────────────────────────
 
