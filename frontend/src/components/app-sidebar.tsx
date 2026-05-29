@@ -35,21 +35,24 @@ import { db } from "@/features/chat/db";
 import {
   Book03Icon,
   ChefHatIcon,
-  ColumnInsertIcon,
+  ComputerSettingsIcon,
   CursorInfo02Icon,
   Delete02Icon,
   Download03Icon,
   FolderUploadIcon,
+  GearsIcon,
   GemIcon,
+  LicenseMaintenanceIcon,
   Logout03Icon,
   MessageSearch01Icon,
+  NeuralNetworkIcon,
   Search01Icon,
-  NewReleasesIcon,
   EcoPowerIcon,
   PencilEdit02Icon,
   ArrowReloadHorizontalIcon,
   LayoutAlignLeftIcon,
   Settings02Icon,
+  Settings05Icon,
   ZapIcon,
   Chemistry01Icon,
 } from "@hugeicons/core-free-icons";
@@ -777,7 +780,7 @@ export function AppSidebar() {
                       disabled={isRunningWikiLint || isRunningWikiMaintenance}
                       className="h-[32px] rounded-[10px] gap-[8.5px] px-2.5 font-medium text-[#383835] dark:text-[#c7c7c4] hover:bg-[#f0f0f0]! dark:hover:bg-[#2a2c2f]! hover:text-black! dark:hover:text-white! data-active:bg-[#f0f0f0]! dark:data-active:bg-[#2a2c2f]! data-active:text-black! dark:data-active:text-white!"
                     >
-                      <HugeiconsIcon icon={Search01Icon} strokeWidth={1.75} className="size-[18px]! shrink-0" />
+                      <HugeiconsIcon icon={LicenseMaintenanceIcon} strokeWidth={1.75} className="size-[18px]! shrink-0" />
                       <span className="text-[14px] leading-[18px] tracking-[0.01em]">
                         {isRunningWikiLint ? "Linting..." : "Run Lint"}
                       </span>
@@ -807,7 +810,7 @@ export function AppSidebar() {
                       disabled={isRunningWikiMaintenance || isRunningWikiLint}
                       className="h-[32px] rounded-[10px] gap-[8.5px] px-2.5 font-medium text-[#383835] dark:text-[#c7c7c4] hover:bg-[#f0f0f0]! dark:hover:bg-[#2a2c2f]! hover:text-black! dark:hover:text-white! data-active:bg-[#f0f0f0]! dark:data-active:bg-[#2a2c2f]! data-active:text-black! dark:data-active:text-white!"
                     >
-                      <HugeiconsIcon icon={Settings02Icon} strokeWidth={1.75} className="size-[18px]! shrink-0" />
+                      <HugeiconsIcon icon={GearsIcon} strokeWidth={1.75} className="size-[18px]! shrink-0" />
                       <span className="text-[14px] leading-[18px] tracking-[0.01em]">
                         {isRunningWikiMaintenance
                           && activeWikiMaintenanceMode === "without-web-fill"
@@ -825,7 +828,7 @@ export function AppSidebar() {
                       disabled={isRunningWikiMaintenance || isRunningWikiLint}
                       className="h-[32px] rounded-[10px] gap-[8.5px] px-2.5 font-medium text-[#383835] dark:text-[#c7c7c4] hover:bg-[#f0f0f0]! dark:hover:bg-[#2a2c2f]! hover:text-black! dark:hover:text-white! data-active:bg-[#f0f0f0]! dark:data-active:bg-[#2a2c2f]! data-active:text-black! dark:data-active:text-white!"
                     >
-                      <HugeiconsIcon icon={NewReleasesIcon} strokeWidth={1.75} className="size-[18px]! shrink-0" />
+                      <HugeiconsIcon icon={ComputerSettingsIcon} strokeWidth={1.75} className="size-[18px]! shrink-0" />
                       <span className="text-[14px] leading-[18px] tracking-[0.01em]">
                         {isRunningWikiMaintenance
                           && activeWikiMaintenanceMode === "with-web-fill"
@@ -846,7 +849,7 @@ export function AppSidebar() {
                       disabled={isRunningWikiMaintenance || isRunningWikiLint}
                       className="h-[32px] rounded-[10px] gap-[8.5px] px-2.5 font-medium text-[#383835] dark:text-[#c7c7c4] hover:bg-[#f0f0f0]! dark:hover:bg-[#2a2c2f]! hover:text-black! dark:hover:text-white! data-active:bg-[#f0f0f0]! dark:data-active:bg-[#2a2c2f]! data-active:text-black! dark:data-active:text-white!"
                     >
-                      <HugeiconsIcon icon={ColumnInsertIcon} strokeWidth={1.75} className="size-[18px]! shrink-0" />
+                      <HugeiconsIcon icon={NeuralNetworkIcon} strokeWidth={1.75} className="size-[18px]! shrink-0" />
                       <span className="text-[14px] leading-[18px] tracking-[0.01em]">
                         View/Edit Wiki Data
                       </span>
@@ -862,7 +865,7 @@ export function AppSidebar() {
                       disabled={isRunningWikiMaintenance || isRunningWikiLint}
                       className="h-[32px] rounded-[10px] gap-[8.5px] px-2.5 font-medium text-[#383835] dark:text-[#c7c7c4] hover:bg-[#f0f0f0]! dark:hover:bg-[#2a2c2f]! hover:text-black! dark:hover:text-white! data-active:bg-[#f0f0f0]! dark:data-active:bg-[#2a2c2f]! data-active:text-black! dark:data-active:text-white!"
                     >
-                      <HugeiconsIcon icon={PencilEdit02Icon} strokeWidth={1.75} className="size-[18px]! shrink-0" />
+                      <HugeiconsIcon icon={Settings05Icon} strokeWidth={1.75} className="size-[18px]! shrink-0" />
                       <span className="text-[14px] leading-[18px] tracking-[0.01em]">
                         Edit Wiki Behaviour
                       </span>
