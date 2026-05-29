@@ -1,4 +1,5 @@
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, useState } from "react";
+import { useNavigate } from "@tanstack/react-router";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
@@ -9,6 +10,8 @@ import { SourceApprovalPanel } from "./source-approval-panel";
 import { ResearchProgressBar } from "./research-progress-bar";
 import { ResearchRoundSummary } from "./research-round-summary";
 import { ResearchFinalReport } from "./research-final-report";
+import { db } from "@/features/chat/db";
+import { debouncedSaveThreadToServer } from "@/features/chat/chat-server-sync";
 import type { ResearchConfig, ResearchEvent, SourceSuggestion } from "../types";
 
 interface Props {
@@ -18,6 +21,8 @@ interface Props {
 }
 
 export function ResearchRunView({ config, sessionId, onNewResearch }: Props) {
+  const navigate = useNavigate();
+  const [savedThreadId, setSavedThreadId] = useState<string | null>(null);
   const phase = useResearchStore((s) => s.phase);
   const currentRound = useResearchStore((s) => s.currentRound);
   const totalRounds = useResearchStore((s) => s.totalRounds);
@@ -134,6 +139,60 @@ export function ResearchRunView({ config, sessionId, onNewResearch }: Props) {
     };
   }, [config, sessionId, processEvent, setError]);
 
+  // Save research as a chat thread when complete so it appears in history
+  const savedRef = useRef(false);
+  useEffect(() => {
+    if (phase === "complete" && finalReport && !savedRef.current) {
+      savedRef.current = true;
+      const threadId = sessionId;
+      const topic = config.topic;
+      const now = Date.now();
+
+      const contextMsg = [
+        `Research topic: ${topic}`,
+        `Rounds: ${config.rounds} | Sources per round: ${config.sources_per_round}`,
+        `Sources ingested: ${totalIngested}`,
+        roundResults.map((r) =>
+          `Round ${r.round}: ${r.sources_ingested} ingested, ${r.sources_failed} failed`
+        ).join("\n"),
+        warnings.length > 0
+          ? `\nWarnings:\n${warnings.map((w) => `${w.url}: ${w.error}`).join("\n")}`
+          : "",
+      ].join("\n");
+
+      Promise.all([
+        db.threads.put({
+          id: threadId,
+          title: topic,
+          modelType: "base",
+          archived: false,
+          createdAt: now,
+          messageCount: 2,
+        }),
+        db.messages.put({
+          id: `${threadId}-ctx`,
+          threadId,
+          role: "system",
+          content: [{ type: "text", text: contextMsg }],
+          createdAt: now,
+        }),
+        db.messages.put({
+          id: `${threadId}-report`,
+          threadId,
+          role: "assistant",
+          content: [{ type: "text", text: finalReport }],
+          createdAt: now + 1,
+        }),
+      ]).then(() => {
+        setSavedThreadId(threadId);
+        // Push to server so it persists across devices
+        debouncedSaveThreadToServer(threadId);
+      }).catch((err) => {
+        console.error("Failed to save research thread:", err);
+      });
+    }
+  }, [phase, finalReport, sessionId, config, totalIngested, roundResults, warnings]);
+
   const handleApprove = async (urls: string[]) => {
     setPhase("ingesting");
     try {
@@ -212,6 +271,18 @@ export function ResearchRunView({ config, sessionId, onNewResearch }: Props) {
           totalIngested={totalIngested}
           onNewResearch={onNewResearch}
         />
+        {savedThreadId && (
+          <div className="flex justify-center pb-8">
+            <Button
+              variant="default"
+              onClick={() =>
+                navigate({ to: "/chat", search: { thread: savedThreadId } })
+              }
+            >
+              Continue in Chat
+            </Button>
+          </div>
+        )}
       </div>
     );
   }

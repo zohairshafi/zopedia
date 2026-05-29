@@ -272,10 +272,13 @@ class ResearchOrchestrator:
 
                     raw_file = graphify_ingest(url, self._raw_dir)
                     title = wiki_ingestor.ingest_file(raw_file)
+                    meta = wiki_ingestor.pop_recent_ingest_metadata(raw_file) or {}
+                    source_page = meta.get("source_page", "")
                     return {
                         "url": url,
                         "title": title or raw_file.name,
                         "status": "ingested",
+                        "source_page": source_page,
                     }
                 except Exception as exc:
                     logger.warning("Research: ingest failed for %s: %s", url, exc)
@@ -351,36 +354,128 @@ class ResearchOrchestrator:
 
     # -- final summary -----------------------------------------------------
 
-    async def _generate_final_summary(self, topic: str) -> AsyncGenerator[str, None]:
-        """Stream a final research summary citing wiki sources."""
-        from core.llm import chat_completions_stream
+    async def _generate_final_summary(
+        self, topic: str, all_ingested: list[dict]
+    ) -> AsyncGenerator[str, None]:
+        """Run a tool-calling loop so the LLM can read wiki pages, then stream
+        a final research summary. Uses the same read_wiki_page tool as chat."""
+        from core.llm import (
+            chat_completions_non_streaming,
+            chat_completions_stream,
+            execute_wiki_read,
+            WIKI_READ_PAGE_TOOL,
+        )
 
-        index_path = self._wiki_pages_dir / "index.md"
-        wiki_context = ""
+        wiki_dir = str(self._wiki_dir)
+        max_cumulative = int(os.getenv("ZOPEDIA_WIKI_MAX_CUMULATIVE_READ_CHARS", "500000"))
+        max_chars_per_read = int(os.getenv("ZOPEDIA_WIKI_MAX_CHARS_PER_READ", "12000"))
+
+        index_path = self._wiki_pages_dir / "index-concise.md"
+        index_content = ""
         if index_path.is_file():
-            wiki_context = index_path.read_text(encoding="utf-8", errors="ignore")
-            if len(wiki_context) > 15000:
-                wiki_context = wiki_context[:15000] + "\n\n[... index truncated ...]"
+            index_content = index_path.read_text(encoding="utf-8", errors="ignore")
+            if len(index_content) > 15000:
+                index_content = index_content[:15000] + "\n\n[... index truncated ...]"
 
-        final_prompt = [
-            {"role": "system", "content": (
-                "You are a research synthesizer. Write a thorough research summary "
-                "based on the wiki content that was just ingested during the research "
-                "rounds. Structure your response as a research report:\n\n"
+        ingested_list = "\n".join(
+            f"- {r.get('title', r.get('url', ''))}  ({r.get('url', '')})"
+            for r in all_ingested if r.get("status") == "ingested"
+        )
+
+        system_prompt = (
+            f"You are a research synthesizer. Write a thorough research summary "
+            f"on the topic: '{topic}'.\n\n"
+            "You have access to a wiki knowledge base via the read_wiki_page tool. "
+            "Use it to explore relevant pages, including both newly ingested sources "
+            "and pre-existing wiki content.\n\n"
+            "Plan your reads: start with key pages, then follow leads to related content.\n\n"
+            f"--- Wiki index ---\n{index_content}\n---\n\n"
+            f"Newly ingested during this research:\n{ingested_list or '(none)'}"
+        )
+
+        messages: list[dict[str, Any]] = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": (
+                f"Research topic: {topic}\n\n"
+                "Read relevant wiki pages to understand the current knowledge, "
+                "then tell me you're ready to write the final summary."
+            )},
+        ]
+
+        tools: list[dict[str, Any]] = [WIKI_READ_PAGE_TOOL]
+        cumulative_read_chars = 0
+        max_turns = 5
+
+        for _turn in range(max_turns):
+            response = await chat_completions_non_streaming(
+                messages, tools=tools, temperature=0.2, max_tokens=2048,
+            )
+            if "error" in response:
+                logger.warning("Research: tool-loop LLM error: %s", response.get("error"))
+                break
+
+            choice = response.get("choices", [{}])[0]
+            msg = choice.get("message", {})
+            tool_calls = msg.get("tool_calls") or []
+
+            if not tool_calls:
+                messages.append({"role": "assistant", "content": msg.get("content", "")})
+                break
+
+            # Append assistant message with tool calls
+            messages.append({
+                "role": "assistant",
+                "content": msg.get("content"),
+                "tool_calls": tool_calls,
+            })
+
+            for tc in tool_calls:
+                fn = tc.get("function", {})
+                if fn.get("name") != "read_wiki_page":
+                    continue
+                try:
+                    args = json.loads(fn.get("arguments", "{}"))
+                except json.JSONDecodeError:
+                    continue
+                page_path = args.get("path", "")
+                if not page_path:
+                    continue
+
+                result_json = execute_wiki_read(
+                    wiki_dir, page_path, max_chars=max_chars_per_read,
+                )
+                try:
+                    size = json.loads(result_json).get("size_chars", 0)
+                except json.JSONDecodeError:
+                    size = len(result_json)
+                cumulative_read_chars += size
+
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc.get("id", ""),
+                    "content": result_json,
+                })
+
+            if cumulative_read_chars >= max_cumulative:
+                logger.info("Research: read budget reached (%s chars)", cumulative_read_chars)
+                break
+
+        # Final synthesis — stream
+        messages.append({
+            "role": "user",
+            "content": (
+                "Now write a comprehensive final research summary based on everything "
+                "you've read. Structure it as a research report:\n\n"
                 "## Executive Summary\n"
                 "## Key Findings\n"
                 "## Source Analysis\n"
                 "## Gaps and Future Directions\n"
                 "## References\n\n"
-                "Cite specific wiki pages when possible. Be thorough but concise."
-            )},
-            {"role": "user", "content": (
-                f"Research topic: {topic}\n\n"
-                f"Write a final research summary based on the wiki content:\n{wiki_context}"
-            )},
-        ]
+                "Cite specific wiki pages. Be thorough but concise."
+            ),
+        })
 
-        async for event in chat_completions_stream(final_prompt):
+        async for event in chat_completions_stream(messages, temperature=0.3):
             if event.get("type") == "text":
                 yield event.get("content", "")
 
@@ -495,7 +590,7 @@ class ResearchOrchestrator:
 
             # Phase 6: Final summary
             yield _make_event("research_summarizing", message="Generating final report...")
-            async for chunk in self._generate_final_summary(config.topic):
+            async for chunk in self._generate_final_summary(config.topic, all_ingested):
                 yield _make_event("research_final_summary", content=chunk)
 
             # Surface any warnings (e.g. PDF URLs that returned HTML)
