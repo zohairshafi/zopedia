@@ -5,6 +5,7 @@ import type {
   ResearchState,
   SourceSuggestion,
   RoundResult,
+  ToolActivity,
 } from "../types";
 import { defaultResearchConfig } from "../types";
 
@@ -22,6 +23,11 @@ interface ResearchActions {
   setTotalIngested: (count: number) => void;
   setWarnings: (warnings: { url: string; error: string }[]) => void;
   setSessionId: (id: string | null) => void;
+  setToolStatus: (status: string) => void;
+  addToolActivity: (activity: ToolActivity) => void;
+  completeToolActivity: (toolCallId: string, sizeChars: number, preview: string) => void;
+  clearToolActivities: () => void;
+  setResearchTitle: (title: string) => void;
   reset: () => void;
 }
 
@@ -39,6 +45,9 @@ const initialState: ResearchState = {
   maintenanceSteps: {},
   totalIngested: 0,
   warnings: [],
+  toolStatus: "",
+  toolActivities: [],
+  researchTitle: "",
 };
 
 export const useResearchStore = create<ResearchState & ResearchActions>((set) => ({
@@ -62,6 +71,17 @@ export const useResearchStore = create<ResearchState & ResearchActions>((set) =>
   setTotalIngested: (count) => set({ totalIngested: count }),
   setWarnings: (warnings) => set({ warnings }),
   setSessionId: (id) => set({ sessionId: id }),
+  setToolStatus: (status) => set({ toolStatus: status }),
+  addToolActivity: (activity) =>
+    set((s) => ({ toolActivities: [...s.toolActivities, activity] })),
+  completeToolActivity: (toolCallId: string, sizeChars: number, preview: string) =>
+    set((s) => ({
+      toolActivities: s.toolActivities.map((a) =>
+        a.toolCallId === toolCallId ? { ...a, sizeChars, preview } : a
+      ),
+    })),
+  clearToolActivities: () => set({ toolActivities: [], toolStatus: "" }),
+  setResearchTitle: (title) => set({ researchTitle: title }),
   reset: () =>
     set({
       ...initialState,

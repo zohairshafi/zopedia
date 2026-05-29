@@ -16,6 +16,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import {
   DEPTH_PRESETS,
   SOURCE_TYPE_OPTIONS,
+  TIMELIMIT_OPTIONS,
   type ResearchConfig,
   defaultResearchConfig,
 } from "../types";
@@ -25,13 +26,34 @@ interface Props {
   loading?: boolean;
 }
 
+const STORAGE_KEY = "zopedia-research-prefs";
+
+function loadPrefs(): { trusted: string; blocked: string; sourceTypes: string[] } {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch { /* ignore */ }
+  return { trusted: "", blocked: "", sourceTypes: [] };
+}
+
+function savePrefs(trusted: string, blocked: string, sourceTypes: string[]) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ trusted, blocked, sourceTypes }));
+  } catch { /* ignore */ }
+}
+
 export function ResearchSetupForm({ onStart, loading }: Props) {
-  const [config, setConfig] = useState<ResearchConfig>(defaultResearchConfig());
-  const [trustedText, setTrustedText] = useState("");
-  const [blockedText, setBlockedText] = useState("");
+  const prefs = loadPrefs();
+  const [config, setConfig] = useState<ResearchConfig>(() => ({
+    ...defaultResearchConfig(),
+    source_types: prefs.sourceTypes,
+  }));
+  const [trustedText, setTrustedText] = useState(prefs.trusted);
+  const [blockedText, setBlockedText] = useState(prefs.blocked);
 
   const handleStart = () => {
     if (!config.topic.trim()) return;
+    savePrefs(trustedText, blockedText, config.source_types);
     onStart({
       ...config,
       trusted_sources: trustedText
@@ -73,7 +95,7 @@ export function ResearchSetupForm({ onStart, loading }: Props) {
           <Label htmlFor="topic">Research Topic</Label>
           <Input
             id="topic"
-            placeholder="e.g., Recent advances in RAG evaluation"
+            placeholder="e.g., Recent advances in machine learning for protein folding"
             value={config.topic}
             onChange={(e) =>
               setConfig((c) => ({ ...c, topic: e.target.value }))
@@ -87,6 +109,10 @@ export function ResearchSetupForm({ onStart, loading }: Props) {
         {/* Depth preset */}
         <div className="space-y-2">
           <Label>Research Depth</Label>
+          <p className="text-sm text-muted-foreground">
+            Select the depth of research. This will determine the number of rounds
+            and sources per round. Recommended to have fewer rounds with higher number of sources.
+          </p>
           <Select value={config.research_depth} onValueChange={applyDepth}>
             <SelectTrigger>
               <SelectValue />
@@ -111,10 +137,12 @@ export function ResearchSetupForm({ onStart, loading }: Props) {
               min={1}
               max={10}
               value={config.rounds}
+              disabled={config.research_depth !== "custom"}
               onChange={(e) =>
                 setConfig((c) => ({
                   ...c,
                   rounds: Math.max(1, parseInt(e.target.value) || 1),
+                  research_depth: "custom",
                 }))
               }
             />
@@ -127,10 +155,12 @@ export function ResearchSetupForm({ onStart, loading }: Props) {
               min={1}
               max={30}
               value={config.sources_per_round}
+              disabled={config.research_depth !== "custom"}
               onChange={(e) =>
                 setConfig((c) => ({
                   ...c,
                   sources_per_round: Math.max(1, parseInt(e.target.value) || 1),
+                  research_depth: "custom",
                 }))
               }
             />
@@ -171,6 +201,31 @@ export function ResearchSetupForm({ onStart, loading }: Props) {
               </ToggleGroupItem>
             ))}
           </ToggleGroup>
+        </div>
+
+        {/* Time sensitivity */}
+        <div className="space-y-2">
+          <Label>Time Sensitivity</Label>
+          <p className="text-sm text-muted-foreground">
+            Filter search results to a specific time window
+          </p>
+          <Select
+            value={config.timelimit}
+            onValueChange={(v) =>
+              setConfig((c) => ({ ...c, timelimit: v }))
+            }
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {TIMELIMIT_OPTIONS.map((opt) => (
+                <SelectItem key={opt.value} value={opt.value}>
+                  {opt.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
 
         {/* Trusted sources */}

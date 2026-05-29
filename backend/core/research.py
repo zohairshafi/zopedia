@@ -50,6 +50,7 @@ class ResearchConfig:
     blocked_sources: list[str] = field(default_factory=list)
     research_depth: str = "standard"
     source_types: list[str] = field(default_factory=list)
+    timelimit: str = "m"  # '', 'd', 'w', 'm', 'y'
 
 
 def _apply_depth_preset(config: ResearchConfig) -> ResearchConfig:
@@ -82,7 +83,17 @@ def _is_trusted(url: str, trusted: list[str]) -> bool:
         return False
     domain = urlparse(url).netloc.lower()
     url_lower = url.lower()
-    return any(t.lower() in domain or t.lower() in url_lower for t in trusted)
+    for t in trusted:
+        t_lower = t.lower().strip()
+        if t_lower in domain or t_lower in url_lower:
+            return True
+        # Also match by the trusted source's own domain (e.g. youtube.com/@Channel
+        # should match youtube.com/watch?v=... since the channel isn't in the video URL)
+        if "://" in t_lower:
+            trusted_domain = urlparse(t_lower).netloc.lower()
+            if trusted_domain and trusted_domain in domain:
+                return True
+    return False
 
 
 def _source_type(url: str) -> str:
@@ -97,16 +108,6 @@ def _source_type(url: str) -> str:
     if url.endswith(".pdf"):
         return "pdf"
     return "webpage"
-
-
-def _extract_query_terms(topic: str) -> list[str]:
-    """Extract key terms from a topic for deduplication checking."""
-    words = re.findall(r"[a-zA-Z0-9]{3,}", topic.lower())
-    stop = {"the", "and", "for", "with", "that", "this", "what", "when",
-            "where", "who", "why", "how", "from", "into", "about", "their",
-            "which", "have", "been", "were", "are", "was", "will", "can",
-            "its", "not", "but", "all", "has", "had", "more", "some"}
-    return [w for w in words if w not in stop]
 
 
 # ---------------------------------------------------------------------------
@@ -125,40 +126,148 @@ class ResearchOrchestrator:
 
     # -- wiki survey -------------------------------------------------------
 
-    async def _survey_wiki(self, topic: str) -> str:
-        """Read wiki index and relevant pages to understand existing knowledge."""
-        from core.llm import chat_completions_non_streaming
+    async def _survey_wiki(self, topic: str) -> AsyncGenerator[dict, None]:
+        """Read wiki index and let the LLM explore relevant pages via tool calls.
+        Yields tool_start/tool_end/tool_status events, then a research_survey event."""
+        from core.llm import (
+            chat_completions_non_streaming,
+            execute_wiki_read,
+            WIKI_READ_PAGE_TOOL,
+        )
+
+        wiki_dir = str(self._wiki_pages_dir)
+        max_cumulative = int(os.getenv("ZOPEDIA_WIKI_MAX_CUMULATIVE_READ_CHARS", "500000"))
+        max_chars_per_read = int(os.getenv("ZOPEDIA_WIKI_MAX_CHARS_PER_READ", "12000"))
+        max_turns = int(os.getenv("ZOPEDIA_WIKI_MAX_TOOL_TURNS", "8"))
 
         index_path = self._wiki_pages_dir / "index-concise.md"
-        if not index_path.is_file():
+        index_content = ""
+        if index_path.is_file():
+            index_content = index_path.read_text(encoding="utf-8", errors="ignore")
+            if len(index_content) > 12000:
+                index_content = index_content[:12000] + "\n\n[... index truncated ...]"
+        else:
             logger.info("Research: no wiki index found, skipping survey")
-            return ""
+            yield {"type": "research_survey", "content": ""}
+            return
 
-        index_content = index_path.read_text(encoding="utf-8", errors="ignore")
-        if len(index_content) > 12000:
-            index_content = index_content[:12000] + "\n\n[... index truncated ...]"
+        system_prompt = (
+            "You are a research assistant surveying a wiki knowledge base. "
+            "Use the read_wiki_page tool to explore pages relevant to the topic. "
+            "Identify:\n"
+            "1. What is already known about this topic?\n"
+            "2. What gaps or missing areas exist?\n"
+            "3. What search queries would fill those gaps?\n\n"
+            f"--- Wiki index ---\n{index_content}\n---"
+        )
 
-        survey_prompt = [
-            {"role": "system", "content": (
-                "You are a research assistant. Survey the provided wiki index and answer:\n"
-                "1. What is already known about this topic?\n"
-                "2. What gaps or missing areas exist?\n"
-                "3. What search queries would fill those gaps?\n"
-                "4. Follow any citation links if present to propose search queries.\n"
-                "Be concise. Focus on actionable gaps."
-            )},
+        messages: list[dict[str, Any]] = [
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": (
                 f"Research topic: {topic}\n\n"
-                f"Wiki index:\n{index_content}"
+                "Read relevant wiki pages, then provide your survey analysis."
             )},
         ]
 
+        tools: list[dict[str, Any]] = [WIKI_READ_PAGE_TOOL]
+        cumulative_read_chars = 0
+
+        for turn in range(1, max_turns + 1):
+            yield {"type": "research_tool_status", "text": f"Surveying wiki... (turn {turn})"}
+
+            response = await chat_completions_non_streaming(
+                messages, tools=tools, temperature=0.2, max_tokens=2048,
+            )
+            if "error" in response:
+                logger.warning("Research: survey tool-loop error: %s", response.get("error"))
+                break
+
+            choice = response.get("choices", [{}])[0]
+            msg = choice.get("message", {})
+            tool_calls = msg.get("tool_calls") or []
+
+            if not tool_calls:
+                messages.append({"role": "assistant", "content": msg.get("content", "")})
+                break
+
+            messages.append({
+                "role": "assistant",
+                "content": msg.get("content"),
+                "tool_calls": tool_calls,
+            })
+
+            for tc in tool_calls:
+                fn = tc.get("function", {})
+                if fn.get("name") != "read_wiki_page":
+                    continue
+                try:
+                    args = json.loads(fn.get("arguments", "{}"))
+                except json.JSONDecodeError:
+                    continue
+                page_path = args.get("path", "")
+                if not page_path:
+                    continue
+
+                tc_id = tc.get("id", f"call_{turn}")
+                yield {
+                    "type": "research_tool_start",
+                    "tool_name": "read_wiki_page",
+                    "tool_call_id": tc_id,
+                    "arguments": {"path": page_path},
+                }
+
+                result_json = execute_wiki_read(
+                    wiki_dir, page_path, max_chars=max_chars_per_read,
+                )
+                try:
+                    result_data = json.loads(result_json)
+                    size = result_data.get("size_chars", 0)
+                    preview = result_data.get("content", "")[:200]
+                except json.JSONDecodeError:
+                    size = len(result_json)
+                    preview = ""
+
+                cumulative_read_chars += size
+
+                yield {
+                    "type": "research_tool_end",
+                    "tool_name": "read_wiki_page",
+                    "tool_call_id": tc_id,
+                    "result": json.dumps({"path": page_path, "size_chars": size, "preview": preview}),
+                }
+
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc_id,
+                    "content": result_json,
+                })
+
+            if cumulative_read_chars >= max_cumulative:
+                logger.info("Research: survey read budget reached (%s chars)", cumulative_read_chars)
+                break
+
+        # Get the final survey analysis
+        messages.append({
+            "role": "user",
+            "content": (
+                "Based on what you've read, provide a concise survey analysis:\n"
+                "1. What is already known about this topic?\n"
+                "2. What gaps or missing areas exist?\n"
+                "3. What search queries would fill those gaps?\n"
+                "Focus on actionable gaps."
+            ),
+        })
+
         try:
-            response = await chat_completions_non_streaming(survey_prompt)
-            return (response.get("content") or "").strip()
+            response = await chat_completions_non_streaming(
+                messages, temperature=0.3, max_tokens=2048,
+            )
+            survey_text = (response.get("content") or "").strip()
         except Exception as exc:
-            logger.warning("Research: wiki survey failed: %s", exc)
-            return ""
+            logger.warning("Research: survey analysis failed: %s", exc)
+            survey_text = ""
+
+        yield {"type": "research_survey", "content": survey_text}
 
     # -- source discovery --------------------------------------------------
 
@@ -166,21 +275,36 @@ class ResearchOrchestrator:
         self, topic: str, round_num: int, config: ResearchConfig
     ) -> list[dict]:
         """Use LLM to generate search queries, execute them, and rank results."""
-        from core.llm import chat_completions_non_streaming, execute_web_search
+        from core.llm import chat_completions_non_streaming, execute_web_search, execute_video_search
+
+        num_queries = min(10, max(5, config.sources_per_round))  # ddgs hits 7+ engines per query
 
         # 1. LLM generates diverse search queries
+        source_type_hint = ""
+        if config.source_types:
+            st_labels = [st for st in config.source_types if st != "webpage"]
+            if st_labels:
+                source_type_hint = (
+                    f"\nIMPORTANT: Focus on these source types: {', '.join(st_labels)}. "
+                    "Generate queries that will find results from these specific platforms "
+                    "(e.g. include 'site:youtube.com' for youtube, 'site:x.com' for tweets, "
+                    "'site:arxiv.org' for papers)."
+                )
+
         query_prompt = [
             {"role": "system", "content": (
                 "You are a research strategist. Generate diverse search queries to "
                 "explore a research topic from multiple angles. Return a JSON array "
                 "of query strings. Aim for variety: different phrasings, subtopics, "
-                "competing perspectives, recent developments. Format:\n"
+                "competing perspectives, recent developments."
+                f"{source_type_hint}\n"
+                "Format:\n"
                 '{"queries": ["query 1", "query 2", ...]}'
             )},
             {"role": "user", "content": (
                 f"Research topic: {topic}\n"
                 f"Round: {round_num}/{config.rounds}\n"
-                f"Generate {min(5, config.sources_per_round)} search queries."
+                f"Generate {num_queries} diverse search queries."
             )},
         ]
 
@@ -195,59 +319,123 @@ class ResearchOrchestrator:
         except Exception as exc:
             logger.warning("Research: query generation failed: %s", exc)
 
-        # 2. Execute searches (limited to avoid rate limiting)
+        # 2. Build query list: (query, max_results, search_type)
+        # search_type: "text" or "video" (ddgs videos endpoint for YouTube)
+        all_queries: list[tuple[str, int, str]] = []
+        for q in search_queries[:num_queries]:
+            all_queries.append((q, 15, "text"))
+
+        # Add platform-targeted searches when source_types are specified
+        if config.source_types:
+            for st in config.source_types:
+                if st == "youtube":
+                    all_queries.append((f'"{topic}"', 8, "video"))
+                elif st == "tweet":
+                    all_queries.append((f'site:x.com OR site:twitter.com "{topic}"', 8, "text"))
+                elif st == "paper":
+                    all_queries.append((f'site:arxiv.org "{topic}"', 8, "text"))
+                elif st == "pdf":
+                    all_queries.append((f'"{topic}" filetype:pdf', 8, "text"))
+
+        # Add trusted-source targeted searches
+        if config.trusted_sources:
+            for t in config.trusted_sources:
+                t = t.strip().lower()
+                if not t:
+                    continue
+                if t.startswith("http"):
+                    parsed = urlparse(t)
+                    domain = parsed.netloc
+                    path = parsed.path.strip("/")
+                    if not domain:
+                        continue
+                    # YouTube channel: use video search with channel handle
+                    if ("youtube.com" in domain or "youtu.be" in domain) and path.startswith("@"):
+                        handle = path.split("/")[0].lstrip("@")
+                        if handle:
+                            all_queries.append((f'"{handle}" "{topic}"', 8, "video"))
+                    # X.com / Twitter account: extract username
+                    elif domain in ("x.com", "twitter.com") and path and "/" not in path:
+                        all_queries.append((f'"{path}" "{topic}" site:{domain}', 8, "text"))
+                    else:
+                        all_queries.append((f'site:{domain} "{topic}"', 8, "text"))
+                elif "/" not in t:
+                    all_queries.append((f'site:{t} "{topic}"', 8, "text"))
+                else:
+                    all_queries.append((f'"{topic}" {t}', 8, "text"))
+
+        # Deduplicate queries
+        seen_queries: set[str] = set()
+        unique_queries: list[tuple[str, int, str]] = []
+        for q, n, st in all_queries:
+            key = f"{st}:{q}"
+            if key not in seen_queries:
+                seen_queries.add(key)
+                unique_queries.append((q, n, st))
+        all_queries = unique_queries
+
+        # 3. Execute searches (with brief delay to avoid rate limiting)
         all_sources: list[dict] = []
         seen_urls: set[str] = set()
 
-        for query in search_queries[:5]:
+        for i, (query, max_results, search_type) in enumerate(all_queries):
+            if i > 0:
+                await asyncio.sleep(1.5)  # avoid hammering search engines
             try:
-                result_json = await execute_web_search(query, max_results=5)
+                if search_type == "video":
+                    result_json = await execute_video_search(
+                        query, max_results=max_results, timelimit=config.timelimit,
+                    )
+                else:
+                    result_json = await execute_web_search(
+                        query, max_results=max_results, timelimit=config.timelimit,
+                    )
                 result = json.loads(result_json)
+                new_count = 0
                 for r in result.get("results", []):
                     url = r.get("url", "").strip()
                     if not url or url in seen_urls:
                         continue
                     if _is_blocked(url, config.blocked_sources):
                         continue
-                    if config.source_types:
-                        st = _source_type(url)
-                        if st not in config.source_types:
-                            continue
+                    st = _source_type(url)
+                    if config.source_types and st not in config.source_types:
+                        continue
                     seen_urls.add(url)
                     all_sources.append({
                         "url": url,
                         "title": r.get("title", ""),
                         "snippet": r.get("snippet", ""),
-                        "source_type": _source_type(url),
+                        "source_type": st,
                         "is_trusted": _is_trusted(url, config.trusted_sources),
                         "relevance": 0.5,
                         "already_in_wiki": self._url_in_wiki(url),
                     })
+                    new_count += 1
+                logger.info(
+                    "Research: query %d/%d returned %d new sources (total: %d)",
+                    i + 1, len(all_queries), new_count, len(all_sources),
+                )
             except Exception as exc:
                 logger.warning("Research: search failed for '%s': %s", query, exc)
 
-        # 3. Sort: trusted first, then by relevance
+        # 4. Sort: trusted first, then by relevance
         all_sources.sort(key=lambda s: (not s["is_trusted"], -s.get("relevance", 0)))
 
         return all_sources[: config.sources_per_round]
 
     def _url_in_wiki(self, url: str) -> bool:
-        """Check if a URL is already referenced in the wiki."""
+        """Check if a URL is already referenced in the wiki (exact match only)."""
         if not self._wiki_pages_dir.exists():
             return False
-        query_terms = _extract_query_terms(url)
+        url_clean = url.strip().rstrip("/")
         for page in self._wiki_pages_dir.rglob("*.md"):
             if ".archive" in str(page):
                 continue
             try:
                 content = page.read_text(encoding="utf-8", errors="ignore")
-                if url in content:
+                if url in content or url_clean in content:
                     return True
-                if query_terms:
-                    path_lower = str(page).lower()
-                    if any(t in path_lower for t in query_terms[:2]):
-                        if urlparse(url).netloc.lower() in content.lower():
-                            return True
             except Exception:
                 pass
         return False
@@ -327,24 +515,14 @@ class ResearchOrchestrator:
             yield event
 
     async def _run_light_maintenance(self, manager=None) -> AsyncGenerator[tuple[str, dict], None]:
-        """Run enrichment + backlinks — fast, per-round maintenance.
-
-        Godnodes rebuild is handled internally by enrich_analysis_pages, so we
-        don't call it separately here."""
-        from core.wiki.manager import WikiManager
+        """Run backlinks only — fast, per-round maintenance.
+        Full maintenance (lint, retry, enrichment, backlinks) runs at the final round."""
 
         if manager is None:
+            from core.wiki.manager import WikiManager
             manager = WikiManager.create(self._wiki_dir, self._llm_fn)
 
-        # Enrichment (includes godnodes rebuild internally)
-        try:
-            enrich_result = manager.enrich_analysis_pages(dry_run=False)
-        except Exception as exc:
-            logger.warning("Research: enrichment failed: %s", exc)
-            enrich_result = {"error": str(exc)}
-        yield ("enrichment", enrich_result)
-
-        # Backlinks
+        # Backlinks only
         try:
             backlinks_result = manager.refresh_analysis_backlinks(dry_run=False)
         except Exception as exc:
@@ -356,9 +534,11 @@ class ResearchOrchestrator:
 
     async def _generate_final_summary(
         self, topic: str, all_ingested: list[dict]
-    ) -> AsyncGenerator[str, None]:
+    ) -> AsyncGenerator[dict, None]:
         """Run a tool-calling loop so the LLM can read wiki pages, then stream
-        a final research summary. Uses the same read_wiki_page tool as chat."""
+        a final research summary. Uses the same read_wiki_page tool as chat.
+        Yields SSE event dicts directly (tool_start, tool_end, tool_status,
+        final_summary chunks) so the frontend can show wiki-reading activity."""
         from core.llm import (
             chat_completions_non_streaming,
             chat_completions_stream,
@@ -366,7 +546,7 @@ class ResearchOrchestrator:
             WIKI_READ_PAGE_TOOL,
         )
 
-        wiki_dir = str(self._wiki_dir)
+        wiki_dir = str(self._wiki_pages_dir)
         max_cumulative = int(os.getenv("ZOPEDIA_WIKI_MAX_CUMULATIVE_READ_CHARS", "500000"))
         max_chars_per_read = int(os.getenv("ZOPEDIA_WIKI_MAX_CHARS_PER_READ", "12000"))
 
@@ -404,9 +584,11 @@ class ResearchOrchestrator:
 
         tools: list[dict[str, Any]] = [WIKI_READ_PAGE_TOOL]
         cumulative_read_chars = 0
-        max_turns = 5
+        max_turns = int(os.getenv("ZOPEDIA_WIKI_MAX_TOOL_TURNS", "8"))
 
-        for _turn in range(max_turns):
+        for turn in range(1, max_turns + 1):
+            yield {"type": "research_tool_status", "text": f"Exploring wiki knowledge... (turn {turn})"}
+
             response = await chat_completions_non_streaming(
                 messages, tools=tools, temperature=0.2, max_tokens=2048,
             )
@@ -420,9 +602,9 @@ class ResearchOrchestrator:
 
             if not tool_calls:
                 messages.append({"role": "assistant", "content": msg.get("content", "")})
+                yield {"type": "research_tool_status", "text": "Synthesizing final report..."}
                 break
 
-            # Append assistant message with tool calls
             messages.append({
                 "role": "assistant",
                 "content": msg.get("content"),
@@ -441,23 +623,43 @@ class ResearchOrchestrator:
                 if not page_path:
                     continue
 
+                tc_id = tc.get("id", f"call_{turn}")
+                yield {
+                    "type": "research_tool_start",
+                    "tool_name": "read_wiki_page",
+                    "tool_call_id": tc_id,
+                    "arguments": {"path": page_path},
+                }
+
                 result_json = execute_wiki_read(
                     wiki_dir, page_path, max_chars=max_chars_per_read,
                 )
                 try:
-                    size = json.loads(result_json).get("size_chars", 0)
+                    result_data = json.loads(result_json)
+                    size = result_data.get("size_chars", 0)
+                    preview = result_data.get("content", "")[:200]
                 except json.JSONDecodeError:
                     size = len(result_json)
+                    preview = ""
+
                 cumulative_read_chars += size
+
+                yield {
+                    "type": "research_tool_end",
+                    "tool_name": "read_wiki_page",
+                    "tool_call_id": tc_id,
+                    "result": json.dumps({"path": page_path, "size_chars": size, "preview": preview}),
+                }
 
                 messages.append({
                     "role": "tool",
-                    "tool_call_id": tc.get("id", ""),
+                    "tool_call_id": tc_id,
                     "content": result_json,
                 })
 
             if cumulative_read_chars >= max_cumulative:
                 logger.info("Research: read budget reached (%s chars)", cumulative_read_chars)
+                yield {"type": "research_tool_status", "text": f"Read budget reached ({cumulative_read_chars:,} chars). Synthesizing..."}
                 break
 
         # Final synthesis — stream
@@ -477,7 +679,7 @@ class ResearchOrchestrator:
 
         async for event in chat_completions_stream(messages, temperature=0.3):
             if event.get("type") == "text":
-                yield event.get("content", "")
+                yield {"type": "research_final_summary", "content": event.get("content", "")}
 
     # -- main loop ---------------------------------------------------------
 
@@ -498,9 +700,9 @@ class ResearchOrchestrator:
         all_ingested: list[dict] = []
 
         try:
-            # Phase 1: Survey wiki
-            survey = await self._survey_wiki(config.topic)
-            yield _make_event("research_survey", content=survey)
+            # Phase 1: Survey wiki (tool-calling — yields tool_start/tool_end/tool_status + research_survey)
+            async for event in self._survey_wiki(config.topic):
+                yield event
 
             for round_num in range(1, config.rounds + 1):
                 if _research_cancelled.get(session_id):
@@ -577,7 +779,7 @@ class ResearchOrchestrator:
                             break
                         yield _make_event("research_maintenance_progress",
                             step=step_name, details=step_result)
-                    step_count = 4 if is_final_round else 2
+                    step_count = 4 if is_final_round else 1
                     yield _make_event("research_maintenance_complete",
                         summary={"steps_completed": step_count})
 
@@ -590,12 +792,37 @@ class ResearchOrchestrator:
 
             # Phase 6: Final summary
             yield _make_event("research_summarizing", message="Generating final report...")
-            async for chunk in self._generate_final_summary(config.topic, all_ingested):
-                yield _make_event("research_final_summary", content=chunk)
+            async for event in self._generate_final_summary(config.topic, all_ingested):
+                yield event
 
             # Surface any warnings (e.g. PDF URLs that returned HTML)
             if self._warnings:
                 yield _make_event("research_warnings", warnings=self._warnings)
+
+            # Generate a concise title for the research
+            yield _make_event("research_tool_status", text="Generating title...")
+            try:
+                from core.llm import chat_completions_non_streaming
+                title_response = await chat_completions_non_streaming(
+                    [
+                        {"role": "system", "content": (
+                            "Generate a concise, descriptive title (5-8 words) for a research "
+                            "report. Return ONLY the title, no quotes, no punctuation at the end."
+                        )},
+                        {"role": "user", "content": (
+                            f"Research topic: {config.topic}\n"
+                            f"Sources ingested: {len([r for r in all_ingested if r.get('status') == 'ingested'])}\n"
+                            f"Rounds: {config.rounds}\n\n"
+                            "Generate a concise title for this research."
+                        )},
+                    ],
+                    temperature=0.4, max_tokens=64,
+                )
+                raw_title = (title_response.get("content") or "").strip().strip('"').strip("'")
+                if raw_title:
+                    yield _make_event("research_title", title=f"Research: {raw_title}")
+            except Exception:
+                pass
 
             yield _make_event("research_complete",
                 total_sources_ingested=len([r for r in all_ingested if r.get("status") == "ingested"]))

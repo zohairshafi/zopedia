@@ -422,14 +422,18 @@ WIKI_WEB_SEARCH_TOOL = {
 WIKI_TOOLS = [WIKI_READ_PAGE_TOOL, WIKI_WEB_SEARCH_TOOL]
 
 
-async def execute_web_search(query: str, max_results: int = 5) -> str:
-    """Search the web using DuckDuckGo and return JSON results."""
+async def execute_web_search(query: str, max_results: int = 5, timelimit: str = "m") -> str:
+    """Search the web using DuckDuckGo and return JSON results.
+    timelimit: 'd' (day), 'w' (week), 'm' (month), 'y' (year), or '' (no limit)."""
     try:
         from ddgs import DDGS
 
         results = []
+        kwargs: dict = {"max_results": max_results}
+        if timelimit:
+            kwargs["timelimit"] = timelimit
         with DDGS() as ddgs:
-            for r in ddgs.text(query, max_results=max_results):
+            for r in ddgs.text(query, **kwargs):
                 results.append({
                     "title": r.get("title", ""),
                     "url": r.get("href", ""),
@@ -444,6 +448,34 @@ async def execute_web_search(query: str, max_results: int = 5) -> str:
         return json.dumps({"error": "duckduckgo_search package not installed. Run: pip install duckduckgo_search"})
     except Exception as exc:
         return json.dumps({"error": f"Web search failed: {exc}"})
+
+
+async def execute_video_search(query: str, max_results: int = 5, timelimit: str = "m") -> str:
+    """Search for videos using ddgs videos() endpoint. Returns JSON results.
+    Use for YouTube source type — much better than text search with site:youtube.com."""
+    try:
+        from ddgs import DDGS
+
+        results = []
+        kwargs: dict = {"max_results": max_results}
+        if timelimit:
+            kwargs["timelimit"] = timelimit
+        with DDGS() as ddgs:
+            for r in ddgs.videos(query, **kwargs):
+                results.append({
+                    "title": r.get("title", ""),
+                    "url": r.get("content", ""),  # ddgs videos use 'content' for URL
+                    "snippet": (r.get("description", "") or "")[:300],
+                })
+
+        if not results:
+            return json.dumps({"results": [], "query": query, "hint": "No video results found."})
+
+        return json.dumps({"results": results, "query": query}, ensure_ascii=False)
+    except ImportError:
+        return json.dumps({"error": "duckduckgo_search package not installed."})
+    except Exception as exc:
+        return json.dumps({"error": f"Video search failed: {exc}"})
 
 
 def execute_wiki_search(wiki_dir: str, query: str, max_results: int = 10) -> str:

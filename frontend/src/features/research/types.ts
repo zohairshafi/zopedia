@@ -7,9 +7,18 @@ export interface ResearchConfig {
   auto_mode: boolean;
   trusted_sources: string[];
   blocked_sources: string[];
-  research_depth: "shallow" | "standard" | "deep";
+  research_depth: "shallow" | "standard" | "deep" | "custom";
   source_types: string[];
+  timelimit: string;
 }
+
+export const TIMELIMIT_OPTIONS = [
+  { value: "all", label: "Any time" },
+  { value: "d", label: "Past 24 hours" },
+  { value: "w", label: "Past week" },
+  { value: "m", label: "Past month" },
+  { value: "y", label: "Past year" },
+];
 
 export interface SourceSuggestion {
   url: string;
@@ -56,6 +65,9 @@ export interface ResearchState {
   maintenanceSteps: Record<string, unknown>;
   totalIngested: number;
   warnings: { url: string; error: string }[];
+  toolStatus: string;
+  toolActivities: ToolActivity[];
+  researchTitle: string;
 }
 
 export type ResearchEventType =
@@ -73,10 +85,22 @@ export type ResearchEventType =
   | "research_round_complete"
   | "research_summarizing"
   | "research_final_summary"
+  | "research_tool_status"
+  | "research_tool_start"
+  | "research_tool_end"
+  | "research_title"
   | "research_complete"
   | "research_warnings"
   | "research_cancelled"
   | "research_error";
+
+export interface ToolActivity {
+  toolName: string;
+  toolCallId: string;
+  path: string;
+  sizeChars: number;
+  preview: string;
+}
 
 export interface ResearchEvent {
   type: ResearchEventType;
@@ -87,9 +111,10 @@ export const DEPTH_PRESETS: Record<
   string,
   { label: string; rounds: number; sources_per_round: number }
 > = {
-  shallow: { label: "Shallow (2 rounds, 5 sources)", rounds: 2, sources_per_round: 5 },
-  standard: { label: "Standard (3 rounds, 10 sources)", rounds: 3, sources_per_round: 10 },
-  deep: { label: "Deep (5 rounds, 15 sources)", rounds: 5, sources_per_round: 15 },
+  shallow: { label: "Shallow (2 rounds, 10 sources)", rounds: 2, sources_per_round: 10 },
+  standard: { label: "Standard (3 rounds, 15 sources)", rounds: 3, sources_per_round: 15 },
+  deep: { label: "Deep (5 rounds, 50 sources)", rounds: 5, sources_per_round: 50 },
+  custom: { label: "Custom", rounds: 3, sources_per_round: 15 },
 };
 
 export const SOURCE_TYPE_OPTIONS = [
@@ -103,12 +128,13 @@ export const SOURCE_TYPE_OPTIONS = [
 export function defaultResearchConfig(): ResearchConfig {
   return {
     topic: "",
-    rounds: 3,
+    rounds: 2,
     sources_per_round: 10,
     auto_mode: false,
     trusted_sources: [],
     blocked_sources: [],
     research_depth: "standard",
     source_types: [],
+    timelimit: "m",
   };
 }

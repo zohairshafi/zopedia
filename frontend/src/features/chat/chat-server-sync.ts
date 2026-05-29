@@ -77,7 +77,7 @@ async function fetchServerThread(threadId: string): Promise<{ thread: any; messa
   }
 }
 
-async function saveThreadToServer(
+export async function saveThreadToServer(
   threadId: string,
   title: string,
   messages: Array<{ id: string; role: string; content: any; reasoning_content?: string; parent_id?: string | null; created_at?: string }>,

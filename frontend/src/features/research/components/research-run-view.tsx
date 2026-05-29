@@ -11,7 +11,7 @@ import { ResearchProgressBar } from "./research-progress-bar";
 import { ResearchRoundSummary } from "./research-round-summary";
 import { ResearchFinalReport } from "./research-final-report";
 import { db } from "@/features/chat/db";
-import { debouncedSaveThreadToServer } from "@/features/chat/chat-server-sync";
+import { saveThreadToServer } from "@/features/chat/chat-server-sync";
 import type { ResearchConfig, ResearchEvent, SourceSuggestion } from "../types";
 
 interface Props {
@@ -32,6 +32,10 @@ export function ResearchRunView({ config, sessionId, onNewResearch }: Props) {
   const error = useResearchStore((s) => s.error);
   const totalIngested = useResearchStore((s) => s.totalIngested);
   const warnings = useResearchStore((s) => s.warnings);
+  const toolStatus = useResearchStore((s) => s.toolStatus);
+  const toolActivities = useResearchStore((s) => s.toolActivities);
+  const surveyContent = useResearchStore((s) => s.surveyContent);
+  const researchTitle = useResearchStore((s) => s.researchTitle);
 
   const setPhase = useResearchStore((s) => s.setPhase);
   const setCurrentRound = useResearchStore((s) => s.setCurrentRound);
@@ -41,6 +45,11 @@ export function ResearchRunView({ config, sessionId, onNewResearch }: Props) {
   const appendFinalReport = useResearchStore((s) => s.appendFinalReport);
   const setError = useResearchStore((s) => s.setError);
   const setTotalIngested = useResearchStore((s) => s.setTotalIngested);
+  const setToolStatus = useResearchStore((s) => s.setToolStatus);
+  const addToolActivity = useResearchStore((s) => s.addToolActivity);
+  const clearToolActivities = useResearchStore((s) => s.clearToolActivities);
+  const completeToolActivity = useResearchStore((s) => s.completeToolActivity);
+  const setResearchTitle = useResearchStore((s) => s.setResearchTitle);
 
   const controllerRef = useRef<AbortController | null>(null);
   const ingestedCountRef = useRef(0);
@@ -53,7 +62,9 @@ export function ResearchRunView({ config, sessionId, onNewResearch }: Props) {
           setPhase("surveying");
           break;
         case "research_survey":
+          useResearchStore.getState().setSurveyContent(event.content as string);
           setPhase("searching");
+          clearToolActivities();
           break;
         case "research_round_start":
           setCurrentRound(event.round as number);
@@ -93,7 +104,33 @@ export function ResearchRunView({ config, sessionId, onNewResearch }: Props) {
           break;
         case "research_summarizing":
           setPhase("summarizing");
+          clearToolActivities();
           break;
+        case "research_tool_status":
+          setToolStatus(event.text as string);
+          break;
+        case "research_tool_start":
+          addToolActivity({
+            toolName: event.tool_name as string,
+            toolCallId: event.tool_call_id as string,
+            path: (event.arguments as { path: string })?.path ?? "",
+            sizeChars: 0,
+            preview: "",
+          });
+          break;
+        case "research_tool_end": {
+          const resultStr = event.result as string;
+          let resultData: { size_chars?: number; preview?: string } = {};
+          try {
+            resultData = JSON.parse(resultStr);
+          } catch { /* ignore */ }
+          completeToolActivity(
+            event.tool_call_id as string,
+            resultData.size_chars ?? 0,
+            resultData.preview ?? "",
+          );
+          break;
+        }
         case "research_final_summary":
           appendFinalReport(event.content as string);
           break;
@@ -102,11 +139,14 @@ export function ResearchRunView({ config, sessionId, onNewResearch }: Props) {
             (event.warnings as { url: string; error: string }[]) ?? []
           );
           break;
+        case "research_title":
+          setResearchTitle(event.title as string);
+          break;
         case "research_complete":
           setPhase("complete");
           break;
         case "research_cancelled":
-          setError("Research was cancelled.");
+          onNewResearch();
           break;
         case "research_error":
           setError(event.message as string);
@@ -116,6 +156,8 @@ export function ResearchRunView({ config, sessionId, onNewResearch }: Props) {
     [
       setPhase, setCurrentRound, setTotalRounds, setSources,
       addRoundResult, appendFinalReport, setError, setTotalIngested,
+      setToolStatus, addToolActivity, completeToolActivity, clearToolActivities,
+      setResearchTitle, onNewResearch,
     ],
   );
 
@@ -145,11 +187,11 @@ export function ResearchRunView({ config, sessionId, onNewResearch }: Props) {
     if (phase === "complete" && finalReport && !savedRef.current) {
       savedRef.current = true;
       const threadId = sessionId;
-      const topic = config.topic;
+      const title = researchTitle || config.topic;
       const now = Date.now();
 
       const contextMsg = [
-        `Research topic: ${topic}`,
+        `Research topic: ${config.topic}`,
         `Rounds: ${config.rounds} | Sources per round: ${config.sources_per_round}`,
         `Sources ingested: ${totalIngested}`,
         roundResults.map((r) =>
@@ -160,38 +202,62 @@ export function ResearchRunView({ config, sessionId, onNewResearch }: Props) {
           : "",
       ].join("\n");
 
-      Promise.all([
-        db.threads.put({
-          id: threadId,
-          title: topic,
-          modelType: "base",
-          archived: false,
-          createdAt: now,
-          messageCount: 2,
-        }),
-        db.messages.put({
-          id: `${threadId}-ctx`,
-          threadId,
-          role: "system",
-          content: [{ type: "text", text: contextMsg }],
-          createdAt: now,
-        }),
-        db.messages.put({
-          id: `${threadId}-report`,
-          threadId,
-          role: "assistant",
-          content: [{ type: "text", text: finalReport }],
-          createdAt: now + 1,
-        }),
-      ]).then(() => {
-        setSavedThreadId(threadId);
-        // Push to server so it persists across devices
-        debouncedSaveThreadToServer(threadId);
-      }).catch((err) => {
-        console.error("Failed to save research thread:", err);
-      });
+      (async () => {
+        try {
+          // Save locally
+          await Promise.all([
+            db.threads.put({
+              id: threadId,
+              title,
+              modelType: "base",
+              archived: false,
+              createdAt: now,
+              messageCount: 2,
+            }),
+            db.messages.put({
+              id: `${threadId}-ctx`,
+              threadId,
+              role: "system",
+              content: [{ type: "text", text: contextMsg }],
+              createdAt: now,
+            }),
+            db.messages.put({
+              id: `${threadId}-report`,
+              threadId,
+              role: "assistant",
+              content: [{ type: "text", text: finalReport }],
+              createdAt: now + 1,
+            }),
+          ]);
+
+          setSavedThreadId(threadId);
+
+          // Save to server immediately so messages survive refresh
+          await saveThreadToServer(
+            threadId,
+            title,
+            [
+              {
+                id: `${threadId}-ctx`,
+                role: "system",
+                content: [{ type: "text", text: contextMsg }],
+                created_at: new Date(now).toISOString(),
+              },
+              {
+                id: `${threadId}-report`,
+                role: "assistant",
+                content: [{ type: "text", text: finalReport }],
+                created_at: new Date(now + 1).toISOString(),
+              },
+            ],
+            now,
+          );
+        } catch (err) {
+          console.error("Failed to save research thread:", err);
+        }
+      })();
     }
-  }, [phase, finalReport, sessionId, config, totalIngested, roundResults, warnings]);
+  }, [phase, finalReport, sessionId, config, totalIngested, roundResults, warnings, researchTitle]);
 
   const handleApprove = async (urls: string[]) => {
     setPhase("ingesting");
@@ -218,7 +284,7 @@ export function ResearchRunView({ config, sessionId, onNewResearch }: Props) {
     } catch {
       // ignore
     }
-    setError("Research cancelled.");
+    onNewResearch();
   };
 
   if (error) {
@@ -305,12 +371,51 @@ export function ResearchRunView({ config, sessionId, onNewResearch }: Props) {
         />
       )}
 
-      {(phase === "searching" || phase === "surveying") && (
+      {phase === "surveying" && (
+        <Card className="p-6 space-y-3">
+          {toolStatus && (
+            <div className="text-sm text-muted-foreground">{toolStatus}</div>
+          )}
+          {toolActivities.filter((a) => a.toolCallId !== "").length > 0 && (
+            <div className="space-y-1.5 max-h-[300px] overflow-y-auto">
+              {toolActivities
+                .filter((a) => a.toolCallId !== "")
+                .map((a) => (
+                  <div
+                    key={a.toolCallId}
+                    className="text-xs border rounded-md p-2 bg-muted/30"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium truncate flex-1">
+                        {a.path || "..."}
+                      </span>
+                      {a.sizeChars > 0 && (
+                        <span className="text-muted-foreground shrink-0">
+                          {a.sizeChars.toLocaleString()} chars
+                        </span>
+                      )}
+                    </div>
+                    {a.preview && (
+                      <div className="text-muted-foreground mt-1 truncate">
+                        {a.preview}
+                      </div>
+                    )}
+                  </div>
+                ))}
+            </div>
+          )}
+          {!toolStatus && !toolActivities.length && (
+            <div className="animate-pulse text-muted-foreground">
+              Surveying existing wiki knowledge...
+            </div>
+          )}
+        </Card>
+      )}
+
+      {phase === "searching" && (
         <Card className="p-6 text-center space-y-3">
           <div className="animate-pulse text-muted-foreground">
-            {phase === "surveying"
-              ? "Surveying existing wiki knowledge..."
-              : `Searching for sources (Round ${currentRound}/${totalRounds})...`}
+            Searching for sources (Round {currentRound}/{totalRounds})...
           </div>
         </Card>
       )}
@@ -333,15 +438,49 @@ export function ResearchRunView({ config, sessionId, onNewResearch }: Props) {
 
       {phase === "summarizing" && (
         <Card className="p-6 space-y-3">
-          <div className="animate-pulse text-muted-foreground">
-            Generating final research summary...
-          </div>
-          {finalReport && (
+          {toolStatus && (
+            <div className="text-sm text-muted-foreground">{toolStatus}</div>
+          )}
+          {toolActivities.filter((a) => a.toolCallId !== "").length > 0 && (
+            <div className="space-y-1.5 max-h-[300px] overflow-y-auto">
+              {toolActivities
+                .filter((a) => a.toolCallId !== "")
+                .map((a) => (
+                  <div
+                    key={a.toolCallId}
+                    className="text-xs border rounded-md p-2 bg-muted/30"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium truncate flex-1">
+                        {a.path || "..."}
+                      </span>
+                      {a.sizeChars > 0 && (
+                        <span className="text-muted-foreground shrink-0">
+                          {a.sizeChars.toLocaleString()} chars
+                        </span>
+                      )}
+                    </div>
+                    {a.preview && (
+                      <div className="text-muted-foreground mt-1 truncate">
+                        {a.preview}
+                      </div>
+                    )}
+                  </div>
+                ))}
+            </div>
+          )}
+          {finalReport ? (
             <div className="prose prose-sm dark:prose-invert max-w-none">
               <div className="whitespace-pre-wrap leading-relaxed">
                 {finalReport}
               </div>
             </div>
+          ) : (
+            !toolStatus && (
+              <div className="animate-pulse text-muted-foreground">
+                Generating final research summary...
+              </div>
+            )
           )}
         </Card>
       )}

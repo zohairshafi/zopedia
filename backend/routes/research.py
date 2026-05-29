@@ -48,6 +48,7 @@ async def research_stream(request: Request):
         blocked_sources=list(body.get("blocked_sources", [])),
         research_depth=str(body.get("research_depth", "standard")),
         source_types=list(body.get("source_types", [])),
+        timelimit="" if body.get("timelimit") == "all" else str(body.get("timelimit", "m")),
     )
 
     session_id = body.get("session_id", uuid.uuid4().hex[:16])
