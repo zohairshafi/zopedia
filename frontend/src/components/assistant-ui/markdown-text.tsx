@@ -54,7 +54,7 @@ const STREAMDOWN_COMPONENTS = {
 };
 const COPY_RESET_MS = 2000;
 const MERMAID_SOURCE_RE = /```mermaid\s*([\s\S]*?)```/i;
-const CODE_FENCE_RE = /^```([^\r\n`]*)\r?\n([\s\S]*?)\r?\n?```$/;
+const CODE_FENCE_RE = /^```([^\r\n`]*)\r?\n([\s\S]*?)\r?\n?```\s*$/;
 const ACTION_PANEL_CLASS =
   "pointer-events-auto flex shrink-0 items-center gap-2 rounded-md border border-sidebar bg-sidebar/80 px-1.5 py-1 supports-[backdrop-filter]:bg-sidebar/70 supports-[backdrop-filter]:backdrop-blur dark:border-white/10 dark:bg-code-block dark:supports-[backdrop-filter]:bg-code-block";
 const ACTION_BUTTON_CLASS =
@@ -126,7 +126,8 @@ function isSvgFence(codeFence: CodeFence): boolean {
 
 function isHtmlFence(codeFence: CodeFence): boolean {
   const lang = codeFence.language?.toLowerCase() ?? "";
-  return lang === "html" && !isSvgFence(codeFence);
+  // Accept html, htm, and common LLM variants like "HTML" or "html "
+  return (lang === "html" || lang === "htm") && !isSvgFence(codeFence);
 }
 
 const UNSAFE_SVG_RE = /<script[\s>]|on\w+\s*=|javascript:|<foreignObject[\s>]|<iframe[\s>]|<embed[\s>]|<object[\s>]/i;

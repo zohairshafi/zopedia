@@ -446,7 +446,13 @@ async def openai_chat_completions(request: Request):
                         messages.pop()
                     # Add instruction to break the model out of tool-calling mode and force synthesis.
                     # Marked so we can remove it after streaming — it should not persist into the next turn.
-                    messages.append({"role": "user", "content": "Now synthesize a complete, thorough answer using all the wiki pages you just read. Provide the answer directly — do not output JSON or tool-call syntax.", "_ephemeral": True})
+                    messages.append({"role": "user", "content": (
+                        "Now synthesize a complete, thorough answer using all the wiki pages and web results you "
+                        "just accessed. DO NOT use any more tools. Provide the answer directly as plain markdown. CRITICAL: Do NOT output "
+                        "XML tags, tool invocations (like <invoke> or <function_call>), JSON structures, or any "
+                        "other machine-readable format. The user will see your raw output — write only the final answer."
+                        "If you need more information, admit you don't know and provide the best answer you can with what you have. Do not make up information or use the wiki/web tools anymore."
+                    ), "_ephemeral": True})
                 except Exception as exc:
                     logger.warning("Tool-calling retrieval failed, falling back: %s", exc)
                     yield f"data: {json.dumps({'type': 'tool_status', 'content': f'Error: {exc}'})}\n\n"
@@ -480,7 +486,14 @@ async def openai_chat_completions(request: Request):
                 messages = await _resolve_tool_calls(list(messages), wiki_tools, resolved_model)
                 if messages and messages[-1].get("role") == "assistant" and messages[-1].get("content") and not messages[-1].get("tool_calls"):
                     messages.pop()
-                messages.append({"role": "user", "content": "Now synthesize a complete, thorough answer using all the wiki pages you just read. Provide the answer directly — do not output JSON or tool-call syntax.", "_ephemeral": True})
+                messages.append({"role": "user", "content": (
+                    "Now synthesize a complete, thorough answer using all the wiki pages and web results you "
+                    "just accessed. DO NOT use any more tools. Provide the answer directly as plain markdown. CRITICAL: Do NOT output "
+                    "XML tags, tool invocations (like <invoke> or <function_call>), JSON structures, or any "
+                    "other machine-readable format. The user will see your raw output — write only the final answer."
+                    "If you need more information, admit you don't know and provide the best answer you can with what you have. Do not make up information or use the wiki/web tools anymore."
+
+                ), "_ephemeral": True})
             except Exception as exc:
                 logger.warning("Tool-calling retrieval failed, falling back: %s", exc)
                 if query:
