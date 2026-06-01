@@ -180,6 +180,53 @@ def upsert_thread(
         conn.close()
 
 
+def append_thread_messages(
+    thread_id: str,
+    username: str,
+    title: str | None,
+    updated_at: str,
+    messages: list[dict],
+) -> None:
+    """Append messages to an existing thread without clearing previous ones.
+
+    If the thread doesn't exist yet, creates it. Unlike upsert_thread,
+    this does NOT delete existing messages — it only inserts new ones.
+    """
+    conn = _get_connection()
+    try:
+        # Upsert the thread record (create if new, update timestamp if existing)
+        conn.execute(
+            """
+            INSERT INTO chat_threads (id, username, title, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(id, username) DO UPDATE SET
+                title = COALESCE(excluded.title, chat_threads.title),
+                updated_at = excluded.updated_at
+            """,
+            (thread_id, username, title, updated_at, updated_at),
+        )
+        for msg in messages:
+            conn.execute(
+                """
+                INSERT INTO chat_messages (id, thread_id, username, role, content, reasoning_content, parent_id, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    msg.get("id", ""),
+                    thread_id,
+                    username,
+                    msg.get("role", ""),
+                    _serialize_content(msg.get("content")),
+                    msg.get("reasoning_content"),
+                    msg.get("parent_id"),
+                    msg.get("created_at", ""),
+                ),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def delete_thread(thread_id: str, username: str) -> bool:
     conn = _get_connection()
     try:

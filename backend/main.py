@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import shutil
@@ -198,6 +199,17 @@ async def lifespan(app: FastAPI):
     # Wire auth dependency
     app.state.get_current_subject = _get_current_subject
 
+    # Start periodic research scheduler
+    try:
+        from periodic_scheduler import PeriodicScheduler
+        scheduler = PeriodicScheduler()
+        asyncio.create_task(scheduler.start())
+        app.state.periodic_scheduler = scheduler
+        logger.info("Periodic research scheduler started")
+    except Exception as exc:
+        logger.warning("Periodic scheduler startup failed: %s", exc)
+        app.state.periodic_scheduler = None
+
     # Wire restart support for wiki env editing.
     # Does an in-process soft reload: re-applies stored env overrides and
     # bridge defaults, then refreshes all module-level constants and wiki
@@ -252,6 +264,14 @@ async def lifespan(app: FastAPI):
             logger.info("Wiki watcher stopped.")
         except Exception as exc:
             logger.warning("Error stopping wiki watcher: %s", exc)
+    # Stop periodic scheduler
+    periodic = getattr(app.state, "periodic_scheduler", None)
+    if periodic:
+        try:
+            await periodic.shutdown()
+            logger.info("Periodic scheduler stopped.")
+        except Exception as exc:
+            logger.warning("Error stopping periodic scheduler: %s", exc)
 
 
 # ── App ────────────────────────────────────────────────────────────
@@ -348,6 +368,8 @@ app.include_router(_chat_history_router, prefix="/api")
 # Research mode
 from routes.research import router as research_router
 app.include_router(research_router, prefix="")
+from routes.periodic import router as periodic_router
+app.include_router(periodic_router, prefix="")
 
 # ── Shutdown ────────────────────────────────────────────────────────
 

@@ -15,7 +15,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import AsyncGenerator, Optional
+from typing import AsyncGenerator, Callable, Optional
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
@@ -442,6 +442,73 @@ class ResearchOrchestrator:
 
     # -- ingestion ---------------------------------------------------------
 
+    async def _rank_sources(self, topic: str, sources: list[dict]) -> list[dict]:
+        """Use the LLM to rank discovered sources by relevance and domain authority.
+
+        Cost: one small LLM call per round (~1-3s). Returns reordered list.
+        Falls back to original order on any error.
+        """
+        if len(sources) < 2:
+            return sources
+
+        from core.llm import chat_completions_non_streaming
+
+        source_entries = []
+        for i, s in enumerate(sources):
+            domain = urlparse(s["url"]).netloc
+            source_entries.append(
+                f"{i}. [{s.get('source_type', 'webpage')}] {s.get('title', '')}\n"
+                f"   Domain: {domain}\n"
+                f"   Snippet: {(s.get('snippet', '') or '')[:200]}"
+            )
+
+        prompt = f"""Research topic: "{topic}"
+
+Rank the following sources by relevance and domain authority for this topic.
+Consider:
+- How directly the source addresses the topic (primary factor)
+- Domain authority for this subject area — e.g. arxiv.org for scientific/technical
+  topics, bloomberg.com/reuters.com for financial, biorxiv.org for biology, etc.
+- Specificity and depth of the title/snippet
+- Recency is NOT a factor (all are equally recent)
+
+Return ONLY a JSON array of the source indices (0-based) in descending order of
+relevance, most relevant first. Include ALL indices.
+Example response format: [3, 0, 5, 1, 2, 4]
+
+Sources:
+{chr(10).join(source_entries)}"""
+
+        try:
+            response = await chat_completions_non_streaming(
+                [{"role": "user", "content": prompt}],
+                temperature=0.2, max_tokens=300,
+            )
+            content = (response.get("content") or "").strip()
+            match = re.search(r"\[[\d,\s]+\]", content)
+            if match:
+                ranked_indices = json.loads(match.group())
+                seen: set[int] = set()
+                ranked: list[dict] = []
+                for idx in ranked_indices:
+                    if isinstance(idx, int) and 0 <= idx < len(sources) and idx not in seen:
+                        ranked.append(sources[idx])
+                        seen.add(idx)
+                # Append any sources the LLM missed
+                for i, s in enumerate(sources):
+                    if i not in seen:
+                        ranked.append(s)
+                if len(ranked) == len(sources):
+                    logger.info(
+                        "Research: ranked %d sources by relevance for topic '%s'",
+                        len(sources), topic[:60],
+                    )
+                    return ranked
+        except Exception as exc:
+            logger.warning("Research: source ranking failed: %s", exc)
+
+        return sources  # fallback: original order
+
     async def _ingest_sources(self, urls: list[str]) -> list[dict]:
         """Ingest multiple URLs into the wiki. Runs up to 3 concurrently."""
         results: list[dict] = []
@@ -715,6 +782,7 @@ class ResearchOrchestrator:
                 # Phase 2: Discover sources
                 yield _make_event("research_searching", round=round_num, queries=[])
                 sources = await self._discover_sources(config.topic, round_num, config)
+                sources = await self._rank_sources(config.topic, sources)
                 yield _make_event("research_sources_found",
                     round=round_num, sources=sources)
 
@@ -834,3 +902,133 @@ class ResearchOrchestrator:
             _research_sessions.pop(session_id, None)
             _research_approvals.pop(session_id, None)
             _research_cancelled.pop(session_id, None)
+
+    # -- headless execution (for periodic research) ------------------------
+
+    async def run_research_headless(
+        self,
+        config: ResearchConfig,
+        session_id: str,
+        url_already_ingested: Callable[[str], bool] | None = None,
+    ) -> dict:
+        """Run a complete research cycle without SSE streaming.
+
+        Returns a result dict suitable for saving as a chat thread.
+        Forces auto_mode; filters to trusted-only sources during periodic runs.
+        """
+        started_at = datetime.now(timezone.utc).isoformat()
+        all_ingested: list[dict] = []
+        final_report_parts: list[str] = []
+        warnings: list[dict] = []
+
+        # Force auto mode — no user interaction in headless mode
+        config = _apply_depth_preset(config)
+        config.auto_mode = True
+
+        try:
+            # Phase 1: Survey wiki (consume generator, needed for context)
+            async for _event in self._survey_wiki(config.topic):
+                pass
+
+            for round_num in range(1, config.rounds + 1):
+                # Phase 2: Discover sources
+                sources = await self._discover_sources(config.topic, round_num, config)
+                sources = await self._rank_sources(config.topic, sources)
+
+                # Filter to trusted-only during periodic runs (when trusted sources set)
+                if config.trusted_sources:
+                    trusted = [s for s in sources if s["is_trusted"]]
+                    non_trusted = [s for s in sources if not s["is_trusted"]]
+                    for s in non_trusted:
+                        warnings.append({
+                            "url": s["url"],
+                            "title": s.get("title", ""),
+                            "error": "Skipped (not trusted) during periodic run",
+                        })
+                    sources = trusted
+
+                # Filter out previously ingested URLs
+                if url_already_ingested:
+                    sources = [s for s in sources if not url_already_ingested(s["url"])]
+
+                if not sources:
+                    logger.info("Research headless: no new sources in round %d", round_num)
+                    continue
+
+                approved_urls = [
+                    s["url"] for s in sources
+                    if not s.get("already_in_wiki")
+                ][: config.sources_per_round]
+
+                # Phase 4: Ingest
+                results: list[dict] = []
+                if approved_urls:
+                    results = await self._ingest_sources(approved_urls)
+                    all_ingested.extend(results)
+                    # Track ingested URLs for dedup
+                    for r in results:
+                        if r.get("status") == "ingested" and r.get("url"):
+                            pass  # caller handles via url_already_ingested
+
+                # Phase 5: Maintenance
+                ingested_this_round = [r for r in results if r.get("status") == "ingested"]
+                if ingested_this_round:
+                    is_final = round_num == config.rounds
+                    maintenance = self._run_maintenance() if is_final else self._run_light_maintenance()
+                    async for _step_name, _step_result in maintenance:
+                        pass
+
+            # Phase 6: Final summary
+            async for event in self._generate_final_summary(config.topic, all_ingested):
+                if event.get("type") == "research_final_summary":
+                    final_report_parts.append(event.get("content", ""))
+
+            # Collect all warnings
+            warnings.extend(self._warnings)
+
+            # Title generation
+            title = None
+            try:
+                from core.llm import chat_completions_non_streaming
+                title_response = await chat_completions_non_streaming(
+                    [
+                        {"role": "system", "content": (
+                            "Generate a concise, descriptive title (5-8 words) for a research "
+                            "report. Return ONLY the title, no quotes, no punctuation at the end."
+                        )},
+                        {"role": "user", "content": (
+                            f"Research topic: {config.topic}\n"
+                            f"Sources ingested: {len([r for r in all_ingested if r.get('status') == 'ingested'])}\n"
+                            f"Rounds: {config.rounds}\n\n"
+                            "Generate a concise title for this research."
+                        )},
+                    ],
+                    temperature=0.4, max_tokens=64,
+                )
+                raw_title = (title_response.get("content") or "").strip().strip('"').strip("'")
+                if raw_title:
+                    title = f"Research: {raw_title}"
+            except Exception:
+                pass
+
+            return {
+                "topic": config.topic,
+                "final_report": "".join(final_report_parts),
+                "total_ingested": len([r for r in all_ingested if r.get("status") == "ingested"]),
+                "warnings": warnings,
+                "title": title or config.topic,
+                "started_at": started_at,
+                "completed_at": datetime.now(timezone.utc).isoformat(),
+            }
+        except Exception:
+            logger.exception("Research headless: fatal error for topic '%s'", config.topic)
+            return {
+                "topic": config.topic,
+                "final_report": "",
+                "total_ingested": 0,
+                "warnings": warnings,
+                "title": config.topic,
+                "started_at": started_at,
+                "completed_at": datetime.now(timezone.utc).isoformat(),
+                "error": "Research failed — see logs for details",
+            }

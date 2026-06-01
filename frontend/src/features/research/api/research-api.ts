@@ -1,5 +1,5 @@
 import { authFetch } from "@/features/auth";
-import type { ResearchConfig, ResearchEvent } from "../types";
+import type { FullPeriodicConfig, PeriodicConfig, ResearchConfig, ResearchEvent } from "../types";
 
 /**
  * Stream research events from the backend SSE endpoint.
@@ -92,5 +92,89 @@ export async function cancelResearch(sessionId: string): Promise<void> {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ session_id: sessionId }),
+  });
+}
+
+/**
+ * Create a periodic research config.
+ */
+export async function createPeriodicResearch(
+  config: ResearchConfig,
+): Promise<{ id: string; next_run_at: string }> {
+  const res = await authFetch("/api/research/periodic", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(config),
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to create periodic research (${res.status})`);
+  }
+  return res.json();
+}
+
+/**
+ * List all periodic configs for the current user.
+ */
+export async function listPeriodicResearch(): Promise<PeriodicConfig[]> {
+  const res = await authFetch("/api/research/periodic");
+  if (!res.ok) return [];
+  const data = await res.json();
+  return data.configs ?? [];
+}
+
+/**
+ * Delete a periodic research config.
+ */
+export async function deletePeriodicResearch(id: string): Promise<void> {
+  await authFetch(`/api/research/periodic/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+}
+
+/**
+ * Trigger immediate execution of a periodic config.
+ */
+export async function runPeriodicResearchNow(id: string): Promise<void> {
+  await authFetch(`/api/research/periodic/${encodeURIComponent(id)}/run-now`, {
+    method: "POST",
+  });
+}
+
+/**
+ * Get a single periodic config with full details for editing.
+ */
+export async function getPeriodicResearch(id: string): Promise<FullPeriodicConfig> {
+  const res = await authFetch(`/api/research/periodic/${encodeURIComponent(id)}`);
+  if (!res.ok) throw new Error(`Failed to get periodic research (${res.status})`);
+  return res.json();
+}
+
+/**
+ * Update an existing periodic research config.
+ */
+export async function updatePeriodicResearch(
+  id: string,
+  config: ResearchConfig,
+): Promise<{ id: string; next_run_at: string }> {
+  const res = await authFetch(`/api/research/periodic/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(config),
+  });
+  if (!res.ok) throw new Error(`Failed to update periodic research (${res.status})`);
+  return res.json();
+}
+
+/**
+ * Enable or disable a periodic research config.
+ */
+export async function togglePeriodicResearch(
+  id: string,
+  enabled: boolean,
+): Promise<void> {
+  await authFetch(`/api/research/periodic/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled }),
   });
 }

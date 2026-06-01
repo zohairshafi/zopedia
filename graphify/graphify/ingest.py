@@ -255,48 +255,90 @@ Source: {url}
 def _fetch_arxiv(
     url: str, author: str | None, contributor: str | None
 ) -> tuple[str, str]:
-    """Fetch arXiv abstract page."""
-    # Convert /abs/ or /pdf/ to abs for the API
+    """Fetch arXiv paper: metadata from abstract page + full text from PDF."""
     arxiv_id = re.search(r"(\d{4}\.\d{4,5})", url)
-    if arxiv_id:
-        api_url = f"https://export.arxiv.org/abs/{arxiv_id.group(1)}"
-        try:
-            html = _fetch_html(api_url)
-            abstract_match = re.search(
-                r'class="abstract[^"]*"[^>]*>(.*?)</blockquote>',
-                html,
-                re.DOTALL | re.IGNORECASE,
-            )
-            abstract = (
-                re.sub(r"<[^>]+>", "", abstract_match.group(1)).strip()
-                if abstract_match
-                else ""
-            )
-            title_match = re.search(
-                r'class="title[^"]*"[^>]*>(.*?)</h1>', html, re.DOTALL | re.IGNORECASE
-            )
-            title = (
-                re.sub(r"<[^>]+>", " ", title_match.group(1)).strip()
-                if title_match
-                else arxiv_id.group(1)
-            )
-            authors_match = re.search(
-                r'class="authors"[^>]*>(.*?)</div>', html, re.DOTALL | re.IGNORECASE
-            )
-            paper_authors = (
-                re.sub(r"<[^>]+>", "", authors_match.group(1)).strip()
-                if authors_match
-                else ""
-            )
-        except Exception:
-            title, abstract, paper_authors = arxiv_id.group(1), "", ""
-    else:
+    if not arxiv_id:
         return _fetch_webpage(url, author, contributor)
 
+    aid = arxiv_id.group(1)
+
+    # --- Metadata from abstract API ---
+    api_url = f"https://export.arxiv.org/abs/{aid}"
+    title = aid
+    abstract = ""
+    paper_authors = ""
+    try:
+        html = _fetch_html(api_url)
+        abstract_match = re.search(
+            r'class="abstract[^"]*"[^>]*>(.*?)</blockquote>',
+            html,
+            re.DOTALL | re.IGNORECASE,
+        )
+        abstract = (
+            re.sub(r"<[^>]+>", "", abstract_match.group(1)).strip()
+            if abstract_match
+            else ""
+        )
+        title_match = re.search(
+            r'class="title[^"]*"[^>]*>(.*?)</h1>', html, re.DOTALL | re.IGNORECASE
+        )
+        title = (
+            re.sub(r"<[^>]+>", " ", title_match.group(1)).strip()
+            if title_match
+            else aid
+        )
+        authors_match = re.search(
+            r'class="authors"[^>]*>(.*?)</div>', html, re.DOTALL | re.IGNORECASE
+        )
+        paper_authors = (
+            re.sub(r"<[^>]+>", "", authors_match.group(1)).strip()
+            if authors_match
+            else ""
+        )
+    except Exception:
+        pass  # fall back to aid as title, empty abstract/authors
+
+    # --- Full text from PDF ---
+    pdf_text = ""
+    try:
+        pdf_url = f"https://arxiv.org/pdf/{aid}.pdf"
+        pdf_data = safe_fetch(pdf_url)
+
+        # Verify it's actually a PDF
+        if pdf_data.startswith(_PDF_MAGIC):
+            try:
+                import fitz  # pymupdf
+
+                doc = fitz.open("pdf", pdf_data)
+                pages: list[str] = []
+                for page in doc:
+                    text = page.get_text()
+                    if text:
+                        pages.append(text)
+                doc.close()
+                pdf_text = "\n\n".join(pages)
+            except Exception as exc:
+                logger.warning("pymupdf extraction failed for %s: %s", aid, exc)
+                # Fallback: try pdfplumber
+                try:
+                    import pdfplumber
+                    import io
+
+                    with pdfplumber.open(io.BytesIO(pdf_data)) as pdf:
+                        pages = [p.extract_text() or "" for p in pdf.pages]
+                    pdf_text = "\n\n".join(pages)
+                except Exception as exc2:
+                    logger.warning("pdfplumber fallback also failed for %s: %s", aid, exc2)
+        else:
+            logger.warning("arXiv PDF URL returned non-PDF content for %s", aid)
+    except Exception as exc:
+        logger.warning("arXiv PDF download failed for %s: %s", aid, exc)
+
     now = datetime.now(timezone.utc).isoformat()
-    content = f"""---
+    if pdf_text:
+        content = f"""---
 source_url: {url}
-arxiv_id: {arxiv_id.group(1) if arxiv_id else ''}
+arxiv_id: {aid}
 type: paper
 title: "{title}"
 paper_authors: "{paper_authors}"
@@ -307,7 +349,33 @@ contributor: {contributor or author or 'unknown'}
 # {title}
 
 **Authors:** {paper_authors}
-**arXiv:** {arxiv_id.group(1) if arxiv_id else url}
+**arXiv:** {aid}
+
+## Abstract
+
+{abstract}
+
+## Full Text
+
+{pdf_text}
+
+Source: {url}
+"""
+    else:
+        content = f"""---
+source_url: {url}
+arxiv_id: {aid}
+type: paper
+title: "{title}"
+paper_authors: "{paper_authors}"
+captured_at: {now}
+contributor: {contributor or author or 'unknown'}
+---
+
+# {title}
+
+**Authors:** {paper_authors}
+**arXiv:** {aid}
 
 ## Abstract
 
@@ -315,11 +383,8 @@ contributor: {contributor or author or 'unknown'}
 
 Source: {url}
 """
-    filename = (
-        f"arxiv_{arxiv_id.group(1).replace('.', '_')}.md"
-        if arxiv_id
-        else _safe_filename(url, ".md")
-    )
+
+    filename = f"arxiv_{aid.replace('.', '_')}.md"
     return content, filename
 
 
