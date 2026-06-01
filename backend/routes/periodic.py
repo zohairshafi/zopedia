@@ -29,17 +29,19 @@ class CreatePeriodicRequest(BaseModel):
     periodic_interval: str = "daily"  # hourly, daily, weekly, monthly
     periodic_hour: int | None = None  # 0-23
     periodic_dow: int | None = None   # 0=Mon..6=Sun, for weekly
-    periodic_dom: int | None = None   # 1-28, for monthly
+    periodic_dom: int | None = None   # 1-31, for monthly (clamped to last day)
 
 
 async def _get_username(request: Request) -> str:
-    """Get the current authenticated username, or 'default' if auth is disabled."""
-    try:
-        get_subject = getattr(request.app.state, "get_current_subject", None)
-        if get_subject:
-            return await get_subject(request)
-    except Exception:
-        pass
+    """Get the current authenticated username.
+
+    Uses require_valid_subject so that expired JWTs trigger a 401,
+    which tells the frontend to refresh its token and retry.
+    The 401 must propagate — do not catch HTTPException here.
+    """
+    require_valid = getattr(request.app.state, "require_valid_subject", None)
+    if require_valid:
+        return await require_valid(request)
     return "default"
 
 

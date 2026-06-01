@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -80,9 +80,11 @@ export function ResearchSetupForm({ onStart, onUpdated, loading, editConfig }: P
     editConfig ? editConfig.blocked_sources.join("\n") : prefs.blocked,
   );
   const [periodicLoading, setPeriodicLoading] = useState(false);
+  const submittingRef = useRef(false);
 
   const handleStart = async () => {
-    if (!config.topic.trim()) return;
+    if (!config.topic.trim() || submittingRef.current) return;
+    submittingRef.current = true;
     const fullConfig: ResearchConfig = {
       ...config,
       trusted_sources: trustedText
@@ -112,11 +114,13 @@ export function ResearchSetupForm({ onStart, onUpdated, loading, editConfig }: P
         console.error("Failed to save periodic research:", err);
       } finally {
         setPeriodicLoading(false);
+        submittingRef.current = false;
       }
       return;
     }
 
     onStart(fullConfig);
+    submittingRef.current = false;
   };
 
   const applyDepth = (depth: string) => {
@@ -419,7 +423,7 @@ export function ResearchSetupForm({ onStart, onUpdated, loading, editConfig }: P
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="any">Any day</SelectItem>
-                      {Array.from({ length: 28 }, (_, i) => (
+                      {Array.from({ length: 31 }, (_, i) => (
                         <SelectItem key={i + 1} value={String(i + 1)}>
                           {i + 1}
                           {i + 1 === 1

@@ -68,21 +68,23 @@ def _compute_next_run(
         if next_dt <= now:
             next_dt = datetime.fromtimestamp(next_dt.timestamp() + 7 * 86400, tz=timezone.utc)
     elif interval_type == "monthly" and run_dom is not None:
-        # Try the specified day of this month; if it passed, try next month
+        # Try the specified day of this month; if it passed or doesn't exist, clamp
         try:
-            next_dt = now.replace(day=min(run_dom, 28), hour=hour, minute=0, second=0, microsecond=0)
-            if next_dt <= now:
-                # Move to next month
-                if now.month == 12:
-                    next_dt = next_dt.replace(year=now.year + 1, month=1)
-                else:
-                    next_dt = next_dt.replace(month=now.month + 1)
-            next_dt = next_dt.replace(day=min(run_dom, _days_in_month(next_dt.year, next_dt.month)))
+            next_dt = now.replace(day=run_dom, hour=hour, minute=0, second=0, microsecond=0)
         except ValueError:
-            next_dt = now.replace(day=1, hour=hour, minute=0, second=0, microsecond=0)
-            if next_dt <= now:
-                next_dt = datetime.fromtimestamp(next_dt.timestamp() + 32 * 86400, tz=timezone.utc)
-                next_dt = next_dt.replace(day=min(run_dom, _days_in_month(next_dt.year, next_dt.month)))
+            # Day doesn't exist in current month (e.g. Feb 30), use last day
+            last_day = _days_in_month(now.year, now.month)
+            next_dt = now.replace(day=last_day, hour=hour, minute=0, second=0, microsecond=0)
+        if next_dt <= now:
+            # Move to next month
+            if now.month == 12:
+                next_dt = next_dt.replace(year=now.year + 1, month=1)
+            else:
+                next_dt = next_dt.replace(month=now.month + 1)
+            # Clamp to days in the new month
+            next_dt = next_dt.replace(
+                day=min(run_dom, _days_in_month(next_dt.year, next_dt.month))
+            )
     else:
         # Daily or no specific day constraint — use hour if set
         next_dt = now.replace(hour=hour, minute=0, second=0, microsecond=0)

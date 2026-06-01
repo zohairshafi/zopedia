@@ -198,6 +198,7 @@ async def lifespan(app: FastAPI):
 
     # Wire auth dependency
     app.state.get_current_subject = _get_current_subject
+    app.state.require_valid_subject = _require_valid_subject
 
     # Start periodic research scheduler
     try:
@@ -577,4 +578,4 @@ if __name__ == "__main__":
     import uvicorn
 
     logger.info("Starting Zopedia on port %d", _PORT)
-    uvicorn.run("main:app", host="0.0.0.0", port=_PORT, reload=False)
+    uvicorn.run("main:app", host="::", port=_PORT, reload=False)

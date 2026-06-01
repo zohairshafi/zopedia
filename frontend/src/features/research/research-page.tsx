@@ -133,9 +133,15 @@ export function ResearchPage() {
   const refreshPeriodic = useCallback(async () => {
     try {
       const list = await listPeriodicResearch();
-      setPeriodicConfigs(list);
-    } catch {
-      // ignore
+      // Deduplicate by ID in case of race conditions
+      const seen = new Set<string>();
+      setPeriodicConfigs(list.filter((c) => {
+        if (seen.has(c.id)) return false;
+        seen.add(c.id);
+        return true;
+      }));
+    } catch (err) {
+      console.error("Failed to fetch periodic configs:", err);
     }
   }, []);
 

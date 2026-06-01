@@ -14,7 +14,7 @@ export interface ResearchConfig {
   periodic_interval: "hourly" | "daily" | "weekly" | "monthly";
   periodic_hour: number | null;
   periodic_dow: number | null;  // 0=Mon..6=Sun, for weekly
-  periodic_dom: number | null;  // 1-28, for monthly
+  periodic_dom: number | null;  // 1-31, for monthly (clamped to last day of month)
 }
 
 export const DOW_OPTIONS = [
