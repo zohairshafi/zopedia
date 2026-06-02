@@ -118,6 +118,7 @@ function categoryForVariable(name: string): WikiVariableCategory {
     return "Quality & Maintenance";
   }
   if (
+    name.includes("RAG_PREFETCH") ||
     name.includes("TOOL_RETRIEVAL") ||
     name.includes("MAX_TOOL_TURNS") ||
     name.includes("MAX_READS_PER_TURN") ||

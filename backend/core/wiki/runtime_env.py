@@ -45,6 +45,12 @@ WIKI_ENV_SPECS: tuple[WikiEnvSpec, ...] = (
         description="Run automatic wiki analysis after ingestion.",
     ),
     WikiEnvSpec(
+        name="ZOPEDIA_RAG_PREFETCH_ENABLED",
+        kind="bool",
+        default="false",
+        description="Pre-inject top-ranked wiki pages into the system prompt before each chat message. When disabled, the LLM relies entirely on tool-calling (read_wiki_page) for retrieval.",
+    ),
+    WikiEnvSpec(
         name="ZOPEDIA_WIKI_TOOL_RETRIEVAL",
         kind="bool",
         default="true",

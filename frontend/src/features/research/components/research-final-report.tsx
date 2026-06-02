@@ -3,6 +3,10 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { Download03Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { Streamdown } from "streamdown";
+import { preprocessWikiLinks } from "@/lib/wiki-links";
+import { useMemo } from "react";
+import "katex/dist/katex.min.css";
 
 interface Props {
   content: string;
@@ -17,6 +21,8 @@ export function ResearchFinalReport({
   totalIngested,
   onNewResearch,
 }: Props) {
+  const processedContent = useMemo(() => preprocessWikiLinks(content), [content]);
+
   const handleExport = () => {
     const blob = new Blob([content], { type: "text/markdown" });
     const url = URL.createObjectURL(blob);
@@ -51,8 +57,10 @@ export function ResearchFinalReport({
 
       <ScrollArea className="h-[60vh] rounded-md border">
         <div className="p-4 prose prose-sm dark:prose-invert max-w-none">
-          {content ? (
-            <div className="whitespace-pre-wrap leading-relaxed">{content}</div>
+          {processedContent ? (
+            <Streamdown mode="static">
+              {processedContent}
+            </Streamdown>
           ) : (
             <p className="text-muted-foreground text-sm italic">
               Generating summary...

@@ -39,6 +39,7 @@ import {
   CursorInfo02Icon,
   Delete02Icon,
   Download03Icon,
+  FolderTreeIcon,
   FolderUploadIcon,
   GearsIcon,
   GemIcon,
@@ -81,6 +82,7 @@ import { toast } from "sonner";
 import { ShutdownDialog } from "@/components/shutdown-dialog";
 import { WikiBehaviourDialog } from "@/components/wiki-behaviour-dialog";
 import { WikiDataDialog } from "@/components/wiki-data-dialog";
+import { WikiFileBrowser } from "@/components/wiki-file-browser";
 import { WikiUploadDialog } from "@/components/wiki-upload-dialog";
 
 type WikiLintApiResponse = {
@@ -300,6 +302,7 @@ export function AppSidebar() {
   const [shutdownOpen, setShutdownOpen] = useState(false);
   const [wikiBehaviourOpen, setWikiBehaviourOpen] = useState(false);
   const [wikiDataOpen, setWikiDataOpen] = useState(false);
+  const [wikiFilesOpen, setWikiFilesOpen] = useState(false);
   const [isRunningRebuildIndex, setIsRunningRebuildIndex] = useState(false);
   const [wikiUploadOpen, setWikiUploadOpen] = useState(false);
 
@@ -776,34 +779,6 @@ export function AppSidebar() {
                 <SidebarMenu>
                   <SidebarMenuItem>
                     <SidebarMenuButton
-                      onClick={handleWikiLint}
-                      disabled={isRunningWikiLint || isRunningWikiMaintenance}
-                      className="h-[32px] rounded-[10px] gap-[8.5px] px-2.5 font-medium text-[#383835] dark:text-[#c7c7c4] hover:bg-[#f0f0f0]! dark:hover:bg-[#2a2c2f]! hover:text-black! dark:hover:text-white! data-active:bg-[#f0f0f0]! dark:data-active:bg-[#2a2c2f]! data-active:text-black! dark:data-active:text-white!"
-                    >
-                      <HugeiconsIcon icon={LicenseMaintenanceIcon} strokeWidth={1.75} className="size-[18px]! shrink-0" />
-                      <span className="text-[14px] leading-[18px] tracking-[0.01em]">
-                        {isRunningWikiLint ? "Linting..." : "Run Lint"}
-                      </span>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-
-                  <SidebarMenuItem>
-                    <SidebarMenuButton
-                      onClick={() => {
-                        void handleRebuildIndex();
-                      }}
-                      disabled={isRunningRebuildIndex || isRunningWikiMaintenance || isRunningWikiLint}
-                      className="h-[32px] rounded-[10px] gap-[8.5px] px-2.5 font-medium text-[#383835] dark:text-[#c7c7c4] hover:bg-[#f0f0f0]! dark:hover:bg-[#2a2c2f]! hover:text-black! dark:hover:text-white! data-active:bg-[#f0f0f0]! dark:data-active:bg-[#2a2c2f]! data-active:text-black! dark:data-active:text-white!"
-                    >
-                      <HugeiconsIcon icon={ArrowReloadHorizontalIcon} strokeWidth={1.75} className="size-[18px]! shrink-0" />
-                      <span className="text-[14px] leading-[18px] tracking-[0.01em]">
-                        {isRunningRebuildIndex ? "Rebuilding..." : "Refresh Index"}
-                      </span>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-
-                  <SidebarMenuItem>
-                    <SidebarMenuButton
                       onClick={() => {
                         void handleWikiMaintenance("without-web-fill");
                       }}
@@ -838,7 +813,72 @@ export function AppSidebar() {
                     </SidebarMenuButton>
                   </SidebarMenuItem>
 
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      onClick={() => {
+                        setWikiFilesOpen(true);
+                        closeMobileIfOpen();
+                      }}
+                      className="h-[32px] rounded-[10px] gap-[8.5px] px-2.5 font-medium text-[#383835] dark:text-[#c7c7c4] hover:bg-[#f0f0f0]! dark:hover:bg-[#2a2c2f]! hover:text-black! dark:hover:text-white! data-active:bg-[#f0f0f0]! dark:data-active:bg-[#2a2c2f]! data-active:text-black! dark:data-active:text-white!"
+                    >
+                      <HugeiconsIcon icon={FolderTreeIcon} strokeWidth={1.75} className="size-[18px]! shrink-0" />
+                      <span className="text-[14px] leading-[18px] tracking-[0.01em]">
+                        Browse Wiki Files
+                      </span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      onClick={() => {
+                        setWikiUploadOpen(true);
+                        closeMobileIfOpen();
+                      }}
+                      className="h-[32px] rounded-[10px] gap-[8.5px] px-2.5 font-medium text-[#383835] dark:text-[#c7c7c4] hover:bg-[#f0f0f0]! dark:hover:bg-[#2a2c2f]! hover:text-black! dark:hover:text-white! data-active:bg-[#f0f0f0]! dark:data-active:bg-[#2a2c2f]! data-active:text-black! dark:data-active:text-white!"
+                    >
+                      <HugeiconsIcon icon={FolderUploadIcon} strokeWidth={1.75} className="size-[18px]! shrink-0" />
+                      <span className="text-[14px] leading-[18px] tracking-[0.01em]">
+                        Upload Files
+                      </span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+
                   <div className="my-0.5 border-t border-border mx-2" />
+
+                  {/* Advanced Settings sub-section */}
+                  <div className="pt-1 pb-0.5">
+                    <span className="pl-2.5 text-[11.5px] font-normal tracking-normal text-[#9d9fa5] dark:text-[#62605a]">
+                      Advanced Settings
+                    </span>
+                  </div>
+
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      onClick={handleWikiLint}
+                      disabled={isRunningWikiLint || isRunningWikiMaintenance}
+                      className="h-[32px] rounded-[10px] gap-[8.5px] px-2.5 font-medium text-[#383835] dark:text-[#c7c7c4] hover:bg-[#f0f0f0]! dark:hover:bg-[#2a2c2f]! hover:text-black! dark:hover:text-white! data-active:bg-[#f0f0f0]! dark:data-active:bg-[#2a2c2f]! data-active:text-black! dark:data-active:text-white!"
+                    >
+                      <HugeiconsIcon icon={LicenseMaintenanceIcon} strokeWidth={1.75} className="size-[18px]! shrink-0" />
+                      <span className="text-[14px] leading-[18px] tracking-[0.01em]">
+                        {isRunningWikiLint ? "Linting..." : "Run Lint"}
+                      </span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      onClick={() => {
+                        void handleRebuildIndex();
+                      }}
+                      disabled={isRunningRebuildIndex || isRunningWikiMaintenance || isRunningWikiLint}
+                      className="h-[32px] rounded-[10px] gap-[8.5px] px-2.5 font-medium text-[#383835] dark:text-[#c7c7c4] hover:bg-[#f0f0f0]! dark:hover:bg-[#2a2c2f]! hover:text-black! dark:hover:text-white! data-active:bg-[#f0f0f0]! dark:data-active:bg-[#2a2c2f]! data-active:text-black! dark:data-active:text-white!"
+                    >
+                      <HugeiconsIcon icon={ArrowReloadHorizontalIcon} strokeWidth={1.75} className="size-[18px]! shrink-0" />
+                      <span className="text-[14px] leading-[18px] tracking-[0.01em]">
+                        {isRunningRebuildIndex ? "Rebuilding..." : "Refresh Index"}
+                      </span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
 
                   <SidebarMenuItem>
                     <SidebarMenuButton
@@ -868,23 +908,6 @@ export function AppSidebar() {
                       <HugeiconsIcon icon={Settings05Icon} strokeWidth={1.75} className="size-[18px]! shrink-0" />
                       <span className="text-[14px] leading-[18px] tracking-[0.01em]">
                         Edit Wiki Behaviour
-                      </span>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-
-                  <div className="my-0.5 border-t border-border mx-2" />
-
-                  <SidebarMenuItem>
-                    <SidebarMenuButton
-                      onClick={() => {
-                        setWikiUploadOpen(true);
-                        closeMobileIfOpen();
-                      }}
-                      className="h-[32px] rounded-[10px] gap-[8.5px] px-2.5 font-medium text-[#383835] dark:text-[#c7c7c4] hover:bg-[#f0f0f0]! dark:hover:bg-[#2a2c2f]! hover:text-black! dark:hover:text-white! data-active:bg-[#f0f0f0]! dark:data-active:bg-[#2a2c2f]! data-active:text-black! dark:data-active:text-white!"
-                    >
-                      <HugeiconsIcon icon={FolderUploadIcon} strokeWidth={1.75} className="size-[18px]! shrink-0" />
-                      <span className="text-[14px] leading-[18px] tracking-[0.01em]">
-                        Upload Files
                       </span>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
@@ -1051,6 +1074,10 @@ export function AppSidebar() {
     <WikiDataDialog
       open={wikiDataOpen}
       onOpenChange={setWikiDataOpen}
+    />
+    <WikiFileBrowser
+      open={wikiFilesOpen}
+      onOpenChange={setWikiFilesOpen}
     />
     </>
   );

@@ -92,7 +92,13 @@ def _extract_last_user_query(messages: list[dict]) -> str:
 
 
 def _inject_rag_context(messages: list[dict], query: str) -> tuple[list[dict], Optional[str]]:
-    """Inject wiki RAG context as a system message (legacy path)."""
+    """Inject wiki RAG context as a system message (legacy path).
+
+    Controlled by ZOPEDIA_RAG_PREFETCH_ENABLED env var. Defaults to disabled.
+    When disabled, the LLM relies entirely on tool calling (read_wiki_page)."""
+    if not os.getenv("ZOPEDIA_RAG_PREFETCH_ENABLED", "").strip().lower() in ("1", "true", "yes", "on"):
+        return messages, None
+
     try:
         context = _get_route_rag_context(query)
     except Exception:

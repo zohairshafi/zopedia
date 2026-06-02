@@ -5,6 +5,7 @@
 
 import { copyToClipboard } from "@/lib/copy-to-clipboard";
 import { preprocessLaTeX } from "@/lib/latex";
+import { preprocessWikiLinks } from "@/lib/wiki-links";
 import { openLink } from "@/lib/open-link";
 import { INTERNAL, useMessagePartText } from "@assistant-ui/react";
 import { Copy02Icon, Tick02Icon } from "@hugeicons/core-free-icons";
@@ -418,7 +419,7 @@ const AUDIO_PLAYER_RE = /<audio-player\s+src="([^"]+)"\s*\/>/;
 
 const MarkdownTextImpl = () => {
   const { text, status } = useMessagePartText();
-  const processedText = useMemo(() => preprocessLaTeX(text), [text]);
+  const processedText = useMemo(() => preprocessWikiLinks(preprocessLaTeX(text)), [text]);
 
   const audioMatch = text.match(AUDIO_PLAYER_RE);
   if (audioMatch) {

@@ -330,11 +330,42 @@ def _get_route_rag_context(
             blocks = blocks[:max_pages]
 
     if not blocks and not wants_history and include_source_pages:
-        sources_dir = _WIKI_VAULT / "wiki" / "sources"
-        if sources_dir.exists() and any(x in query_lower for x in ("resume", ".pdf", "document")):
-            candidates = sorted([p for p in sources_dir.glob("*.md") if "chat-history" not in p.name.lower()], key=lambda p: p.stat().st_mtime, reverse=True)
-            for p in candidates[:max_pages]:
-                blocks.append({"page": f"sources/{p.stem}.md", "score": 1.0, "content": p.read_text(encoding="utf-8", errors="ignore")})
+        # Fallback: simple keyword + filename search across all wiki pages.
+        # Splits the query into terms and finds files whose name or content
+        # contains those terms, ranked by how many distinct terms match.
+        wiki_pages = _WIKI_VAULT / "wiki"
+        fallback_terms = [t for t in re.findall(r"[a-zA-Z0-9]{2,}", query_lower) if t not in {
+            "the", "and", "for", "with", "that", "this", "what", "when",
+            "where", "who", "why", "how", "from", "into", "about", "tell",
+            "please", "using", "wiki", "context", "only", "are", "was",
+        }]
+        if fallback_terms:
+            scored: list[tuple[Path, int]] = []
+            for p in wiki_pages.rglob("*.md"):
+                if ".archive" in str(p):
+                    continue
+                name_lower = p.name.lower()
+                hit_count = sum(1 for t in fallback_terms if t in name_lower)
+                if hit_count > 0:
+                    # File name match — bonus points
+                    scored.append((p, hit_count * 10))
+                else:
+                    # Check content (only first 8KB for performance)
+                    try:
+                        sample = p.read_text(encoding="utf-8", errors="ignore")[:8192].lower()
+                    except Exception:
+                        continue
+                    hit_count = sum(1 for t in fallback_terms if t in sample)
+                    if hit_count > 0:
+                        scored.append((p, hit_count))
+            scored.sort(key=lambda x: x[1], reverse=True)
+            for p, hits in scored[:max_pages]:
+                try:
+                    content = p.read_text(encoding="utf-8", errors="ignore")
+                except Exception:
+                    continue
+                rel = str(p.relative_to(wiki_pages))
+                blocks.append({"page": rel, "score": float(hits), "content": content})
 
     if not include_source_pages:
         blocks = [b for b in blocks if not str(b.get("page", "")).lower().startswith("sources/")]
@@ -866,3 +897,108 @@ async def wiki_save_chat_history(payload: WikiChatHistorySaveRequest, current_su
         watcher_enabled=watcher_enabled,
         ingested_immediately=ingested,
     )
+
+
+# ── Wiki file serving (for clickable wiki citations) ─────────────────
+
+@router.get("/wiki-file")
+async def serve_wiki_file(request: Request, path: str):
+    """Serve a wiki page as plain text for viewing in a new tab."""
+    from fastapi.responses import PlainTextResponse
+
+    wiki_dir = Path(os.getenv("ZOPEDIA_WIKI_VAULT", "./wiki_data")).expanduser()
+    wiki_pages = wiki_dir / "wiki"
+
+    # Security: prevent path traversal
+    safe_path = os.path.normpath(path).lstrip("/")
+    full_path = wiki_pages / safe_path
+
+    # Try exact path, then with .md extension
+    if not full_path.exists():
+        full_path = wiki_pages / (safe_path + ".md")
+    if not full_path.exists():
+        # Try case-insensitive match
+        full_path_str = str(full_path).lower()
+        for f in wiki_pages.rglob("*.md"):
+            if str(f).lower() == full_path_str:
+                full_path = f
+                break
+
+    if not full_path.exists() or not str(full_path).startswith(str(wiki_pages)):
+        raise HTTPException(status_code=404, detail=f"Wiki page not found: {path}")
+
+    try:
+        content = full_path.read_text(encoding="utf-8", errors="ignore")
+        return PlainTextResponse(content=content, media_type="text/markdown; charset=utf-8")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ── Wiki file browser ────────────────────────────────────────────────
+
+@router.get("/wiki/files")
+async def list_wiki_files():
+    """Return the wiki directory tree for the file browser UI."""
+    wiki_dir = Path(os.getenv("ZOPEDIA_WIKI_VAULT", "./wiki_data")).expanduser()
+    wiki_pages = wiki_dir / "wiki"
+
+    if not wiki_pages.exists():
+        return {"directories": {}, "root_files": []}
+
+    directories: dict[str, dict] = {}
+    root_files: list[dict] = []
+
+    try:
+        for entry in sorted(wiki_pages.iterdir()):
+            if entry.name.startswith("."):
+                continue
+
+            if entry.is_dir():
+                files: list[dict] = []
+                for f in sorted(entry.rglob("*.md")):
+                    if ".archive" in str(f):
+                        continue
+                    try:
+                        stat = f.stat()
+                        raw = f.read_text(encoding="utf-8", errors="ignore")
+                        preview = raw
+                        if raw.startswith("---"):
+                            end = raw.find("---", 3)
+                            if end != -1:
+                                preview = raw[end + 3:].strip()
+                        preview = preview[:120].replace("\n", " ").strip()
+                        files.append({
+                            "name": f.name,
+                            "relative_path": str(f.relative_to(wiki_pages)),
+                            "size": stat.st_size,
+                            "preview": preview,
+                        })
+                    except Exception:
+                        pass
+                directories[entry.name] = {
+                    "count": len(files),
+                    "files": files,
+                }
+            elif entry.is_file() and entry.suffix == ".md":
+                try:
+                    stat = entry.stat()
+                    raw = entry.read_text(encoding="utf-8", errors="ignore")
+                    preview = raw
+                    if raw.startswith("---"):
+                        end = raw.find("---", 3)
+                        if end != -1:
+                            preview = raw[end + 3:].strip()
+                    preview = preview[:120].replace("\n", " ").strip()
+                    root_files.append({
+                        "name": entry.name,
+                        "relative_path": entry.name,
+                        "size": stat.st_size,
+                        "preview": preview,
+                    })
+                except Exception:
+                    pass
+
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    return {"directories": directories, "root_files": root_files}
