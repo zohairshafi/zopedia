@@ -217,6 +217,8 @@ type ChatRuntimeStore = {
   toolsEnabled: boolean;
   codeToolsEnabled: boolean;
   toolStatus: string | null;
+  turnLimit: { sessionId: string; currentTurn: number; maxTurns: number } | null;
+  setTurnLimit: (limit: { sessionId: string; currentTurn: number; maxTurns: number } | null) => void;
   generatingStatus: string | null;
   autoHealToolCalls: boolean;
   maxToolCallsPerMessage: number;
@@ -307,6 +309,7 @@ export const useChatRuntimeStore = create<ChatRuntimeStore>((set) => ({
   toolsEnabled: initialUseUpstream,
   codeToolsEnabled: initialUseUpstream,
   toolStatus: null,
+  turnLimit: null,
   generatingStatus: null,
   autoHealToolCalls: loadBool(AUTO_HEAL_TOOL_CALLS_KEY, true),
   maxToolCallsPerMessage: loadInt(MAX_TOOL_CALLS_KEY, 25),
@@ -429,6 +432,7 @@ export const useChatRuntimeStore = create<ChatRuntimeStore>((set) => ({
       toolsEnabled: false,
       codeToolsEnabled: false,
       toolStatus: null,
+      turnLimit: null,
       kvCacheDtype: null,
       loadedKvCacheDtype: null,
       speculativeType: "ngram-mod",
@@ -462,6 +466,7 @@ export const useChatRuntimeStore = create<ChatRuntimeStore>((set) => ({
   setToolsEnabled: (toolsEnabled) => set({ toolsEnabled }),
   setCodeToolsEnabled: (codeToolsEnabled) => set({ codeToolsEnabled }),
   setToolStatus: (toolStatus) => set({ toolStatus }),
+  setTurnLimit: (turnLimit) => set({ turnLimit }),
   setGeneratingStatus: (generatingStatus) => set({ generatingStatus }),
   setAutoHealToolCalls: (autoHealToolCalls) =>
     set(() => {

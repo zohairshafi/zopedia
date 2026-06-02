@@ -69,6 +69,18 @@ def _wiki_max_cumulative_read_chars() -> int:
     return int(os.getenv("ZOPEDIA_WIKI_MAX_CUMULATIVE_READ_CHARS", "500000"))
 
 
+# ── Turn-limit continuation: in-memory session state ────────────────
+
+# Maps session_id -> asyncio.Event that the tool loop waits on when turns exhausted
+_turn_continuation_events: dict[str, asyncio.Event] = {}
+# Maps session_id -> new max_turns value set by extend-turns endpoint
+_turn_continuation_extensions: dict[str, int] = {}
+# Hard cap on turns to prevent infinite loops
+_MAX_TURNS_HARD_CAP = 32
+# Extra turns granted per extension
+_TURN_EXTENSION_INCREMENT = 4
+
+
 def _resolve_model(requested: Optional[str]) -> str:
     r = (requested or "").strip()
     if r and r not in {"default", "current"}:
@@ -148,6 +160,7 @@ async def _resolve_tool_calls_stream(
     tools: list[dict],
     resolved_model: str,
     max_turns: int | None = None,
+    session_id: str = "",
 ):
     if max_turns is None:
         max_turns = _wiki_max_tool_turns()
@@ -157,6 +170,10 @@ async def _resolve_tool_calls_stream(
       {"type": "tool_status", "text": "..."}
       {"type": "tool_start", "tool_name": "...", "tool_call_id": "...", "arguments": {...}}
       {"type": "tool_end", "tool_name": "...", "tool_call_id": "...", "result": "..."}
+      {"type": "turn_limit_reached", "current_turn": N, "max_turns": M}
+
+    When the turn limit is reached, emits turn_limit_reached and pauses
+    for user confirmation via the extend-turns endpoint.
 
     Does NOT yield content events — the final answer is streamed separately.
     Mutates messages in place with tool calls and results.
@@ -167,9 +184,11 @@ async def _resolve_tool_calls_stream(
     max_chars_per_read = _wiki_max_chars_per_read()
     max_cumulative = _wiki_max_cumulative_read_chars()
 
-    while turn < max_turns:
-        turn += 1
-        yield {"type": "tool_status", "text": f"Thinking... (turn {turn})"}
+    model_stopped = False
+    while True:  # outer loop: handles turn-limit extensions
+        while turn < max_turns:
+            turn += 1
+            yield {"type": "tool_status", "text": f"Thinking... (turn {turn})"}
 
         result = await chat_completions_non_streaming(
             messages,
@@ -199,6 +218,7 @@ async def _resolve_tool_calls_stream(
                 final_msg["reasoning_content"] = reasoning
             messages.append(final_msg)
             yield {"type": "tool_status", "text": "Synthesizing answer..."}
+            model_stopped = True
             break
 
         logger.info("Tool-calling turn %d: %d tool calls", turn, len(tool_calls))
@@ -294,11 +314,62 @@ async def _resolve_tool_calls_stream(
 
         # Stop further tool turns if cumulative read budget is exhausted
         if cumulative_read_chars >= max_cumulative:
-            yield {"type": "tool_status", "text": "Synthesizing answer..."}
+            yield {"type": "tool_status", "text": "Read budget reached. Synthesizing answer..."}
             break
+
+        # After inner loop: check if we hit turn limit and should ask user
+        if turn < max_turns or model_stopped:
+            break  # model finished naturally or budget stopped it
+
+        if not session_id or max_turns >= _MAX_TURNS_HARD_CAP:
+            break  # no session to extend, or already at hard cap
+
+        # Turn limit reached — ask user if they want to continue
+        yield {
+            "type": "turn_limit_reached",
+            "current_turn": turn,
+            "max_turns": max_turns,
+        }
+        event = asyncio.Event()
+        _turn_continuation_events[session_id] = event
+        try:
+            await asyncio.wait_for(event.wait(), timeout=30)
+        except asyncio.TimeoutError:
+            pass  # User didn't respond — treat as "stop"
+        finally:
+            _turn_continuation_events.pop(session_id, None)
+            new_max = _turn_continuation_extensions.pop(session_id, None)
+            if new_max and new_max > max_turns and new_max <= _MAX_TURNS_HARD_CAP:
+                max_turns = new_max
+                yield {"type": "tool_status", "text": f"Continuing research... ({max_turns - turn} more turns)"}
+                continue  # restart inner loop with new max_turns
+        break  # user said no or timed out
 
 
 # ── Standard chat/completions ──────────────────────────────────────
+
+
+@router.post("/api/chat/extend-turns")
+async def extend_tool_turns(body: dict):
+    """Extend the tool-calling turn limit for a paused chat session.
+
+    Called by the frontend when the user clicks "Continue" after seeing
+    the turn_limit_reached prompt. Signals the waiting tool loop to resume.
+    """
+    session_id = str(body.get("session_id", "")).strip()
+    if not session_id:
+        raise HTTPException(status_code=400, detail="session_id is required")
+
+    event = _turn_continuation_events.get(session_id)
+    if not event:
+        raise HTTPException(status_code=404, detail="No paused tool session found (may have timed out)")
+
+    current = _turn_continuation_extensions.get(session_id, 0)
+    new_max = max(current, _wiki_max_tool_turns()) + _TURN_EXTENSION_INCREMENT
+    new_max = min(new_max, _MAX_TURNS_HARD_CAP)
+    _turn_continuation_extensions[session_id] = new_max
+    event.set()
+    return {"status": "extended", "max_turns": new_max}
 
 
 @router.post("/chat/completions")
@@ -437,8 +508,9 @@ async def openai_chat_completions(request: Request):
                 created = int(time.time())
 
                 # Phase 1: tool resolution with progress events
+                session_id = chunk_id  # unique per request, used for turn-limit continuation
                 try:
-                    async for evt in _resolve_tool_calls_stream(messages, wiki_tools, resolved_model):
+                    async for evt in _resolve_tool_calls_stream(messages, wiki_tools, resolved_model, session_id=session_id):
                         etype = evt["type"]
                         if etype == "tool_status":
                             yield f"data: {json.dumps({'type': 'tool_status', 'content': evt['text']})}\n\n"
@@ -446,6 +518,8 @@ async def openai_chat_completions(request: Request):
                             yield f"data: {json.dumps({'type': 'tool_start', 'tool_name': evt['tool_name'], 'tool_call_id': evt['tool_call_id'], 'arguments': evt.get('arguments', {})})}\n\n"
                         elif etype == "tool_end":
                             yield f"data: {json.dumps({'type': 'tool_end', 'tool_name': evt['tool_name'], 'tool_call_id': evt['tool_call_id'], 'result': evt.get('result', '')})}\n\n"
+                        elif etype == "turn_limit_reached":
+                            yield f"data: {json.dumps({'type': 'turn_limit_reached', 'current_turn': evt['current_turn'], 'max_turns': evt['max_turns'], 'session_id': session_id})}\n\n"
 
                     # Pop any non-tool-call assistant message (narration/planning text).
                     if messages and messages[-1].get("role") == "assistant" and messages[-1].get("content") and not messages[-1].get("tool_calls"):
@@ -466,6 +540,10 @@ async def openai_chat_completions(request: Request):
                         fallback_msgs, _ = _inject_rag_context(messages, query)
                         messages.clear()
                         messages.extend(fallback_msgs)
+                finally:
+                    # Clean up turn-continuation session state
+                    _turn_continuation_events.pop(session_id, None)
+                    _turn_continuation_extensions.pop(session_id, None)
 
                 # Phase 2: always stream the final answer from the API.
                 # This ensures proper token-by-token output with full CoT visibility

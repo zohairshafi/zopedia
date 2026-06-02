@@ -36,6 +36,7 @@ import { sentAudioNames } from "@/features/chat/api/chat-adapter";
 import { useChatRuntimeStore } from "@/features/chat/stores/chat-runtime-store";
 import { applyQwenThinkingParams } from "@/features/chat/utils/qwen-params";
 import { deleteThreadMessage } from "@/features/chat/utils/delete-thread-message";
+import { TurnLimitPrompt } from "./turn-limit-prompt";
 import { AUDIO_ACCEPT, MAX_AUDIO_SIZE, fileToBase64 } from "@/lib/audio-utils";
 import { copyToClipboard } from "@/lib/copy-to-clipboard";
 import { cn } from "@/lib/utils";
@@ -140,6 +141,8 @@ export const Thread: FC<{
               AssistantMessage,
             }}
           />
+
+          <TurnLimitPrompt />
 
           {/* Bottom slack so the last message has breathing room above the
             sticky scroll-to-bottom button (and the floating composer in

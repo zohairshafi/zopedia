@@ -886,6 +886,17 @@ export function createOpenAIStreamAdapter(): ChatModelAdapter {
           // Emit tool-call content parts for assistant-ui.
           // On tool_start: add a new tool-call part (renders in "running" state).
           // On tool_end: set result on the existing part (transitions to "complete").
+          // Turn limit reached — pause and ask user to continue
+          const turnLimit = (chunk as unknown as { _turnLimitReached?: { current_turn: number; max_turns: number; session_id: string } })._turnLimitReached;
+          if (turnLimit !== undefined) {
+            runtime.setTurnLimit({
+              sessionId: turnLimit.session_id,
+              currentTurn: turnLimit.current_turn,
+              maxTurns: turnLimit.max_turns,
+            });
+            continue;
+          }
+
           const toolEvent = (chunk as unknown as { _toolEvent?: Record<string, unknown> })._toolEvent;
           if (toolEvent !== undefined) {
             if (toolEvent.type === "tool_start") {

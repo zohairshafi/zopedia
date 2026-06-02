@@ -303,6 +303,7 @@ export function AppSidebar() {
   const [wikiBehaviourOpen, setWikiBehaviourOpen] = useState(false);
   const [wikiDataOpen, setWikiDataOpen] = useState(false);
   const [wikiFilesOpen, setWikiFilesOpen] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [isRunningRebuildIndex, setIsRunningRebuildIndex] = useState(false);
   const [wikiUploadOpen, setWikiUploadOpen] = useState(false);
 
@@ -843,15 +844,24 @@ export function AppSidebar() {
                     </SidebarMenuButton>
                   </SidebarMenuItem>
 
-                  <div className="my-0.5 border-t border-border mx-2" />
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </CollapsibleContent>
+          </SidebarGroup>
+        </Collapsible>
 
-                  {/* Advanced Settings sub-section */}
-                  <div className="pt-1 pb-0.5">
-                    <span className="pl-2.5 text-[11.5px] font-normal tracking-normal text-[#9d9fa5] dark:text-[#62605a]">
-                      Advanced Settings
-                    </span>
-                  </div>
-
+        {/* Advanced Settings */}
+        <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen} asChild>
+          <SidebarGroup className="group-data-[collapsible=icon]:hidden overflow-hidden px-2 py-0">
+            <SidebarGroupLabel className="pt-2 pb-1.5 pl-2.5 pr-2 text-[12.5px]! font-normal normal-case tracking-normal text-[#62605a] dark:text-[#9d9fa5] focus-visible:ring-0! focus-visible:outline-none" asChild>
+              <CollapsibleTrigger className="cursor-pointer flex w-full items-center justify-between">
+                Advanced Settings
+                <ChevronDown className="size-3.5 transition-transform duration-200 data-[state=open]:rotate-0 [[data-state=closed]_&]:rotate-[-90deg]" />
+              </CollapsibleTrigger>
+            </SidebarGroupLabel>
+            <CollapsibleContent>
+              <SidebarGroupContent>
+                <SidebarMenu>
                   <SidebarMenuItem>
                     <SidebarMenuButton
                       onClick={handleWikiLint}

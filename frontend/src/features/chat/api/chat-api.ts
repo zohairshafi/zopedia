@@ -413,6 +413,12 @@ export async function* streamChatCompletions(
         separatorIndex = buffer.search(/\r?\n\r?\n/);
         continue;
       }
+      // Turn limit reached — ask user if they want to continue tool calling
+      if ("type" in parsed && parsed.type === "turn_limit_reached") {
+        yield { _turnLimitReached: parsed } as unknown as OpenAIChatChunk;
+        separatorIndex = buffer.search(/\r?\n\r?\n/);
+        continue;
+      }
       yield parsed as OpenAIChatChunk;
       separatorIndex = buffer.search(/\r?\n\r?\n/);
     }
@@ -436,4 +442,12 @@ export async function generateAudio(
   }
 
   return (await response.json()) as AudioGenerationResponse;
+}
+
+export async function extendToolTurns(sessionId: string): Promise<void> {
+  await authFetch("/v1/api/chat/extend-turns", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session_id: sessionId }),
+  });
 }
