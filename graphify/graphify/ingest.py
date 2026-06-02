@@ -29,8 +29,6 @@ def _detect_url_type(url: str) -> str:
     lower = url.lower()
     if "twitter.com" in lower or "x.com" in lower:
         return "tweet"
-    if "arxiv.org" in lower:
-        return "arxiv"
     if "github.com" in lower:
         return "github"
     if "youtube.com" in lower or "youtu.be" in lower:
@@ -252,142 +250,6 @@ Source: {url}
     return content, filename
 
 
-def _fetch_arxiv(
-    url: str, author: str | None, contributor: str | None
-) -> tuple[str, str]:
-    """Fetch arXiv paper: metadata from abstract page + full text from PDF."""
-    arxiv_id = re.search(r"(\d{4}\.\d{4,5})", url)
-    if not arxiv_id:
-        return _fetch_webpage(url, author, contributor)
-
-    aid = arxiv_id.group(1)
-
-    # --- Metadata from abstract API ---
-    api_url = f"https://export.arxiv.org/abs/{aid}"
-    title = aid
-    abstract = ""
-    paper_authors = ""
-    try:
-        html = _fetch_html(api_url)
-        abstract_match = re.search(
-            r'class="abstract[^"]*"[^>]*>(.*?)</blockquote>',
-            html,
-            re.DOTALL | re.IGNORECASE,
-        )
-        abstract = (
-            re.sub(r"<[^>]+>", "", abstract_match.group(1)).strip()
-            if abstract_match
-            else ""
-        )
-        title_match = re.search(
-            r'class="title[^"]*"[^>]*>(.*?)</h1>', html, re.DOTALL | re.IGNORECASE
-        )
-        title = (
-            re.sub(r"<[^>]+>", " ", title_match.group(1)).strip()
-            if title_match
-            else aid
-        )
-        authors_match = re.search(
-            r'class="authors"[^>]*>(.*?)</div>', html, re.DOTALL | re.IGNORECASE
-        )
-        paper_authors = (
-            re.sub(r"<[^>]+>", "", authors_match.group(1)).strip()
-            if authors_match
-            else ""
-        )
-    except Exception:
-        pass  # fall back to aid as title, empty abstract/authors
-
-    # --- Full text from PDF ---
-    pdf_text = ""
-    try:
-        pdf_url = f"https://arxiv.org/pdf/{aid}.pdf"
-        pdf_data = safe_fetch(pdf_url)
-
-        # Verify it's actually a PDF
-        if pdf_data.startswith(_PDF_MAGIC):
-            try:
-                import fitz  # pymupdf
-
-                doc = fitz.open("pdf", pdf_data)
-                pages: list[str] = []
-                for page in doc:
-                    text = page.get_text()
-                    if text:
-                        pages.append(text)
-                doc.close()
-                pdf_text = "\n\n".join(pages)
-            except Exception as exc:
-                logger.warning("pymupdf extraction failed for %s: %s", aid, exc)
-                # Fallback: try pdfplumber
-                try:
-                    import pdfplumber
-                    import io
-
-                    with pdfplumber.open(io.BytesIO(pdf_data)) as pdf:
-                        pages = [p.extract_text() or "" for p in pdf.pages]
-                    pdf_text = "\n\n".join(pages)
-                except Exception as exc2:
-                    logger.warning("pdfplumber fallback also failed for %s: %s", aid, exc2)
-        else:
-            logger.warning("arXiv PDF URL returned non-PDF content for %s", aid)
-    except Exception as exc:
-        logger.warning("arXiv PDF download failed for %s: %s", aid, exc)
-
-    now = datetime.now(timezone.utc).isoformat()
-    if pdf_text:
-        content = f"""---
-source_url: {url}
-arxiv_id: {aid}
-type: paper
-title: "{title}"
-paper_authors: "{paper_authors}"
-captured_at: {now}
-contributor: {contributor or author or 'unknown'}
----
-
-# {title}
-
-**Authors:** {paper_authors}
-**arXiv:** {aid}
-
-## Abstract
-
-{abstract}
-
-## Full Text
-
-{pdf_text}
-
-Source: {url}
-"""
-    else:
-        content = f"""---
-source_url: {url}
-arxiv_id: {aid}
-type: paper
-title: "{title}"
-paper_authors: "{paper_authors}"
-captured_at: {now}
-contributor: {contributor or author or 'unknown'}
----
-
-# {title}
-
-**Authors:** {paper_authors}
-**arXiv:** {aid}
-
-## Abstract
-
-{abstract}
-
-Source: {url}
-"""
-
-    filename = f"arxiv_{aid.replace('.', '_')}.md"
-    return content, filename
-
-
 _PDF_MAGIC = b"%PDF"
 
 
@@ -432,6 +294,13 @@ def ingest(
     except ValueError as exc:
         raise ValueError(f"ingest: {exc}") from exc
 
+    # Convert arxiv URLs to direct PDF downloads
+    if "arxiv.org" in url.lower():
+        arxiv_match = re.search(r"(\d{4}\.\d{4,5})", url)
+        if arxiv_match:
+            url = f"https://arxiv.org/pdf/{arxiv_match.group(1)}.pdf"
+            url_type = "pdf"
+
     try:
         if url_type == "pdf":
             out = _download_binary(url, ".pdf", target_dir)
@@ -446,8 +315,6 @@ def ingest(
 
         if url_type == "tweet":
             content, filename = _fetch_tweet(url, author, contributor)
-        elif url_type == "arxiv":
-            content, filename = _fetch_arxiv(url, author, contributor)
         elif url_type == "youtube":
             content, filename = _fetch_youtube(url, author, contributor)
         elif url_type == "github":

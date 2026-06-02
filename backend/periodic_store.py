@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import sqlite3
 import uuid
 from datetime import datetime, timezone
@@ -75,8 +76,15 @@ def _ensure_tables() -> None:
 
 
 def _normalize_url(url: str) -> str:
-    """Normalize a URL for dedup comparison."""
+    """Normalize a URL for dedup comparison.
+
+    Handles arXiv /abs/ vs /pdf/ equivalence by extracting just the ID.
+    """
     parsed = urlparse(url.strip().lower())
+    # arXiv: normalize /abs/ID and /pdf/ID to just the ID
+    arxiv_match = re.search(r"arxiv\.org/(?:abs|pdf)/(\d{4}\.\d{4,5})", f"{parsed.netloc}{parsed.path}")
+    if arxiv_match:
+        return f"arxiv:{arxiv_match.group(1)}"
     return f"{parsed.scheme}://{parsed.netloc}{parsed.path.rstrip('/')}"
 
 

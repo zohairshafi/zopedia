@@ -131,6 +131,7 @@ class ResearchOrchestrator:
         Yields tool_start/tool_end/tool_status events, then a research_survey event."""
         from core.llm import (
             chat_completions_non_streaming,
+            extract_content,
             execute_wiki_read,
             WIKI_READ_PAGE_TOOL,
         )
@@ -262,7 +263,7 @@ class ResearchOrchestrator:
             response = await chat_completions_non_streaming(
                 messages, temperature=0.3, max_tokens=2048,
             )
-            survey_text = (response.get("content") or "").strip()
+            survey_text = extract_content(response)
         except Exception as exc:
             logger.warning("Research: survey analysis failed: %s", exc)
             survey_text = ""
@@ -275,9 +276,9 @@ class ResearchOrchestrator:
         self, topic: str, round_num: int, config: ResearchConfig
     ) -> list[dict]:
         """Use LLM to generate search queries, execute them, and rank results."""
-        from core.llm import chat_completions_non_streaming, execute_web_search, execute_video_search
+        from core.llm import chat_completions_non_streaming, execute_web_search, execute_video_search, extract_content
 
-        num_queries = min(10, max(5, config.sources_per_round))  # ddgs hits 7+ engines per query
+        num_queries = min(8, max(3, config.sources_per_round // 2))  # ddgs hits 7+ engines per query
 
         # 1. LLM generates diverse search queries
         source_type_hint = ""
@@ -311,7 +312,7 @@ class ResearchOrchestrator:
         search_queries = [topic]
         try:
             response = await chat_completions_non_streaming(query_prompt)
-            content = (response.get("content") or "").strip()
+            content = extract_content(response)
             match = re.search(r"\{[^}]*\"queries\"[^}]*\}", content, re.DOTALL)
             if match:
                 parsed = json.loads(match.group(0))
@@ -325,19 +326,22 @@ class ResearchOrchestrator:
         for q in search_queries[:num_queries]:
             all_queries.append((q, 15, "text"))
 
+        # Use the best LLM-generated query (or topic fallback) for targeted searches
+        best_query = search_queries[0] if search_queries else topic
+
         # Add platform-targeted searches when source_types are specified
         if config.source_types:
             for st in config.source_types:
                 if st == "youtube":
-                    all_queries.append((f'"{topic}"', 8, "video"))
+                    all_queries.append((best_query, 5, "video"))
                 elif st == "tweet":
-                    all_queries.append((f'site:x.com OR site:twitter.com "{topic}"', 8, "text"))
+                    all_queries.append((f'site:x.com OR site:twitter.com {best_query}', 5, "text"))
                 elif st == "paper":
-                    all_queries.append((f'site:arxiv.org "{topic}"', 8, "text"))
+                    all_queries.append((f'site:arxiv.org {best_query}', 5, "text"))
                 elif st == "pdf":
-                    all_queries.append((f'"{topic}" filetype:pdf', 8, "text"))
+                    all_queries.append((f'{best_query} filetype:pdf', 5, "text"))
 
-        # Add trusted-source targeted searches
+        # Add trusted-source targeted searches (limited: 3 results, 1 per domain)
         if config.trusted_sources:
             for t in config.trusted_sources:
                 t = t.strip().lower()
@@ -353,16 +357,16 @@ class ResearchOrchestrator:
                     if ("youtube.com" in domain or "youtu.be" in domain) and path.startswith("@"):
                         handle = path.split("/")[0].lstrip("@")
                         if handle:
-                            all_queries.append((f'"{handle}" "{topic}"', 8, "video"))
+                            all_queries.append((f'{handle} {best_query}', 3, "video"))
                     # X.com / Twitter account: extract username
                     elif domain in ("x.com", "twitter.com") and path and "/" not in path:
-                        all_queries.append((f'"{path}" "{topic}" site:{domain}', 8, "text"))
+                        all_queries.append((f'from:{path} {best_query}', 3, "text"))
                     else:
-                        all_queries.append((f'site:{domain} "{topic}"', 8, "text"))
+                        all_queries.append((f'site:{domain} {best_query}', 3, "text"))
                 elif "/" not in t:
-                    all_queries.append((f'site:{t} "{topic}"', 8, "text"))
+                    all_queries.append((f'site:{t} {best_query}', 3, "text"))
                 else:
-                    all_queries.append((f'"{topic}" {t}', 8, "text"))
+                    all_queries.append((f'{best_query} {t}', 3, "text"))
 
         # Deduplicate queries
         seen_queries: set[str] = set()
@@ -419,22 +423,32 @@ class ResearchOrchestrator:
             except Exception as exc:
                 logger.warning("Research: search failed for '%s': %s", query, exc)
 
-        # 4. Sort: trusted first, then by relevance
+        # 4. Sort: trusted first, then by relevance (preliminary — LLM ranking will refine)
         all_sources.sort(key=lambda s: (not s["is_trusted"], -s.get("relevance", 0)))
 
-        return all_sources[: config.sources_per_round]
+        # Return up to 3x sources_per_round so the ranking step has enough
+        # candidates to choose from. The final truncation happens after ranking.
+        return all_sources[: max(config.sources_per_round * 3, 30)]
 
     def _url_in_wiki(self, url: str) -> bool:
         """Check if a URL is already referenced in the wiki (exact match only)."""
         if not self._wiki_pages_dir.exists():
             return False
         url_clean = url.strip().rstrip("/")
+        # Build a set of URL variants to check (handles arxiv /abs/ vs /pdf/)
+        variants = {url, url_clean}
+        arxiv_match = re.search(r"arxiv\.org/(?:abs|pdf)/(\d{4}\.\d{4,5})", url)
+        if arxiv_match:
+            aid = arxiv_match.group(1)
+            variants.add(f"arxiv.org/abs/{aid}")
+            variants.add(f"arxiv.org/pdf/{aid}")
+            variants.add(aid)
         for page in self._wiki_pages_dir.rglob("*.md"):
             if ".archive" in str(page):
                 continue
             try:
                 content = page.read_text(encoding="utf-8", errors="ignore")
-                if url in content or url_clean in content:
+                if any(v in content for v in variants):
                     return True
             except Exception:
                 pass
@@ -451,7 +465,13 @@ class ResearchOrchestrator:
         if len(sources) < 2:
             return sources
 
-        from core.llm import chat_completions_non_streaming
+        # Log original order
+        original_labels = [f"{s.get('source_type','?')}:{urlparse(s['url']).netloc}" for s in sources]
+        logger.info(
+            "Research ranking: %d sources for topic '%s' — original order:\n  %s",
+            len(sources), topic[:60],
+            "\n  ".join(f"{i}. {l}" for i, l in enumerate(original_labels)),
+        )
 
         source_entries = []
         for i, s in enumerate(sources):
@@ -464,50 +484,95 @@ class ResearchOrchestrator:
 
         prompt = f"""Research topic: "{topic}"
 
-Rank the following sources by relevance and domain authority for this topic.
-Consider:
-- How directly the source addresses the topic (primary factor)
-- Domain authority for this subject area — e.g. arxiv.org for scientific/technical
-  topics, bloomberg.com/reuters.com for financial, biorxiv.org for biology, etc.
-- Specificity and depth of the title/snippet
-- Recency is NOT a factor (all are equally recent)
+Rank these sources by how USEFUL they are for researching this specific topic.
 
-Return ONLY a JSON array of the source indices (0-based) in descending order of
-relevance, most relevant first. Include ALL indices.
-Example response format: [3, 0, 5, 1, 2, 4]
+CRITICAL RULES:
+1. PRIMARY RELEVANCE: Does this source directly address the topic, or does it only
+   mention keywords tangentially? A paper about "computing as the new oil" is NOT
+   relevant to actual oil markets. Demote sources that only use keywords metaphorically.
+2. DOMAIN AUTHORITY: For economics/finance topics, prioritize: .gov, .edu, major
+   financial publications (Bloomberg, Reuters, FT, WSJ, Economist, Investopedia),
+   international organizations (World Bank, IMF, EIA, BEA, Fed). For tech topics,
+   prioritize: major tech publications, official company sources, arxiv.org.
+3. SOURCE QUALITY: Penalize spam domains, SEO blogs, link farms, personal blogs,
+   social media (quora.com, tiktok.com, linkedin.com), and low-authority sites.
+4. A source with high domain authority that directly addresses the topic should
+   ALWAYS rank above a tangentially-relevant source, regardless of domain.
+
+Return ONLY a JSON array of indices (0-based), most useful first. Include ALL.
+Example: [3, 0, 5, 1, 2, 4]
 
 Sources:
 {chr(10).join(source_entries)}"""
 
-        try:
-            response = await chat_completions_non_streaming(
-                [{"role": "user", "content": prompt}],
-                temperature=0.2, max_tokens=300,
-            )
-            content = (response.get("content") or "").strip()
-            match = re.search(r"\[[\d,\s]+\]", content)
-            if match:
-                ranked_indices = json.loads(match.group())
-                seen: set[int] = set()
-                ranked: list[dict] = []
-                for idx in ranked_indices:
-                    if isinstance(idx, int) and 0 <= idx < len(sources) and idx not in seen:
-                        ranked.append(sources[idx])
-                        seen.add(idx)
-                # Append any sources the LLM missed
-                for i, s in enumerate(sources):
-                    if i not in seen:
-                        ranked.append(s)
-                if len(ranked) == len(sources):
-                    logger.info(
-                        "Research: ranked %d sources by relevance for topic '%s'",
-                        len(sources), topic[:60],
-                    )
-                    return ranked
-        except Exception as exc:
-            logger.warning("Research: source ranking failed: %s", exc)
+        logger.info("Research ranking: full prompt (%d chars)", len(prompt))
+        ranked = await self._llm_rank(sources, prompt, topic)
+        if ranked is not None:
+            return ranked
 
-        return sources  # fallback: original order
+        logger.info("Research ranking: LLM ranking failed, keeping original order")
+        return sources
+
+    async def _llm_rank(
+        self, sources: list[dict], prompt: str, topic: str,
+    ) -> list[dict] | None:
+        """Try LLM-based ranking. Returns ranked list or None on failure."""
+        from core.llm import chat_completions_non_streaming, extract_content
+
+        logger.info("Research ranking: calling LLM for topic '%s'...", topic[:60])
+        try:
+            response = await asyncio.wait_for(
+                chat_completions_non_streaming(
+                    [{"role": "user", "content": prompt}],
+                    temperature=0.2, max_tokens=512,
+                    thinking={"type": "disabled"},
+                ),
+                timeout=15,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("Research ranking: LLM call timed out (15s)")
+            return None
+        except Exception as exc:
+            logger.warning("Research: source ranking LLM call failed: %s", exc)
+            return None
+
+        error_msg = response.get("error", "")
+        content = extract_content(response)
+        if error_msg:
+            logger.warning("Research ranking: LLM error: %s", error_msg[:200])
+            return None
+
+        match = re.search(r"\[[\d,\s]+\]", content)
+        if not match:
+            logger.warning("Research ranking: no JSON array found in LLM response: %s", content[:100])
+            return None
+
+        ranked_indices = json.loads(match.group())
+        valid_indices = [
+            idx for idx in ranked_indices
+            if isinstance(idx, int) and 0 <= idx < len(sources)
+        ]
+        if not valid_indices:
+            logger.warning("Research ranking: no valid indices in LLM response: %s", content[:100])
+            return None
+
+        seen: set[int] = set()
+        ranked: list[dict] = []
+        for idx in valid_indices:
+            if idx not in seen:
+                ranked.append(sources[idx])
+                seen.add(idx)
+        for i, s in enumerate(sources):
+            if i not in seen:
+                ranked.append(s)
+
+        ranked_labels = [f"{s.get('source_type','?')}:{urlparse(s['url']).netloc}" for s in ranked]
+        logger.info(
+            "Research ranking: LLM reordered %d sources for topic '%s' — ranked order:\n  %s",
+            len(ranked), topic[:60],
+            "\n  ".join(f"{i}. {l}" for i, l in enumerate(ranked_labels)),
+        )
+        return ranked
 
     async def _ingest_sources(self, urls: list[str]) -> list[dict]:
         """Ingest multiple URLs into the wiki. Runs up to 3 concurrently."""
@@ -870,7 +935,7 @@ Sources:
             # Generate a concise title for the research
             yield _make_event("research_tool_status", text="Generating title...")
             try:
-                from core.llm import chat_completions_non_streaming
+                from core.llm import chat_completions_non_streaming, extract_content
                 title_response = await chat_completions_non_streaming(
                     [
                         {"role": "system", "content": (
@@ -886,7 +951,7 @@ Sources:
                     ],
                     temperature=0.4, max_tokens=64,
                 )
-                raw_title = (title_response.get("content") or "").strip().strip('"').strip("'")
+                raw_title = extract_content(title_response).strip('"').strip("'")
                 if raw_title:
                     yield _make_event("research_title", title=f"Research: {raw_title}")
             except Exception:
@@ -989,7 +1054,7 @@ Sources:
             # Title generation
             title = None
             try:
-                from core.llm import chat_completions_non_streaming
+                from core.llm import chat_completions_non_streaming, extract_content
                 title_response = await chat_completions_non_streaming(
                     [
                         {"role": "system", "content": (
@@ -1005,16 +1070,18 @@ Sources:
                     ],
                     temperature=0.4, max_tokens=64,
                 )
-                raw_title = (title_response.get("content") or "").strip().strip('"').strip("'")
+                raw_title = extract_content(title_response).strip('"').strip("'")
                 if raw_title:
                     title = f"Research: {raw_title}"
             except Exception:
                 pass
 
+            ingested_urls = [r["url"] for r in all_ingested if r.get("status") == "ingested"]
             return {
                 "topic": config.topic,
                 "final_report": "".join(final_report_parts),
-                "total_ingested": len([r for r in all_ingested if r.get("status") == "ingested"]),
+                "total_ingested": len(ingested_urls),
+                "ingested_urls": ingested_urls,
                 "warnings": warnings,
                 "title": title or config.topic,
                 "started_at": started_at,

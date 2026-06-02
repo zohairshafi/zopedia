@@ -161,16 +161,13 @@ class PeriodicScheduler:
             raise ValueError(f"Config {config_id} not found")
         logger.info("PeriodicScheduler: running config %s now", config_id)
 
-        async def _run_and_mark() -> None:
-            try:
-                await self._execute_research(cfg)
-            finally:
-                now = datetime.now(timezone.utc).isoformat()
-                from periodic_store import update_config
-                update_config(config_id, username, last_run_at=now)
+        # Mark started immediately so UI shows the run was triggered
+        now = datetime.now(timezone.utc).isoformat()
+        from periodic_store import update_config
+        update_config(config_id, username, last_run_at=now)
 
         asyncio.create_task(
-            _run_and_mark(), name=f"periodic-{config_id}-manual"
+            self._execute_research(cfg), name=f"periodic-{config_id}-manual"
         )
 
     # -- internals ---------------------------------------------------------
@@ -279,11 +276,8 @@ class PeriodicScheduler:
         )
 
         # Track ingested URLs for dedup
-        ingested_urls = []
-        for w in result.get("warnings", []):
-            if "Skipped" not in w.get("error", ""):
-                ingested_urls.append(w["url"])
-        mark_url_ingested(config_id, config.topic)  # mark topic
+        for url in result.get("ingested_urls", []):
+            mark_url_ingested(config_id, url)
 
         # Save as chat thread — persist thread_id so subsequent runs append
         now = datetime.now(timezone.utc).isoformat()

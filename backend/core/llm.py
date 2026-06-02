@@ -371,6 +371,48 @@ async def chat_completions_non_streaming(
             return {"error": f"Failed to parse response: {exc}"}
 
 
+def extract_content(response: dict[str, Any]) -> str:
+    """Extract the assistant's text content from an OpenAI-compatible response.
+
+    Handles both the raw API format (choices[0].message.content) and
+    simplified formats that already have 'content' at the top level.
+    """
+    # Already extracted (our simplified format)
+    if "content" in response and "choices" not in response:
+        return str(response.get("content", "") or "")
+
+    # OpenAI-compatible format
+    choices = response.get("choices") or [{}]
+    content = ""
+    if choices and isinstance(choices[0], dict):
+        choice = choices[0]
+        msg = choice.get("message") or {}
+        if isinstance(msg, dict):
+            content = msg.get("content", "")
+        # DeepSeek sometimes puts content at choice level or uses reasoning_content
+        if not content:
+            content = choice.get("text", choice.get("content", ""))
+        # Check finish_reason for clues
+        finish = choice.get("finish_reason", "")
+        if not content and finish:
+            logger = logging.getLogger(__name__)
+            logger.warning(
+                "LLM response: empty content, finish_reason=%r, choice keys=%s",
+                finish, list(choice.keys()),
+            )
+    if not content:
+        content = response.get("output_text", response.get("text", ""))
+
+    if isinstance(content, list):
+        parts = []
+        for part in content:
+            if isinstance(part, dict) and part.get("type") == "text":
+                parts.append(part.get("text", ""))
+        content = "".join(parts)
+
+    return str(content or "").strip()
+
+
 # ── Wiki Tool Definitions ──────────────────────────────────────────
 
 WIKI_READ_PAGE_TOOL = {
