@@ -239,6 +239,7 @@ export function ResearchPage() {
     return (
       <div className="flex flex-col items-center px-4 py-8 gap-4">
         <ResearchSetupForm
+          key={editingConfig.id}
           onStart={handleStart}
           onUpdated={handleUpdated}
           editConfig={editingConfig}

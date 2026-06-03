@@ -15,7 +15,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from chat_history_store import append_thread_messages, upsert_thread
+from chat_history_store import append_thread_messages, get_thread_messages, upsert_thread
 from core.llm import wiki_llm_fn
 from core.research import ResearchConfig, ResearchOrchestrator
 from periodic_store import (
@@ -271,8 +271,30 @@ class PeriodicScheduler:
         def _check_ingested(url: str) -> bool:
             return is_url_already_ingested(config_id, url)
 
+        # Fetch prior run's report so the model knows what was already covered
+        prior_report = None
+        existing_thread_id = get_thread_id(config_id)
+        if existing_thread_id:
+            try:
+                thread_msgs = get_thread_messages(existing_thread_id, username)
+                for msg in reversed(thread_msgs):
+                    if msg.get("role") == "assistant":
+                        content = msg.get("content", "")
+                        if isinstance(content, list):
+                            # content may be stored as a list of parts
+                            content = "".join(
+                                part.get("text", "") for part in content
+                                if isinstance(part, dict) and part.get("type") == "text"
+                            )
+                        if content and len(content) > 200:
+                            prior_report = content
+                            break
+            except Exception:
+                logger.exception("Periodic: failed to fetch prior report for %s", config_id)
+
         result = await orchestrator.run_research_headless(
             config, session_id, url_already_ingested=_check_ingested,
+            prior_report=prior_report,
         )
 
         # Track ingested URLs for dedup

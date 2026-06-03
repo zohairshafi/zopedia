@@ -470,8 +470,12 @@ async def execute_web_search(query: str, max_results: int = 5, timelimit: str = 
     try:
         from ddgs import DDGS
 
+        # Normalize "all" (frontend "Any time" selection) to empty string
+        if timelimit == "all":
+            timelimit = ""
+
         results = []
-        kwargs: dict = {"max_results": max_results}
+        kwargs: dict = {"max_results": max_results, "backend": "duckduckgo,google,brave"}
         if timelimit:
             kwargs["timelimit"] = timelimit
         with DDGS() as ddgs:
@@ -498,10 +502,15 @@ async def execute_video_search(query: str, max_results: int = 5, timelimit: str 
     try:
         from ddgs import DDGS
 
+        # Normalize "all" (frontend "Any time" selection) to empty string
+        if timelimit == "all":
+            timelimit = ""
+
         results = []
         kwargs: dict = {"max_results": max_results}
         if timelimit:
             kwargs["timelimit"] = timelimit
+            kwargs["backend"] = "duckduckgo,google,brave"
         with DDGS() as ddgs:
             for r in ddgs.videos(query, **kwargs):
                 results.append({

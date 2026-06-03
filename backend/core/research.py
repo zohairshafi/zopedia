@@ -126,7 +126,7 @@ class ResearchOrchestrator:
 
     # -- wiki survey -------------------------------------------------------
 
-    async def _survey_wiki(self, topic: str) -> AsyncGenerator[dict, None]:
+    async def _survey_wiki(self, topic: str, prior_report: str | None = None) -> AsyncGenerator[dict, None]:
         """Read wiki index and let the LLM explore relevant pages via tool calls.
         Yields tool_start/tool_end/tool_status events, then a research_survey event."""
         from core.llm import (
@@ -141,7 +141,10 @@ class ResearchOrchestrator:
         max_chars_per_read = int(os.getenv("ZOPEDIA_WIKI_MAX_CHARS_PER_READ", "12000"))
         max_turns = int(os.getenv("ZOPEDIA_WIKI_MAX_TOOL_TURNS", "8"))
 
-        index_path = self._wiki_pages_dir / "index-concise.md"
+        # Prefer the hierarchical god-nodes index; fall back to flat concise index
+        index_path = self._wiki_pages_dir / "index-godnodes.md"
+        if not index_path.exists():
+            index_path = self._wiki_pages_dir / "index-concise.md"
         index_content = ""
         if index_path.is_file():
             index_content = index_path.read_text(encoding="utf-8", errors="ignore")
@@ -161,6 +164,18 @@ class ResearchOrchestrator:
             "3. What search queries would fill those gaps?\n\n"
             f"--- Wiki index ---\n{index_content}\n---"
         )
+        if prior_report:
+            prior_context = (
+                "\n\n## Prior Research Report\n"
+                "The following is the research report from the PREVIOUS run. "
+                "Use it to understand what was already covered. "
+                "Focus your wiki exploration on:\n"
+                "- New information not in the prior report\n"
+                "- Gaps or areas the prior report identified as needing more research\n"
+                "- Updates or changes to topics covered in the prior report\n\n"
+                f"{prior_report[:8000]}\n"
+            )
+            system_prompt += prior_context
 
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": system_prompt},
@@ -273,7 +288,8 @@ class ResearchOrchestrator:
     # -- source discovery --------------------------------------------------
 
     async def _discover_sources(
-        self, topic: str, round_num: int, config: ResearchConfig
+        self, topic: str, round_num: int, config: ResearchConfig,
+        prior_report: str | None = None,
     ) -> list[dict]:
         """Use LLM to generate search queries, execute them, and rank results."""
         from core.llm import chat_completions_non_streaming, execute_web_search, execute_video_search, extract_content
@@ -297,7 +313,11 @@ class ResearchOrchestrator:
                 "You are a research strategist. Generate diverse search queries to "
                 "explore a research topic from multiple angles. Return a JSON array "
                 "of query strings. Aim for variety: different phrasings, subtopics, "
-                "competing perspectives, recent developments."
+                "competing perspectives, recent developments.\n"
+                f"Today's date is {datetime.now(timezone.utc).strftime('%B %d, %Y')}. "
+                "Use date-specific queries where relevant "
+                "(e.g. include month/year/day terms for recent news but might be unnecessary for research papers"
+                " where old research might be relevent. Or include it if you want state of the art research, use your best judgement)."
                 f"{source_type_hint}\n"
                 "Format:\n"
                 '{"queries": ["query 1", "query 2", ...]}'
@@ -306,6 +326,15 @@ class ResearchOrchestrator:
                 f"Research topic: {topic}\n"
                 f"Round: {round_num}/{config.rounds}\n"
                 f"Generate {num_queries} diverse search queries."
+                + (
+                    f"\n\nPRIOR RESEARCH (from a previous run):\n"
+                    f"{prior_report[:5000]}\n\n"
+                    f"Today is {datetime.now(timezone.utc).strftime('%B %d, %Y')}. "
+                    f"Generate queries that find NEW or UPDATED information "
+                    f"NOT covered in the prior report above. Focus on developments, news, "
+                    f"or data published after the prior run."
+                    if prior_report else ""
+                )
             )},
         ]
 
@@ -426,9 +455,9 @@ class ResearchOrchestrator:
         # 4. Sort: trusted first, then by relevance (preliminary — LLM ranking will refine)
         all_sources.sort(key=lambda s: (not s["is_trusted"], -s.get("relevance", 0)))
 
-        # Return up to 3x sources_per_round so the ranking step has enough
+        # Return up to 2x sources_per_round so the ranking step has enough
         # candidates to choose from. The final truncation happens after ranking.
-        return all_sources[: max(config.sources_per_round * 3, 30)]
+        return all_sources[: max(config.sources_per_round * 2, 15)]
 
     def _url_in_wiki(self, url: str) -> bool:
         """Check if a URL is already referenced in the wiki (exact match only)."""
@@ -665,7 +694,8 @@ Sources:
     # -- final summary -----------------------------------------------------
 
     async def _generate_final_summary(
-        self, topic: str, all_ingested: list[dict]
+        self, topic: str, all_ingested: list[dict],
+        prior_report: str | None = None,
     ) -> AsyncGenerator[dict, None]:
         """Run a tool-calling loop so the LLM can read wiki pages, then stream
         a final research summary. Uses the same read_wiki_page tool as chat.
@@ -682,7 +712,10 @@ Sources:
         max_cumulative = int(os.getenv("ZOPEDIA_WIKI_MAX_CUMULATIVE_READ_CHARS", "500000"))
         max_chars_per_read = int(os.getenv("ZOPEDIA_WIKI_MAX_CHARS_PER_READ", "12000"))
 
-        index_path = self._wiki_pages_dir / "index-concise.md"
+        # Prefer the hierarchical god-nodes index; fall back to flat concise index
+        index_path = self._wiki_pages_dir / "index-godnodes.md"
+        if not index_path.exists():
+            index_path = self._wiki_pages_dir / "index-concise.md"
         index_content = ""
         if index_path.is_file():
             index_content = index_path.read_text(encoding="utf-8", errors="ignore")
@@ -704,6 +737,17 @@ Sources:
             f"--- Wiki index ---\n{index_content}\n---\n\n"
             f"Newly ingested during this research:\n{ingested_list or '(none)'}"
         )
+        if prior_report:
+            system_prompt += (
+                "\n\n## Prior Report (from previous run)\n"
+                f"{prior_report[:8000]}\n\n"
+                "IMPORTANT: Your report MUST include a '## What Changed Since Last Run' "
+                "section that compares your findings against the prior report above. Highlight:\n"
+                "- New sources, entities, or concepts discovered this run\n"
+                "- Updated or changed information\n"
+                "- Gaps from the prior report that were addressed\n"
+                "- Gaps that remain unresolved"
+            )
 
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": system_prompt},
@@ -795,16 +839,26 @@ Sources:
                 break
 
         # Final synthesis — stream
+        synthesis_sections = (
+            "## What Changed Since Last Run\n"
+            "## Executive Summary\n"
+            "## Key Findings\n"
+            "## Source Analysis\n"
+            "## Gaps and Future Directions\n"
+            "## References\n"
+            if prior_report else
+            "## Executive Summary\n"
+            "## Key Findings\n"
+            "## Source Analysis\n"
+            "## Gaps and Future Directions\n"
+            "## References\n"
+        )
         messages.append({
             "role": "user",
             "content": (
                 "Now write a comprehensive final research summary based on everything "
                 "you've read. Structure it as a research report:\n\n"
-                "## Executive Summary\n"
-                "## Key Findings\n"
-                "## Source Analysis\n"
-                "## Gaps and Future Directions\n"
-                "## References\n\n"
+                f"{synthesis_sections}\n"
                 "Cite specific wiki pages. Be thorough but concise."
             ),
         })
@@ -975,11 +1029,15 @@ Sources:
         config: ResearchConfig,
         session_id: str,
         url_already_ingested: Callable[[str], bool] | None = None,
+        prior_report: str | None = None,
     ) -> dict:
         """Run a complete research cycle without SSE streaming.
 
         Returns a result dict suitable for saving as a chat thread.
         Forces auto_mode; filters to trusted-only sources during periodic runs.
+        If prior_report is provided, it is injected into survey, discovery,
+        and final summary prompts so the model can avoid redundant work and
+        highlight what changed.
         """
         started_at = datetime.now(timezone.utc).isoformat()
         all_ingested: list[dict] = []
@@ -992,12 +1050,12 @@ Sources:
 
         try:
             # Phase 1: Survey wiki (consume generator, needed for context)
-            async for _event in self._survey_wiki(config.topic):
+            async for _event in self._survey_wiki(config.topic, prior_report=prior_report):
                 pass
 
             for round_num in range(1, config.rounds + 1):
                 # Phase 2: Discover sources
-                sources = await self._discover_sources(config.topic, round_num, config)
+                sources = await self._discover_sources(config.topic, round_num, config, prior_report=prior_report)
                 sources = await self._rank_sources(config.topic, sources)
 
                 # Filter to trusted-only during periodic runs (when trusted sources set)
@@ -1044,7 +1102,7 @@ Sources:
                         pass
 
             # Phase 6: Final summary
-            async for event in self._generate_final_summary(config.topic, all_ingested):
+            async for event in self._generate_final_summary(config.topic, all_ingested, prior_report=prior_report):
                 if event.get("type") == "research_final_summary":
                     final_report_parts.append(event.get("content", ""))
 

@@ -10103,6 +10103,17 @@ class LLMWikiEngine:
         merged_rel = f"analysis/{merged_slug}"
         merged_path = self.analysis_dir / f"{merged_slug}.md"
 
+        # Remove any stale chunk-merged files from prior runs (same source,
+        # different title). Without this, each run leaves an orphan.
+        stale_merged_pattern = f"{self._slug(source_slug)}--chunk-merged--*"
+        for stale_path in self.analysis_dir.glob(stale_merged_pattern):
+            if stale_path != merged_path:
+                stale_path.unlink()
+                logger.info(
+                    "Chunk merge: removed stale merged file %s (replaced by %s)",
+                    stale_path.name, merged_slug,
+                )
+
         context_pages: List[str] = []
         for rel in [normalized_source_page] + chunk_source_pages:
             normalized = self._normalize_wikilink(rel)
@@ -10353,10 +10364,13 @@ class LLMWikiEngine:
     def _clean_source_text(self, text: str) -> str:
         lines = []
         in_frontmatter = False
+        frontmatter_done = False
         for raw in text.splitlines():
             line = raw.strip()
-            if line == "---":
+            if line == "---" and not frontmatter_done:
                 in_frontmatter = not in_frontmatter
+                if not in_frontmatter:
+                    frontmatter_done = True  # first frontmatter block closed — ignore subsequent --- separators
                 continue
             if in_frontmatter:
                 continue
