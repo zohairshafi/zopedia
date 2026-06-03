@@ -239,6 +239,7 @@ async def chat_completions_stream(
     max_tokens: int = 4096,
     tools: list[dict[str, Any]] | None = None,
     tool_choice: Any = None,
+    thinking: dict[str, Any] | None = None,
 ) -> Any:
     """Stream chat completions from upstream API. Yields SSE text chunks and tool call events."""
     if not llm_available():
@@ -259,6 +260,8 @@ async def chat_completions_stream(
         body["tools"] = tools
         if tool_choice is not None:
             body["tool_choice"] = tool_choice
+    if thinking:
+        body["thinking"] = thinking
 
     async with httpx.AsyncClient(timeout=_LLM_TIMEOUT_SECONDS) as client:
         async with client.stream("POST", target_url, json=body, headers=_headers()) as response:

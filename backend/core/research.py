@@ -192,7 +192,7 @@ class ResearchOrchestrator:
             yield {"type": "research_tool_status", "text": f"Surveying wiki... (turn {turn})"}
 
             response = await chat_completions_non_streaming(
-                messages, tools=tools, temperature=0.2, max_tokens=2048,
+                messages, tools=tools, temperature=0.2, max_tokens=8192,
             )
             if "error" in response:
                 logger.warning("Research: survey tool-loop error: %s", response.get("error"))
@@ -276,7 +276,7 @@ class ResearchOrchestrator:
 
         try:
             response = await chat_completions_non_streaming(
-                messages, temperature=0.3, max_tokens=2048,
+                messages, temperature=0.3, max_tokens=8192,
             )
             survey_text = extract_content(response)
         except Exception as exc:
@@ -340,7 +340,9 @@ class ResearchOrchestrator:
 
         search_queries = [topic]
         try:
-            response = await chat_completions_non_streaming(query_prompt)
+            response = await chat_completions_non_streaming(
+                query_prompt, max_tokens=8192,
+            )
             content = extract_content(response)
             match = re.search(r"\{[^}]*\"queries\"[^}]*\}", content, re.DOTALL)
             if match:
@@ -766,7 +768,7 @@ Sources:
             yield {"type": "research_tool_status", "text": f"Exploring wiki knowledge... (turn {turn})"}
 
             response = await chat_completions_non_streaming(
-                messages, tools=tools, temperature=0.2, max_tokens=2048,
+                messages, tools=tools, temperature=0.2, max_tokens=8192,
             )
             if "error" in response:
                 logger.warning("Research: tool-loop LLM error: %s", response.get("error"))
@@ -863,7 +865,9 @@ Sources:
             ),
         })
 
-        async for event in chat_completions_stream(messages, temperature=0.3):
+        async for event in chat_completions_stream(
+            messages, temperature=0.3, max_tokens=32000,
+        ):
             if event.get("type") == "text":
                 yield {"type": "research_final_summary", "content": event.get("content", "")}
 
@@ -1004,6 +1008,7 @@ Sources:
                         )},
                     ],
                     temperature=0.4, max_tokens=64,
+                    thinking={"type": "disabled"},
                 )
                 raw_title = extract_content(title_response).strip('"').strip("'")
                 if raw_title:
@@ -1127,6 +1132,7 @@ Sources:
                         )},
                     ],
                     temperature=0.4, max_tokens=64,
+                    thinking={"type": "disabled"},
                 )
                 raw_title = extract_content(title_response).strip('"').strip("'")
                 if raw_title:
