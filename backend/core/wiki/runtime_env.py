@@ -77,13 +77,13 @@ WIKI_ENV_SPECS: tuple[WikiEnvSpec, ...] = (
     WikiEnvSpec(
         name="ZOPEDIA_AUTH_DISABLED",
         kind="bool",
-        default="true",
+        default="false",
         description="Disable authentication for single-user mode.",
     ),
     WikiEnvSpec(
         name="ZOPEDIA_WIKI_LLM_MAX_TOKENS",
         kind="int",
-        default="6000",
+        default="200000",
         description="Max tokens for wiki-generated responses (analysis, extraction, etc.).",
         minimum=200,
     ),
@@ -97,7 +97,7 @@ WIKI_ENV_SPECS: tuple[WikiEnvSpec, ...] = (
     WikiEnvSpec(
         name="ZOPEDIA_WIKI_MAX_ANALYSIS_PAGES",
         kind="int",
-        default="64",
+        default="128",
         description="Max analysis pages processed per enrich/retry/backlinks operation. Most-recent pages are prioritized.",
         minimum=1,
         maximum=1024,
@@ -141,7 +141,7 @@ WIKI_ENV_SPECS: tuple[WikiEnvSpec, ...] = (
     WikiEnvSpec(
         name="ZOPEDIA_WIKI_KNOWLEDGE_MAX_INCREMENTAL_UPDATES",
         kind="int",
-        default="10",
+        default="5",
         description="Max Incremental Updates blocks retained per entity/concept page.",
         minimum=1,
         maximum=256,
@@ -149,7 +149,7 @@ WIKI_ENV_SPECS: tuple[WikiEnvSpec, ...] = (
     WikiEnvSpec(
         name="ZOPEDIA_WIKI_COMPACTION_MAX_PAGES",
         kind="int",
-        default="64",
+        default="128",
         description="Max entity/concept pages compacted per maintenance run. Pages with most overflow are prioritized.",
         minimum=0,
         maximum=2048,
@@ -157,7 +157,7 @@ WIKI_ENV_SPECS: tuple[WikiEnvSpec, ...] = (
     WikiEnvSpec(
         name="ZOPEDIA_WIKI_MAX_TOOL_TURNS",
         kind="int",
-        default="8",
+        default="10",
         description="Max tool-calling turns per chat request. Each turn can batch multiple reads (see MAX_READS_PER_TURN).",
         minimum=1,
         maximum=50,
@@ -165,7 +165,7 @@ WIKI_ENV_SPECS: tuple[WikiEnvSpec, ...] = (
     WikiEnvSpec(
         name="ZOPEDIA_WIKI_MAX_READS_PER_TURN",
         kind="int",
-        default="20",
+        default="5",
         description="Max wiki page reads per tool-calling turn. Caps batched reads to prevent context overload.",
         minimum=1,
         maximum=100,
@@ -189,7 +189,7 @@ WIKI_ENV_SPECS: tuple[WikiEnvSpec, ...] = (
     WikiEnvSpec(
         name="ZOPEDIA_WIKI_COMMUNITY_CUTOFF",
         kind="int",
-        default="20",
+        default="40",
         description="Max number of communities detected by graph-based clustering. Higher values produce more fine-grained clusters. Controls granularity of the god-nodes index.",
         minimum=5,
         maximum=100,
@@ -197,7 +197,7 @@ WIKI_ENV_SPECS: tuple[WikiEnvSpec, ...] = (
     WikiEnvSpec(
         name="ZOPEDIA_WIKI_COMMUNITY_MIN_SIZE",
         kind="int",
-        default="4",
+        default="10",
         description="Communities smaller than this are merged into Other Pages in the god-nodes index.",
         minimum=2,
         maximum=50,
@@ -205,7 +205,7 @@ WIKI_ENV_SPECS: tuple[WikiEnvSpec, ...] = (
     WikiEnvSpec(
         name="ZOPEDIA_WIKI_COMMUNITY_MAX_SIZE",
         kind="int",
-        default="0",
+        default="150",
         description="Communities larger than this are recursively split into sub-communities. 0 disables splitting.",
         minimum=0,
         maximum=10000,
@@ -213,7 +213,7 @@ WIKI_ENV_SPECS: tuple[WikiEnvSpec, ...] = (
     WikiEnvSpec(
         name="ZOPEDIA_WIKI_GODNODES_REBUILD_THRESHOLD",
         kind="int",
-        default="50",
+        default="100",
         description="Rebuild god-nodes index after this many new pages are added (delta threshold).",
         minimum=10,
         maximum=10000,
