@@ -430,6 +430,16 @@ async def openai_chat_completions(request: Request):
             }
             messages = [wiki_system] + list(messages)
 
+        # Inject current date into the last user message so the model always
+        # knows what "today" is — even when continuing a conversation from days ago.
+        _today = datetime.now(timezone.utc).strftime("%A, %B %d, %Y")
+        for i in range(len(messages) - 1, -1, -1):
+            if messages[i].get("role") == "user":
+                content = messages[i].get("content", "")
+                if isinstance(content, str):
+                    messages[i]["content"] = f"Today's date is {_today}.\n\n{content}"
+                break
+
         if stream:
             # ── Streaming with tool visibility ──────────────────────
             async def event_generator():

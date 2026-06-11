@@ -19,6 +19,7 @@ import type {
 import { MessageRepository } from "@assistant-ui/core/runtime/utils/message-repository";
 import { db } from "@/features/chat/db";
 import type { MessageRecord } from "@/features/chat/types";
+import { saveThreadToServer } from "@/features/chat/chat-server-sync";
 
 function cloneContent(content: ThreadMessage["content"]): ThreadMessage["content"] {
   if (typeof content === "string") {
@@ -105,8 +106,9 @@ export async function deleteThreadMessage(args: {
   thread: ThreadImportExport;
   messageId: string;
   remoteId: string | undefined;
+  title?: string;
 }): Promise<void> {
-  const { thread, messageId, remoteId } = args;
+  const { thread, messageId, remoteId, title } = args;
   const exported = thread.export();
   const repo = new MessageRepository();
   repo.import(exported);
@@ -114,6 +116,26 @@ export async function deleteThreadMessage(args: {
   const next = repo.export();
   if (remoteId) {
     await syncExportedRepositoryToDexie(remoteId, next);
+    // Persist the deletion to the server so it stays gone on refresh.
+    // Without this, syncThreadMessagesFromServer re-inserts the message
+    // because the server still has it.
+    if (title) {
+      saveThreadToServer(
+        remoteId,
+        title,
+        next.messages.map(({ message, parentId }) => ({
+          id: message.id,
+          role: message.role,
+          content: message.content,
+          parent_id: parentId ?? null,
+          created_at: message.createdAt
+            ? new Date(message.createdAt).toISOString()
+            : new Date().toISOString(),
+        })),
+      ).catch((err) => {
+        console.error("[delete] saveThreadToServer failed:", err);
+      });
+    }
   }
   thread.import(next);
 }

@@ -175,6 +175,7 @@ class PeriodicScheduler:
     async def _schedule_one(self, cfg: dict) -> None:
         """Create a background asyncio.Task that loops for this config."""
         config_id = cfg["id"]
+        username = cfg.get("username", self._default_username)
 
         # Avoid duplicate tasks
         if config_id in self._tasks:
@@ -185,7 +186,7 @@ class PeriodicScheduler:
         async def loop() -> None:
             while True:
                 try:
-                    cfg = get_config(config_id, self._default_username)
+                    cfg = get_config(config_id, username)
                     if not cfg or not cfg.get("enabled"):
                         self._tasks.pop(config_id, None)
                         return
@@ -206,7 +207,7 @@ class PeriodicScheduler:
                             pass
 
                     # Re-check after sleep
-                    cfg = get_config(config_id, self._default_username)
+                    cfg = get_config(config_id, username)
                     if not cfg or not cfg.get("enabled"):
                         return
 

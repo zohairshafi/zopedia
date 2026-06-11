@@ -578,4 +578,4 @@ if __name__ == "__main__":
     import uvicorn
 
     logger.info("Starting Zopedia on port %d", _PORT)
-    uvicorn.run("main:app", host="::", port=_PORT, reload=False)
+    uvicorn.run("main:app", host="0.0.0.0", port=_PORT, reload=False)

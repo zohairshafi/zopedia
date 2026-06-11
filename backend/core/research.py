@@ -132,8 +132,10 @@ class ResearchOrchestrator:
         from core.llm import (
             chat_completions_non_streaming,
             extract_content,
+            execute_web_search,
             execute_wiki_read,
             WIKI_READ_PAGE_TOOL,
+            WIKI_WEB_SEARCH_TOOL,
         )
 
         wiki_dir = str(self._wiki_pages_dir)
@@ -157,7 +159,9 @@ class ResearchOrchestrator:
 
         system_prompt = (
             "You are a research assistant surveying a wiki knowledge base. "
-            "Use the read_wiki_page tool to explore pages relevant to the topic. "
+            "Use the read_wiki_page and web_search tools to explore pages "
+            "relevant to the topic. "
+            f"Today's date is {datetime.now(timezone.utc).strftime('%B %d, %Y')}.\n"
             "Identify:\n"
             "1. What is already known about this topic?\n"
             "2. What gaps or missing areas exist?\n"
@@ -185,7 +189,7 @@ class ResearchOrchestrator:
             )},
         ]
 
-        tools: list[dict[str, Any]] = [WIKI_READ_PAGE_TOOL]
+        tools: list[dict[str, Any]] = [WIKI_READ_PAGE_TOOL, WIKI_WEB_SEARCH_TOOL]
         cumulative_read_chars = 0
 
         for turn in range(1, max_turns + 1):
@@ -214,49 +218,85 @@ class ResearchOrchestrator:
 
             for tc in tool_calls:
                 fn = tc.get("function", {})
-                if fn.get("name") != "read_wiki_page":
-                    continue
+                name = fn.get("name", "")
                 try:
                     args = json.loads(fn.get("arguments", "{}"))
                 except json.JSONDecodeError:
                     continue
-                page_path = args.get("path", "")
-                if not page_path:
-                    continue
 
                 tc_id = tc.get("id", f"call_{turn}")
-                yield {
-                    "type": "research_tool_start",
-                    "tool_name": "read_wiki_page",
-                    "tool_call_id": tc_id,
-                    "arguments": {"path": page_path},
-                }
 
-                result_json = execute_wiki_read(
-                    wiki_dir, page_path, max_chars=max_chars_per_read,
-                )
-                try:
-                    result_data = json.loads(result_json)
-                    size = result_data.get("size_chars", 0)
-                    preview = result_data.get("content", "")[:200]
-                except json.JSONDecodeError:
-                    size = len(result_json)
-                    preview = ""
+                if name == "read_wiki_page":
+                    page_path = args.get("path", "")
+                    if not page_path:
+                        continue
 
-                cumulative_read_chars += size
+                    yield {
+                        "type": "research_tool_start",
+                        "tool_name": "read_wiki_page",
+                        "tool_call_id": tc_id,
+                        "arguments": {"path": page_path},
+                    }
 
-                yield {
-                    "type": "research_tool_end",
-                    "tool_name": "read_wiki_page",
-                    "tool_call_id": tc_id,
-                    "result": json.dumps({"path": page_path, "size_chars": size, "preview": preview}),
-                }
+                    result_json = execute_wiki_read(
+                        wiki_dir, page_path, max_chars=max_chars_per_read,
+                    )
+                    try:
+                        result_data = json.loads(result_json)
+                        size = result_data.get("size_chars", 0)
+                        preview = result_data.get("content", "")[:200]
+                    except json.JSONDecodeError:
+                        size = len(result_json)
+                        preview = ""
 
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tc_id,
-                    "content": result_json,
-                })
+                    cumulative_read_chars += size
+
+                    yield {
+                        "type": "research_tool_end",
+                        "tool_name": "read_wiki_page",
+                        "tool_call_id": tc_id,
+                        "result": json.dumps({"path": page_path, "size_chars": size, "preview": preview}),
+                    }
+
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc_id,
+                        "content": result_json,
+                    })
+
+                elif name == "web_search":
+                    query_str = args.get("query", "")
+                    if not query_str:
+                        continue
+
+                    yield {
+                        "type": "research_tool_start",
+                        "tool_name": "web_search",
+                        "tool_call_id": tc_id,
+                        "arguments": {"query": query_str},
+                    }
+                    yield {"type": "research_tool_status", "text": f"Searching web: {query_str}"}
+
+                    result_json = await execute_web_search(query_str, max_results=5)
+                    try:
+                        result_data = json.loads(result_json)
+                        count = len(result_data.get("results", []))
+                        yield {"type": "research_tool_status", "text": f"Web search: {count} results"}
+                    except json.JSONDecodeError:
+                        pass
+
+                    yield {
+                        "type": "research_tool_end",
+                        "tool_name": "web_search",
+                        "tool_call_id": tc_id,
+                        "result": result_json,
+                    }
+
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc_id,
+                        "content": result_json,
+                    })
 
             if cumulative_read_chars >= max_cumulative:
                 logger.info("Research: survey read budget reached (%s chars)", cumulative_read_chars)
@@ -706,8 +746,10 @@ Sources:
         from core.llm import (
             chat_completions_non_streaming,
             chat_completions_stream,
+            execute_web_search,
             execute_wiki_read,
             WIKI_READ_PAGE_TOOL,
+            WIKI_WEB_SEARCH_TOOL,
         )
 
         wiki_dir = str(self._wiki_pages_dir)
@@ -731,10 +773,12 @@ Sources:
 
         system_prompt = (
             f"You are a research synthesizer. Write a thorough research summary "
-            f"on the topic: '{topic}'.\n\n"
-            "You have access to a wiki knowledge base via the read_wiki_page tool. "
-            "Use it to explore relevant pages, including both newly ingested sources "
-            "and pre-existing wiki content.\n\n"
+            f"on the topic: '{topic}'.\n"
+            f"Today's date is {datetime.now(timezone.utc).strftime('%B %d, %Y')}.\n\n"
+            "You have access to a wiki knowledge base via the read_wiki_page and "
+            "web_search tools. Use them to explore relevant pages and find recent "
+            "information, including both newly ingested sources and pre-existing "
+            "wiki content.\n\n"
             "Plan your reads: start with key pages, then follow leads to related content.\n\n"
             f"--- Wiki index ---\n{index_content}\n---\n\n"
             f"Newly ingested during this research:\n{ingested_list or '(none)'}"
@@ -760,7 +804,7 @@ Sources:
             )},
         ]
 
-        tools: list[dict[str, Any]] = [WIKI_READ_PAGE_TOOL]
+        tools: list[dict[str, Any]] = [WIKI_READ_PAGE_TOOL, WIKI_WEB_SEARCH_TOOL]
         cumulative_read_chars = 0
         max_turns = int(os.getenv("ZOPEDIA_WIKI_MAX_TOOL_TURNS", "8"))
 
@@ -791,49 +835,85 @@ Sources:
 
             for tc in tool_calls:
                 fn = tc.get("function", {})
-                if fn.get("name") != "read_wiki_page":
-                    continue
+                name = fn.get("name", "")
                 try:
                     args = json.loads(fn.get("arguments", "{}"))
                 except json.JSONDecodeError:
                     continue
-                page_path = args.get("path", "")
-                if not page_path:
-                    continue
 
                 tc_id = tc.get("id", f"call_{turn}")
-                yield {
-                    "type": "research_tool_start",
-                    "tool_name": "read_wiki_page",
-                    "tool_call_id": tc_id,
-                    "arguments": {"path": page_path},
-                }
 
-                result_json = execute_wiki_read(
-                    wiki_dir, page_path, max_chars=max_chars_per_read,
-                )
-                try:
-                    result_data = json.loads(result_json)
-                    size = result_data.get("size_chars", 0)
-                    preview = result_data.get("content", "")[:200]
-                except json.JSONDecodeError:
-                    size = len(result_json)
-                    preview = ""
+                if name == "read_wiki_page":
+                    page_path = args.get("path", "")
+                    if not page_path:
+                        continue
 
-                cumulative_read_chars += size
+                    yield {
+                        "type": "research_tool_start",
+                        "tool_name": "read_wiki_page",
+                        "tool_call_id": tc_id,
+                        "arguments": {"path": page_path},
+                    }
 
-                yield {
-                    "type": "research_tool_end",
-                    "tool_name": "read_wiki_page",
-                    "tool_call_id": tc_id,
-                    "result": json.dumps({"path": page_path, "size_chars": size, "preview": preview}),
-                }
+                    result_json = execute_wiki_read(
+                        wiki_dir, page_path, max_chars=max_chars_per_read,
+                    )
+                    try:
+                        result_data = json.loads(result_json)
+                        size = result_data.get("size_chars", 0)
+                        preview = result_data.get("content", "")[:200]
+                    except json.JSONDecodeError:
+                        size = len(result_json)
+                        preview = ""
 
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tc_id,
-                    "content": result_json,
-                })
+                    cumulative_read_chars += size
+
+                    yield {
+                        "type": "research_tool_end",
+                        "tool_name": "read_wiki_page",
+                        "tool_call_id": tc_id,
+                        "result": json.dumps({"path": page_path, "size_chars": size, "preview": preview}),
+                    }
+
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc_id,
+                        "content": result_json,
+                    })
+
+                elif name == "web_search":
+                    query_str = args.get("query", "")
+                    if not query_str:
+                        continue
+
+                    yield {
+                        "type": "research_tool_start",
+                        "tool_name": "web_search",
+                        "tool_call_id": tc_id,
+                        "arguments": {"query": query_str},
+                    }
+                    yield {"type": "research_tool_status", "text": f"Searching web: {query_str}"}
+
+                    result_json = await execute_web_search(query_str, max_results=5)
+                    try:
+                        result_data = json.loads(result_json)
+                        count = len(result_data.get("results", []))
+                        yield {"type": "research_tool_status", "text": f"Web search: {count} results"}
+                    except json.JSONDecodeError:
+                        pass
+
+                    yield {
+                        "type": "research_tool_end",
+                        "tool_name": "web_search",
+                        "tool_call_id": tc_id,
+                        "result": result_json,
+                    }
+
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc_id,
+                        "content": result_json,
+                    })
 
             if cumulative_read_chars >= max_cumulative:
                 logger.info("Research: read budget reached (%s chars)", cumulative_read_chars)
@@ -861,7 +941,8 @@ Sources:
                 "Now write a comprehensive final research summary based on everything "
                 "you've read. Structure it as a research report:\n\n"
                 f"{synthesis_sections}\n"
-                "Cite specific wiki pages. Be thorough but concise."
+                "Cite specific wiki pages. Note the current date and highlight "
+                "whether sources and findings are recent or older. Be thorough but concise."
             ),
         })
 
