@@ -134,7 +134,9 @@ class ResearchOrchestrator:
             extract_content,
             execute_web_search,
             execute_wiki_read,
+            execute_wiki_search,
             WIKI_READ_PAGE_TOOL,
+            WIKI_SEARCH_TOOL,
             WIKI_WEB_SEARCH_TOOL,
         )
 
@@ -159,7 +161,7 @@ class ResearchOrchestrator:
 
         system_prompt = (
             "You are a research assistant surveying a wiki knowledge base. "
-            "Use the read_wiki_page and web_search tools to explore pages "
+            "Use the search_wiki, read_wiki_page, and web_search tools to explore pages "
             "relevant to the topic. "
             f"Today's date is {datetime.now(timezone.utc).strftime('%B %d, %Y')}.\n"
             "Identify:\n"
@@ -189,7 +191,7 @@ class ResearchOrchestrator:
             )},
         ]
 
-        tools: list[dict[str, Any]] = [WIKI_READ_PAGE_TOOL, WIKI_WEB_SEARCH_TOOL]
+        tools: list[dict[str, Any]] = [WIKI_READ_PAGE_TOOL, WIKI_SEARCH_TOOL, WIKI_WEB_SEARCH_TOOL]
         cumulative_read_chars = 0
 
         for turn in range(1, max_turns + 1):
@@ -288,6 +290,42 @@ class ResearchOrchestrator:
                     yield {
                         "type": "research_tool_end",
                         "tool_name": "web_search",
+                        "tool_call_id": tc_id,
+                        "result": result_json,
+                    }
+
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc_id,
+                        "content": result_json,
+                    })
+
+                elif name == "search_wiki":
+                    query_str = args.get("query", "")
+                    if not query_str:
+                        continue
+
+                    yield {
+                        "type": "research_tool_start",
+                        "tool_name": "search_wiki",
+                        "tool_call_id": tc_id,
+                        "arguments": {"query": query_str},
+                    }
+                    yield {"type": "research_tool_status", "text": f"Searching wiki: {query_str}"}
+
+                    result_json = await asyncio.to_thread(
+                        execute_wiki_search, str(self._wiki_pages_dir), query_str
+                    )
+                    try:
+                        result_data = json.loads(result_json)
+                        count = result_data.get("total", 0)
+                        yield {"type": "research_tool_status", "text": f"Wiki search: {count} results"}
+                    except json.JSONDecodeError:
+                        pass
+
+                    yield {
+                        "type": "research_tool_end",
+                        "tool_name": "search_wiki",
                         "tool_call_id": tc_id,
                         "result": result_json,
                     }
@@ -754,7 +792,9 @@ Sources:
             chat_completions_stream,
             execute_web_search,
             execute_wiki_read,
+            execute_wiki_search,
             WIKI_READ_PAGE_TOOL,
+            WIKI_SEARCH_TOOL,
             WIKI_WEB_SEARCH_TOOL,
         )
 
@@ -781,10 +821,10 @@ Sources:
             f"You are a research synthesizer. Write a thorough research summary "
             f"on the topic: '{topic}'.\n"
             f"Today's date is {datetime.now(timezone.utc).strftime('%B %d, %Y')}.\n\n"
-            "You have access to a wiki knowledge base via the read_wiki_page and "
-            "web_search tools. Use them to explore relevant pages and find recent "
-            "information, including both newly ingested sources and pre-existing "
-            "wiki content.\n\n"
+            "You have access to a wiki knowledge base via the search_wiki, "
+            "read_wiki_page, and web_search tools. Use them to explore relevant "
+            "pages and find recent information, including both newly ingested "
+            "sources and pre-existing wiki content.\n\n"
             "Plan your reads: start with key pages, then follow leads to related content.\n\n"
             f"--- Wiki index ---\n{index_content}\n---\n\n"
             f"Newly ingested during this research:\n{ingested_list or '(none)'}"
@@ -810,7 +850,7 @@ Sources:
             )},
         ]
 
-        tools: list[dict[str, Any]] = [WIKI_READ_PAGE_TOOL, WIKI_WEB_SEARCH_TOOL]
+        tools: list[dict[str, Any]] = [WIKI_READ_PAGE_TOOL, WIKI_SEARCH_TOOL, WIKI_WEB_SEARCH_TOOL]
         cumulative_read_chars = 0
         max_turns = int(os.getenv("ZOPEDIA_WIKI_MAX_TOOL_TURNS", "8"))
 
@@ -911,6 +951,42 @@ Sources:
                     yield {
                         "type": "research_tool_end",
                         "tool_name": "web_search",
+                        "tool_call_id": tc_id,
+                        "result": result_json,
+                    }
+
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc_id,
+                        "content": result_json,
+                    })
+
+                elif name == "search_wiki":
+                    query_str = args.get("query", "")
+                    if not query_str:
+                        continue
+
+                    yield {
+                        "type": "research_tool_start",
+                        "tool_name": "search_wiki",
+                        "tool_call_id": tc_id,
+                        "arguments": {"query": query_str},
+                    }
+                    yield {"type": "research_tool_status", "text": f"Searching wiki: {query_str}"}
+
+                    result_json = await asyncio.to_thread(
+                        execute_wiki_search, wiki_dir, query_str
+                    )
+                    try:
+                        result_data = json.loads(result_json)
+                        count = result_data.get("total", 0)
+                        yield {"type": "research_tool_status", "text": f"Wiki search: {count} results"}
+                    except json.JSONDecodeError:
+                        pass
+
+                    yield {
+                        "type": "research_tool_end",
+                        "tool_name": "search_wiki",
                         "tool_call_id": tc_id,
                         "result": result_json,
                     }

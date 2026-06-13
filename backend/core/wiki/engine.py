@@ -6941,7 +6941,7 @@ class LLMWikiEngine:
 
         page_count = sum(1 for l in lines if l.startswith("- [["))
         lines.append("---")
-        lines.append(f"Total: {page_count} pages. Use read_wiki_page to read any page by its path.")
+        lines.append(f"Total: {page_count} pages. Use search_wiki to find pages by keyword, or read_wiki_page to read any page by its path.")
         self.index_concise_file.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
 
     def _sync_godnodes_other(self) -> None:
@@ -7061,7 +7061,8 @@ class LLMWikiEngine:
             total = sum(1 for l in lines if l.startswith("- [["))
             lines.append("---")
             lines.append(
-                f"Total: {total} pages. Use read_wiki_page to expand community pages "
+                f"Total: {total} pages. Use search_wiki to find pages by keyword, "
+                "or read_wiki_page to expand community pages "
                 "and see their members. Start with the community that best matches "
                 "the user's question."
             )
@@ -7469,7 +7470,8 @@ class LLMWikiEngine:
         index_lines.append("---")
         index_lines.append(
             f"Total: {total_pages} pages in {total_communities} communities. "
-            "Use read_wiki_page to expand community pages and see their members. "
+            "Use search_wiki to find pages by keyword, or read_wiki_page to expand "
+            "community pages and see their members. "
             "\"Other\" pages are listed inline — no need to expand. "
             "Start with the community description that best matches the user's question."
         )

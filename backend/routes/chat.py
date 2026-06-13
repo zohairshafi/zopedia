@@ -377,12 +377,14 @@ async def openai_chat_completions(request: Request):
         if enable_tools:
             enabled_set = set(enabled_tools)
             enabled_set.add("read_wiki_page")
+            enabled_set.add("search_wiki")
         else:
-            enabled_set = {"read_wiki_page", "web_search"}
+            enabled_set = {"read_wiki_page", "web_search", "search_wiki"}
 
         wiki_tools = [t for t in WIKI_TOOLS if t["function"]["name"] in enabled_set]
-        # Add any custom tools from the request
-        wiki_tools += [t for t in tools if t.get("function", {}).get("name") not in {"read_wiki_page", "web_search"}]
+        # Add any custom tools from the request (only those not already in WIKI_TOOLS)
+        _wiki_tool_names = {t["function"]["name"] for t in WIKI_TOOLS}
+        wiki_tools += [t for t in tools if t.get("function", {}).get("name") not in _wiki_tool_names]
 
         has_wiki = "read_wiki_page" in enabled_set
         has_web = "web_search" in enabled_set
