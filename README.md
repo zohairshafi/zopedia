@@ -71,7 +71,11 @@ cd ../frontend && npm install && npm run build
 # Configure (DeepSeek, OpenAI, or any compatible API)
 export ZOPEDIA_LLM_BASE_URL=https://api.deepseek.com/v1
 export ZOPEDIA_LLM_API_KEY=sk-your-key
-export ZOPEDIA_LLM_MODEL=deepseek-v4-flash 
+export ZOPEDIA_LLM_MODEL=deepseek-v4-flash
+
+# Optional: Brave Search API for web search (free: 2,000 queries/month)
+# Get a key at https://brave.com/search/api/
+export ZOPEDIA_BRAVE_API_KEY=BSA... 
 
 # Run
 cd ../backend && python main.py
@@ -290,6 +294,11 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for full prompt table, maintenance lifecy
 |---|---|---|
 | `ZOPEDIA_WIKI_PENDING_INGEST_INTERVAL_SECONDS` | `45` | Min seconds between ingest sweeps during chat |
 | `ZOPEDIA_WIKI_PENDING_INGEST_MAX_FILES_PER_CHAT` | `1` | Max files ingested per chat request (0=off) |
+
+### Search
+| Variable | Default | Description |
+|---|---|---|
+| `ZOPEDIA_BRAVE_API_KEY` | — | Brave Search API key for web search. Required for the `web_search` tool in chat and research. Free tier: 2,000 queries/month. Get one at https://brave.com/search/api/ |
 
 ### Maintenance
 | Variable | Default | Description |
