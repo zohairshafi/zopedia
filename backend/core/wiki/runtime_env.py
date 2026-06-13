@@ -218,6 +218,14 @@ WIKI_ENV_SPECS: tuple[WikiEnvSpec, ...] = (
         minimum=10,
         maximum=10000,
     ),
+    WikiEnvSpec(
+        name="ZOPEDIA_WIKI_PARALLEL_WORKERS",
+        kind="int",
+        default="8",
+        description="Max worker threads for parallel wiki operations (ingestion, enrichment, lint, maintenance). Set to 1 to disable parallelism.",
+        minimum=1,
+        maximum=64,
+    ),
 )
 
 _WIKI_ENV_SPECS_BY_NAME = {spec.name: spec for spec in WIKI_ENV_SPECS}

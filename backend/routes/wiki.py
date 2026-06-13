@@ -596,7 +596,9 @@ async def wiki_ingest(payload: WikiIngestRequest, current_subject: str = Depends
         source_str = payload.source_path.strip()
         # URLs are passed through directly — the ingestor downloads them via graphify
         if source_str.startswith("http://") or source_str.startswith("https://"):
-            result = ingestor.ingest_file(Path(source_str), contributor="Zopedia")
+            result = await asyncio.to_thread(
+                ingestor.ingest_file, Path(source_str), contributor="Zopedia"
+            )
             if not result:
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to ingest URL: {source_str}")
             return WikiIngestResponse(status="ok", processed_files=1, results=[{"source_path": source_str, "result": result}])
@@ -604,11 +606,17 @@ async def wiki_ingest(payload: WikiIngestRequest, current_subject: str = Depends
         source_path = Path(source_str).expanduser()
         if not source_path.exists() or not source_path.is_file():
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"File not found: {source_path}")
-        result = ingestor.ingest_file(source_path, contributor="Zopedia")
+        result = await asyncio.to_thread(
+            ingestor.ingest_file, source_path, contributor="Zopedia"
+        )
         if not result:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to ingest file: {source_path}")
         return WikiIngestResponse(status="ok", processed_files=1, results=[{"source_path": str(source_path), "result": result}])
-    results = _ingest_pending_raw_files(max_files=payload.max_pending_raw_files, respect_interval_gate=False)
+    results = await asyncio.to_thread(
+        _ingest_pending_raw_files,
+        max_files=payload.max_pending_raw_files,
+        respect_interval_gate=False,
+    )
     return WikiIngestResponse(status="ok", processed_files=len(results), results=results)
 
 
@@ -737,20 +745,29 @@ async def wiki_query(payload: WikiQueryRequest, current_subject: str = Depends(_
     global _WIKI_QUERY_RUN_COUNT
     _WIKI_QUERY_RUN_COUNT += 1
     if _WIKI_AUTO_LINT_EVERY > 0 and _WIKI_QUERY_RUN_COUNT % _WIKI_AUTO_LINT_EVERY == 0:
-        try:
-            lint_report = manager.engine.lint()
-            logger.info("Auto lint after wiki query #%d: orphans=%d stale=%d broken=%d", _WIKI_QUERY_RUN_COUNT, len(lint_report.get("orphans", [])), len(lint_report.get("stale_pages", [])), len(lint_report.get("broken_links", [])))
-        except Exception as exc:
-            logger.warning("Auto lint after query #%d failed: %s", _WIKI_QUERY_RUN_COUNT, exc)
-        if _WIKI_AUTO_RETRY_FALLBACK_MAX_PAGES > 0:
+        # Launch maintenance as a background task so the HTTP response returns
+        # immediately rather than blocking on synchronous engine calls.
+        async def _background_maintenance():
             try:
-                manager.retry_fallback_analysis_pages(dry_run=False, max_analysis_pages=_WIKI_AUTO_RETRY_FALLBACK_MAX_PAGES)
+                lint_report = await asyncio.to_thread(manager.engine.lint)
+                logger.info("Auto lint after wiki query #%d: orphans=%d stale=%d broken=%d", _WIKI_QUERY_RUN_COUNT, len(lint_report.get("orphans", [])), len(lint_report.get("stale_pages", [])), len(lint_report.get("broken_links", [])))
             except Exception as exc:
-                logger.warning("Auto fallback-retry after query #%d failed: %s", _WIKI_QUERY_RUN_COUNT, exc)
-        try:
-            manager.enrich_analysis_pages(dry_run=False)
-        except Exception as exc:
-            logger.warning("Auto enrichment after query #%d failed: %s", _WIKI_QUERY_RUN_COUNT, exc)
+                logger.warning("Auto lint after query #%d failed: %s", _WIKI_QUERY_RUN_COUNT, exc)
+            if _WIKI_AUTO_RETRY_FALLBACK_MAX_PAGES > 0:
+                try:
+                    await asyncio.to_thread(
+                        manager.retry_fallback_analysis_pages,
+                        dry_run=False,
+                        max_analysis_pages=_WIKI_AUTO_RETRY_FALLBACK_MAX_PAGES,
+                    )
+                except Exception as exc:
+                    logger.warning("Auto fallback-retry after query #%d failed: %s", _WIKI_QUERY_RUN_COUNT, exc)
+            try:
+                await asyncio.to_thread(manager.enrich_analysis_pages, dry_run=False)
+            except Exception as exc:
+                logger.warning("Auto enrichment after query #%d failed: %s", _WIKI_QUERY_RUN_COUNT, exc)
+
+        asyncio.create_task(_background_maintenance())
 
     return WikiQueryResponse(status=str(result.get("status", "ok")), answer=str(result.get("answer", "")), answer_page=result.get("answer_page"), context_pages=[str(p) for p in result.get("context_pages", [])])
 

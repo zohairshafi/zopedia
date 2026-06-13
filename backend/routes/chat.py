@@ -30,6 +30,7 @@ from core.llm import (
     chat_completions_stream,
     execute_web_search,
     execute_wiki_read,
+    execute_wiki_search,
     llm_available,
 )
 from routes.wiki import (
@@ -277,6 +278,32 @@ async def _resolve_tool_calls_stream(
                     "tool_call_id": tc_id,
                     "result": tool_result,
                 }
+                # Small delay between successive web_search calls to avoid
+                # hammering upstream search engines when the LLM issues
+                # multiple searches in a single tool-calling turn.
+                await asyncio.sleep(0.15)
+            elif name == "search_wiki":
+                query_str = str(args.get("query", ""))
+                yield {
+                    "type": "tool_start",
+                    "tool_name": "search_wiki",
+                    "tool_call_id": tc_id,
+                    "arguments": {"query": query_str},
+                }
+                yield {"type": "tool_status", "text": f"Searching wiki: {query_str}"}
+                tool_result = await asyncio.to_thread(execute_wiki_search, wiki_dir, query_str)
+                try:
+                    result_data = json.loads(tool_result)
+                    count = result_data.get("total", 0)
+                    yield {"type": "tool_status", "text": f"Wiki search: {count} results"}
+                except Exception:
+                    pass
+                yield {
+                    "type": "tool_end",
+                    "tool_name": "search_wiki",
+                    "tool_call_id": tc_id,
+                    "result": tool_result,
+                }
             else:
                 tool_result = json.dumps({"error": f"Unknown tool: {name}"})
                 yield {
@@ -326,10 +353,19 @@ async def openai_chat_completions(request: Request):
     resolved_model = _resolve_model(model)
 
     if _WIKI_PENDING_INGEST_MAX_FILES_PER_CHAT > 0:
-        try:
-            _ingest_pending_raw_files(max_files=_WIKI_PENDING_INGEST_MAX_FILES_PER_CHAT, respect_interval_gate=True)
-        except Exception:
-            pass
+        # Fire-and-forget: don't delay the chat response for background ingest.
+        # The ingest runs in a thread pool and may complete after streaming begins.
+        async def _background_ingest():
+            try:
+                await asyncio.to_thread(
+                    _ingest_pending_raw_files,
+                    max_files=_WIKI_PENDING_INGEST_MAX_FILES_PER_CHAT,
+                    respect_interval_gate=True,
+                )
+            except Exception:
+                logger.debug("Background wiki ingest during chat request failed", exc_info=True)
+
+        asyncio.create_task(_background_ingest())
 
     query = _extract_last_user_query(messages)
 
@@ -400,6 +436,7 @@ async def openai_chat_completions(request: Request):
                 "HOW TO USE THE WIKI:\n"
                 "- The wiki index below is a table of contents. Each line is a community page (godnodes/*.md).\n"
                 "- Use read_wiki_page to expand a community — the page lists all entity/concept members.\n"
+                "- If you don't know which pages to read, use search_wiki to search all wiki content by keywords.\n"
                 "- Start with the community name that best matches the user's question, "
                 "read it, then read individual member pages and follow their [[wikilinks]].\n"
                 "- Entity and concept pages are the most curated and up-to-date. They contain [[wikilinks]] to related analysis and source pages.\n"

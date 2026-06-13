@@ -692,22 +692,26 @@ Sources:
     # -- maintenance -------------------------------------------------------
 
     async def _run_maintenance(self) -> AsyncGenerator[tuple[str, dict], None]:
-        """Run the full 5-step maintenance cycle — only for the final round."""
+        """Run the full 5-step maintenance cycle — only for the final round.
+        All synchronous engine calls are offloaded via asyncio.to_thread to avoid
+        blocking the event loop."""
         from core.wiki.manager import WikiManager
 
         manager = WikiManager.create(self._wiki_dir, self._llm_fn)
 
-        # Step 1: Lint
+        # Step 1: Lint (offloaded — walks all wiki pages, no LLM)
         try:
-            lint_result = manager.engine.lint()
+            lint_result = await asyncio.to_thread(manager.engine.lint)
         except Exception as exc:
             logger.warning("Research: lint failed: %s", exc)
             lint_result = {"error": str(exc)}
         yield ("lint", lint_result)
 
-        # Step 2: Retry fallback
+        # Step 2: Retry fallback (offloaded — makes parallel LLM calls)
         try:
-            retry_result = manager.retry_fallback_analysis_pages(dry_run=False)
+            retry_result = await asyncio.to_thread(
+                manager.retry_fallback_analysis_pages, dry_run=False
+            )
         except Exception as exc:
             logger.warning("Research: retry-fallback failed: %s", exc)
             retry_result = {"error": str(exc)}
@@ -725,9 +729,11 @@ Sources:
             from core.wiki.manager import WikiManager
             manager = WikiManager.create(self._wiki_dir, self._llm_fn)
 
-        # Backlinks only
+        # Backlinks only (offloaded — file I/O, no LLM)
         try:
-            backlinks_result = manager.refresh_analysis_backlinks(dry_run=False)
+            backlinks_result = await asyncio.to_thread(
+                manager.refresh_analysis_backlinks, dry_run=False
+            )
         except Exception as exc:
             logger.warning("Research: backlinks failed: %s", exc)
             backlinks_result = {"error": str(exc)}

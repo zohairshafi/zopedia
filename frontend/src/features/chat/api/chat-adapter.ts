@@ -860,8 +860,8 @@ export function createOpenAIStreamAdapter(): ChatModelAdapter {
               ? {
                   enable_tools: true,
                   enabled_tools: toolsEnabled
-                    ? ["read_wiki_page", "web_search"]
-                    : ["read_wiki_page"],
+                    ? ["read_wiki_page", "web_search", "search_wiki"]
+                    : ["read_wiki_page", "search_wiki"],
                   auto_heal_tool_calls: useChatRuntimeStore.getState().autoHealToolCalls,
                   max_tool_calls_per_message: useChatRuntimeStore.getState().maxToolCallsPerMessage,
                   tool_call_timeout: (() => {

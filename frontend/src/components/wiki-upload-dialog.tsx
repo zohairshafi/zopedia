@@ -46,7 +46,6 @@ export function WikiUploadDialog({ open, onOpenChange }: WikiUploadDialogProps) 
   const [dragging, setDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [urlValue, setUrlValue] = useState("");
-  const [ingestingUrl, setIngestingUrl] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const uploadFiles = useCallback(async (files: FileList | File[]) => {
@@ -114,7 +113,13 @@ export function WikiUploadDialog({ open, onOpenChange }: WikiUploadDialogProps) 
       return;
     }
 
-    setIngestingUrl(true);
+    // Close dialog immediately so the user can continue working.
+    setUrlValue("");
+    onOpenChange(false);
+    toast.info("URL ingest queued", {
+      description: "Processing in background — wiki pages will appear when ready.",
+    });
+
     try {
       const res = await authFetch("/api/inference/wiki/ingest", {
         method: "POST",
@@ -130,8 +135,6 @@ export function WikiUploadDialog({ open, onOpenChange }: WikiUploadDialogProps) 
         toast.success("URL ingested", {
           description: trimmed,
         });
-        setUrlValue("");
-        onOpenChange(false);
       } else {
         toast.error("URL ingestion returned no results");
       }
@@ -139,8 +142,6 @@ export function WikiUploadDialog({ open, onOpenChange }: WikiUploadDialogProps) 
       toast.error("URL ingestion failed", {
         description: err instanceof Error ? err.message : "Unknown error",
       });
-    } finally {
-      setIngestingUrl(false);
     }
   }, [urlValue, onOpenChange]);
 
@@ -157,7 +158,7 @@ export function WikiUploadDialog({ open, onOpenChange }: WikiUploadDialogProps) 
     }
   };
 
-  const busy = uploading || ingestingUrl;
+  const busy = uploading;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -237,7 +238,7 @@ export function WikiUploadDialog({ open, onOpenChange }: WikiUploadDialogProps) 
             variant="secondary"
             size="sm"
           >
-            {ingestingUrl ? "Ingesting..." : "Ingest"}
+            Ingest
           </Button>
         </form>
       </DialogContent>

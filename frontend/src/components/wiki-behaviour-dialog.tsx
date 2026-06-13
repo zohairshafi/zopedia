@@ -132,7 +132,8 @@ function categoryForVariable(name: string): WikiVariableCategory {
     name.includes("AUTO_QUERY") ||
     name.includes("PENDING_INGEST") ||
     name.includes("AUTO_LINT") ||
-    name.includes("WIKI_VAULT")
+    name.includes("WIKI_VAULT") ||
+    name.includes("PARALLEL")
   ) {
     return "Watcher & Ingest";
   }

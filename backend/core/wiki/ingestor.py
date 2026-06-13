@@ -7,6 +7,7 @@ import importlib
 import urllib.parse
 import json
 import hashlib
+import threading
 
 
 def _import_graphify_module(module_name: str):
@@ -36,6 +37,7 @@ try:
 except Exception:
     _GRAPHIFY_CACHE = None
 
+from .concurrency import run_parallel
 from .manager import WikiManager
 
 logger = logging.getLogger(__name__)
@@ -52,6 +54,7 @@ class WikiIngestor:
         self.raw_dir = raw_dir
         self.raw_dir.mkdir(parents = True, exist_ok = True)
         self._recent_ingest_metadata: Dict[str, Dict[str, Any]] = {}
+        self._state_lock = threading.Lock()
 
     _SKIPPED_LOCAL_FILENAMES = {".ds_store", "thumbs.db"}
     _FALLBACK_SUPPORTED_SUFFIXES = {
@@ -438,70 +441,103 @@ class WikiIngestor:
                 skipped_sensitive,
             )
 
-        state = self._load_ingest_state()
-        state_changed = False
+        # -- snapshot phase: read state and collect tasks under lock --
+        with self._state_lock:
+            state = self._load_ingest_state()
+            state_changed = False
 
-        existing_paths = {str(p.expanduser().resolve()) for p in candidates}
-        stale_paths = [path for path in state.keys() if path not in existing_paths]
-        for stale in stale_paths:
-            state.pop(stale, None)
-            state_changed = True
-
-        ingested = 0
-        results: List[Dict[str, str]] = []
-        for path in candidates:
-            if ingested >= max_files:
-                break
-
-            resolved = path.expanduser().resolve()
-            if self.should_skip_local_file(resolved):
-                continue
-            if not self._is_supported_local_file(resolved):
-                continue
-
-            key = str(resolved)
-            current_hash = self._compute_file_hash(resolved)
-            previous_hash = state.get(key)
-
-            slug = self.wiki_manager.engine._slug(self._local_source_title(resolved))
-            source_page = sources_dir / f"{slug}.md"
-
-            if source_page.exists():
-                if current_hash is None:
-                    continue
-
-                try:
-                    source_mtime = source_page.stat().st_mtime
-                    raw_mtime = resolved.stat().st_mtime
-                except OSError:
-                    source_mtime = 0.0
-                    raw_mtime = 0.0
-
-                source_is_up_to_date = source_mtime >= raw_mtime
-                if previous_hash == current_hash:
-                    continue
-
-                # Backfill missing hash state for already-ingested sources, but
-                # do not skip when we have evidence of changed raw content.
-                if previous_hash is None and source_is_up_to_date:
-                    if state.get(key) != current_hash:
-                        state[key] = current_hash
-                        state_changed = True
-                    continue
-
-            title = self.ingest_file(resolved, contributor = contributor)
-            if not title:
-                continue
-
-            ingested += 1
-            results.append({"source_path": str(resolved), "result": title})
-
-            if current_hash is not None and state.get(key) != current_hash:
-                state[key] = current_hash
+            existing_paths = {str(p.expanduser().resolve()) for p in candidates}
+            stale_paths = [path for path in state.keys() if path not in existing_paths]
+            for stale in stale_paths:
+                state.pop(stale, None)
                 state_changed = True
 
-        if state_changed:
-            self._save_ingest_state(state)
+            ingested = 0
+            results: List[Dict[str, str]] = []
+
+            # -- pre-filter: collect tasks that need ingestion (I/O only, sequential) --
+            tasks: list[tuple[Path, str, str | None]] = []  # (resolved, key, current_hash)
+            for path in candidates:
+                if len(tasks) >= max_files:
+                    break
+
+                resolved = path.expanduser().resolve()
+                if self.should_skip_local_file(resolved):
+                    continue
+                if not self._is_supported_local_file(resolved):
+                    continue
+
+                key = str(resolved)
+                current_hash = self._compute_file_hash(resolved)
+                previous_hash = state.get(key)
+
+                slug = self.wiki_manager.engine._slug(self._local_source_title(resolved))
+                source_page = sources_dir / f"{slug}.md"
+
+                if source_page.exists():
+                    if current_hash is None:
+                        continue
+
+                    try:
+                        source_mtime = source_page.stat().st_mtime
+                        raw_mtime = resolved.stat().st_mtime
+                    except OSError:
+                        source_mtime = 0.0
+                        raw_mtime = 0.0
+
+                    source_is_up_to_date = source_mtime >= raw_mtime
+                    if previous_hash == current_hash:
+                        continue
+
+                    # Backfill missing hash state for already-ingested sources, but
+                    # do not skip when we have evidence of changed raw content.
+                    if previous_hash is None and source_is_up_to_date:
+                        if state.get(key) != current_hash:
+                            state[key] = current_hash
+                            state_changed = True
+                        continue
+
+                tasks.append((resolved, key, current_hash))
+
+            if state_changed:
+                self._save_ingest_state(state)
+
+        # -- parallel ingest phase --
+        if tasks:
+            logger.info(
+                "Parallel ingest: processing %d file(s) with up to %d workers",
+                len(tasks),
+                min(4, len(tasks)),
+            )
+
+            def _ingest_one(task: tuple[Path, str, str | None]) -> tuple[str, str, str | None] | None:
+                resolved, key, current_hash = task
+                title = self.ingest_file(resolved, contributor=contributor)
+                if not title:
+                    return None
+                return (str(resolved), title, current_hash)
+
+            ingest_results = run_parallel(
+                tasks,
+                _ingest_one,
+                max_workers=min(4, len(tasks)),
+                description="ingest_pending_raw_files",
+            )
+
+            # -- post-process: update state and collect results (sequential, locked) --
+            with self._state_lock:
+                fresh_state = self._load_ingest_state()
+                for entry in ingest_results:
+                    if entry is None:
+                        continue
+                    source_path, title, current_hash = entry
+                    results.append({"source_path": source_path, "result": title})
+                    ingested += 1
+                    if current_hash is not None and fresh_state.get(source_path) != current_hash:
+                        fresh_state[source_path] = current_hash
+                        state_changed = True
+                if state_changed:
+                    self._save_ingest_state(fresh_state)
 
         return results
 

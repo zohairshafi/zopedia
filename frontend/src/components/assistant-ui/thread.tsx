@@ -33,9 +33,11 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { saveWikiChatHistory } from "@/features/chat/api/chat-api";
 import { sentAudioNames } from "@/features/chat/api/chat-adapter";
+import { db } from "@/features/chat/db";
 import { useChatRuntimeStore } from "@/features/chat/stores/chat-runtime-store";
 import { applyQwenThinkingParams } from "@/features/chat/utils/qwen-params";
 import { deleteThreadMessage } from "@/features/chat/utils/delete-thread-message";
+import { exportThreadAsHtml } from "@/features/chat/utils/export-thread-html";
 import { AUDIO_ACCEPT, MAX_AUDIO_SIZE, fileToBase64 } from "@/lib/audio-utils";
 import { copyToClipboard } from "@/lib/copy-to-clipboard";
 import { cn } from "@/lib/utils";
@@ -709,6 +711,58 @@ const WebSearchToggle: FC = () => {
 
 
 
+const ExportHTMLButton: FC = () => {
+  const threadId = useAuiState(({ threads }) => threads.mainThreadId);
+  const isThreadRunning = useAuiState(({ thread }) => thread.isRunning);
+  const [isExporting, setIsExporting] = useState(false);
+
+  const handleExport = useCallback(async () => {
+    if (!threadId) return;
+
+    setIsExporting(true);
+    try {
+      const thread = await db.threads.get(threadId);
+      const msgs = await db.messages
+        .where("threadId")
+        .equals(threadId)
+        .sortBy("createdAt");
+      if (msgs.length === 0) {
+        toast.error("No messages to export yet.");
+        return;
+      }
+      await exportThreadAsHtml(msgs, thread?.title);
+    } catch (error) {
+      toast.error("Export failed", {
+        description: error instanceof Error ? error.message : "Unknown error",
+      });
+    } finally {
+      setIsExporting(false);
+    }
+  }, [threadId]);
+
+  const disabled = !threadId || isThreadRunning || isExporting;
+
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={() => {
+        void handleExport();
+      }}
+      className={cn(
+        "flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-colors",
+        disabled
+          ? "cursor-not-allowed opacity-40"
+          : "bg-muted text-muted-foreground hover:bg-muted-foreground/15",
+      )}
+      aria-label="Export as HTML"
+    >
+      <DownloadIcon className="size-3.5" />
+      <span>{isExporting ? "Exporting..." : "Export HTML"}</span>
+    </button>
+  );
+};
+
 const WikiChatHistoryToggle: FC = () => {
   const aui = useAui();
   const threadId = useAuiState(({ threads }) => threads.mainThreadId);
@@ -857,6 +911,7 @@ const ComposerAction: FC<{ disabled?: boolean }> = ({ disabled }) => {
         <PreserveThinkingToggle />
         <WebSearchToggle />
         <WikiChatHistoryToggle />
+        <ExportHTMLButton />
       </div>
       <div className="shrink-0 flex items-center gap-1">
         <ComposerPrimitive.If dictation={false}>

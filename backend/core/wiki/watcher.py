@@ -67,7 +67,7 @@ class WikiFileEventHandler(FileSystemEventHandler):
         self._lock = threading.Lock()
         self._processed_mtime_ns: dict[str, int] = {}
         self._processed_hash: dict[str, str] = {}
-        self._ingest_inflight: set[str] = set()
+        self._batch_active = False
 
     def _analysis_context_override_chars(self) -> Optional[int]:
         if (
@@ -144,325 +144,356 @@ class WikiFileEventHandler(FileSystemEventHandler):
             self._process_file(Path(event.src_path))
 
     def _process_file(self, file_path: Path):
-        # Debounce slightly to allow file writing to complete
-        time.sleep(0.5)
         if self.ingestor.should_skip_local_file(file_path):
             return
-        if file_path.exists():
-            try:
-                resolved = str(file_path.resolve())
-                mtime_ns = file_path.stat().st_mtime_ns
-                file_hash = self._compute_file_hash(file_path)
-            except OSError:
-                return
+        if not file_path.exists():
+            return
 
-            with self._lock:
-                last_mtime = self._processed_mtime_ns.get(resolved)
-                last_hash = self._processed_hash.get(resolved)
-                if last_hash == file_hash:
-                    return
-                if last_mtime == mtime_ns:
-                    return
-                if resolved in self._ingest_inflight:
-                    return
-                self._ingest_inflight.add(resolved)
+        try:
+            resolved = str(file_path.resolve())
+        except OSError:
+            return
+
+        # Only one watcher-triggered batch may run at a time.
+        # Subsequent events (e.g. 3 files dropped at once) become no-ops
+        # because the first batch processes all pending files in parallel.
+        with self._lock:
+            if self._batch_active:
+                return
+            self._batch_active = True
+
+        # -- Batch ingest phase --
+        title: Optional[str] = None
+        ingest_metadata: dict = {}
+
+        try:
+            # Debounce: wait briefly for more files to finish writing
+            time.sleep(0.5)
 
             trace_id: Optional[str] = None
             try:
-                # Keep background wiki LLM telemetry grouped per file event
-                # so call_seq starts at 1 for each ingest/analysis workflow.
                 from routes.inference import _start_chat_trace
 
                 trace_id = _start_chat_trace()
             except Exception:
                 trace_id = None
 
-            try:
-                if trace_id:
-                    logger.info(
-                        "New file detected in wiki raw directory: %s (trace_id=%s)",
-                        file_path,
-                        trace_id,
-                    )
-                else:
-                    logger.info(f"New file detected in wiki raw directory: {file_path}")
-                title = self.ingestor.ingest_file(
-                    file_path, contributor = self.contributor
-                )
-                if not title:
-                    return
-
-                ingest_metadata: dict = {}
-                pop_ingest_metadata = getattr(
-                    self.ingestor,
-                    "pop_recent_ingest_metadata",
-                    None,
-                )
-                if callable(pop_ingest_metadata):
-                    maybe_metadata = pop_ingest_metadata(file_path)
-                    if isinstance(maybe_metadata, dict):
-                        ingest_metadata = maybe_metadata
-
-                with self._lock:
-                    self._processed_mtime_ns[resolved] = mtime_ns
-                    self._processed_hash[resolved] = file_hash
-            finally:
-                with self._lock:
-                    self._ingest_inflight.discard(resolved)
-
-            if not self.auto_analyze:
-                return
-
-            if not self.analyze_chat_history and file_path.stem.lower().startswith(
-                "chat_history_"
-            ):
-                return
-
-            if self.llm_available_fn is not None and not self.llm_available_fn():
+            if trace_id:
                 logger.info(
-                    "Skipping auto wiki analysis for %s (no active model loaded)",
-                    file_path.name,
+                    "Batch ingest triggered by new file in wiki raw directory: %s (trace_id=%s)",
+                    file_path,
+                    trace_id,
                 )
-                return
-
-            if str(ingest_metadata.get("mode", "")).strip().lower() == "chunked":
+            else:
                 logger.info(
-                    "Skipping watcher auto wiki analysis for %s (chunked ingest already produced merged analysis: %s)",
-                    file_path.name,
-                    str(ingest_metadata.get("merged_analysis_page", "") or "unknown"),
+                    "Batch ingest triggered by new file in wiki raw directory: %s",
+                    file_path,
                 )
-                return
 
-            source_slug = self.ingestor.wiki_manager.engine._slug(title)
-            source_page_rel = f"sources/{source_slug}.md"
-            source_chars = self._source_page_chars(source_slug)
-            question = self.ingestor.wiki_manager.engine._source_first_summary_question(
-                title = title,
-                source_slug = source_slug,
+            # Process ALL pending raw files in parallel (not just the triggering file).
+            results = self.ingestor.ingest_pending_raw_files(
+                max_files=8, contributor=self.contributor
             )
-            context_override_chars = self._analysis_context_override_chars()
-            if source_chars is not None and context_override_chars is not None:
-                context_override_chars = max(context_override_chars, source_chars)
-            try:
-                attempt_override = context_override_chars
-                probe_result = None
-                reductions_done = 0
-                source_only_mode = self.analysis_source_only
-                if source_only_mode and source_chars is not None:
+
+            # Find the result for the file that triggered this batch.
+            for entry in results:
+                entry_path = str(entry.get("source_path", ""))
+                try:
+                    entry_resolved = str(Path(entry_path).resolve())
+                except Exception:
+                    entry_resolved = entry_path
+                if entry_resolved == resolved:
+                    title = str(entry.get("result", "") or "")
+                # Refresh mtime/hash tracking so re-ingest is not attempted
+                # for files this batch already processed.
+                try:
+                    entry_path_obj = Path(entry_path)
+                    if entry_path_obj.exists():
+                        self._processed_mtime_ns[entry_resolved] = (
+                            entry_path_obj.stat().st_mtime_ns
+                        )
+                        self._processed_hash[entry_resolved] = (
+                            self._compute_file_hash(entry_path_obj)
+                        )
+                except OSError:
+                    pass
+        except Exception:
+            logger.warning(
+                "Batch ingest failed for %s", file_path, exc_info=True
+            )
+            return
+        finally:
+            with self._lock:
+                self._batch_active = False
+
+        if not title:
+            return
+
+        # Pop metadata for the triggering file (chunked mode, etc.).
+        pop_ingest_metadata = getattr(
+            self.ingestor,
+            "pop_recent_ingest_metadata",
+            None,
+        )
+        if callable(pop_ingest_metadata):
+            maybe_metadata = pop_ingest_metadata(file_path)
+            if isinstance(maybe_metadata, dict):
+                ingest_metadata = maybe_metadata
+
+        # -- Analysis phase (runs AFTER batch ingest completes and lock is released) --
+        if not self.auto_analyze:
+            return
+
+        if not self.analyze_chat_history and file_path.stem.lower().startswith(
+            "chat_history_"
+        ):
+            return
+
+        if self.llm_available_fn is not None and not self.llm_available_fn():
+            logger.info(
+                "Skipping auto wiki analysis for %s (no active model loaded)",
+                file_path.name,
+            )
+            return
+
+        if str(ingest_metadata.get("mode", "")).strip().lower() == "chunked":
+            logger.info(
+                "Skipping watcher auto wiki analysis for %s (chunked ingest already produced merged analysis: %s)",
+                file_path.name,
+                str(ingest_metadata.get("merged_analysis_page", "") or "unknown"),
+            )
+            return
+
+        source_slug = self.ingestor.wiki_manager.engine._slug(title)
+        source_page_rel = f"sources/{source_slug}.md"
+        source_chars = self._source_page_chars(source_slug)
+        question = self.ingestor.wiki_manager.engine._source_first_summary_question(
+            title = title,
+            source_slug = source_slug,
+        )
+        context_override_chars = self._analysis_context_override_chars()
+        if source_chars is not None and context_override_chars is not None:
+            context_override_chars = max(context_override_chars, source_chars)
+        try:
+            attempt_override = context_override_chars
+            probe_result = None
+            reductions_done = 0
+            source_only_mode = self.analysis_source_only
+            if source_only_mode and source_chars is not None:
+                attempt_override = (
+                    source_chars
+                    if attempt_override is None
+                    else max(attempt_override, source_chars)
+                )
+
+            while True:
+                probe_result = self.ingestor.wiki_manager.query_rag(
+                    question,
+                    query_context_max_chars_override = attempt_override,
+                    save_answer = False,
+                    preferred_context_page = source_page_rel,
+                    keep_preferred_context_full = True,
+                    preferred_context_only = source_only_mode,
+                )
+
+                if not probe_result.get("used_extractive_fallback"):
+                    break
+
+                can_reduce = (
+                    self.analysis_retry_on_fallback
+                    and not source_only_mode
+                    and reductions_done < self.analysis_max_retries
+                )
+                if can_reduce:
+                    next_override = self._reduced_context_override(attempt_override)
+                    if source_chars is not None and next_override is not None:
+                        next_override = max(next_override, source_chars)
+                    if next_override is not None:
+                        logger.info(
+                            "Auto wiki analysis fallback for %s (reason=%s). "
+                            "Retrying with smaller context (%s -> %s chars).",
+                            file_path.name,
+                            probe_result.get("fallback_reason"),
+                            attempt_override,
+                            next_override,
+                        )
+                        attempt_override = next_override
+                        reductions_done += 1
+                        continue
+
+                if (
+                    self.analysis_source_only_final_retry
+                    and source_chars is not None
+                    and not self.analysis_source_only
+                    and not source_only_mode
+                ):
+                    source_only_mode = True
                     attempt_override = (
                         source_chars
                         if attempt_override is None
                         else max(attempt_override, source_chars)
                     )
+                    logger.info(
+                        "Auto wiki analysis fallback for %s (reason=%s). "
+                        "Final retry with source-only context.",
+                        file_path.name,
+                        probe_result.get("fallback_reason"),
+                    )
+                    continue
 
-                while True:
-                    probe_result = self.ingestor.wiki_manager.query_rag(
-                        question,
-                        query_context_max_chars_override = attempt_override,
-                        save_answer = False,
-                        preferred_context_page = source_page_rel,
-                        keep_preferred_context_full = True,
-                        preferred_context_only = source_only_mode,
+                break
+
+            result = probe_result if isinstance(probe_result, dict) else {}
+            answer_page = None
+            persisted_from_probe = False
+
+            persist_probe_fn = getattr(
+                self.ingestor.wiki_manager,
+                "persist_query_probe_result",
+                None,
+            )
+            if callable(persist_probe_fn):
+                try:
+                    answer_page = persist_probe_fn(result, question = question)
+                except Exception as exc:
+                    logger.warning(
+                        "Auto wiki analysis probe persistence failed for %s: %s",
+                        file_path.name,
+                        exc,
+                    )
+                    answer_page = None
+
+            if answer_page:
+                persisted_from_probe = True
+                result = dict(result)
+                result["status"] = str(result.get("status", "ok") or "ok")
+                result["answer_page"] = answer_page
+            else:
+                result = self.ingestor.wiki_manager.query_rag(
+                    question,
+                    query_context_max_chars_override = attempt_override,
+                    save_answer = True,
+                    preferred_context_page = source_page_rel,
+                    keep_preferred_context_full = True,
+                    preferred_context_only = source_only_mode,
+                )
+                answer_page = result.get("answer_page")
+
+            with self._lock:
+                self._analysis_runs += 1
+                run_count = self._analysis_runs
+
+            logger.info(
+                "Auto wiki analysis complete for %s (run=%d, answer_page=%s, "
+                "context_chars_override=%s, source_only=%s, fallback=%s, reason=%s, "
+                "persisted_from_probe=%s)",
+                file_path.name,
+                run_count,
+                answer_page,
+                attempt_override,
+                source_only_mode,
+                result.get("used_extractive_fallback"),
+                result.get("fallback_reason"),
+                persisted_from_probe,
+            )
+
+            if self.lint_every > 0 and run_count % self.lint_every == 0:
+                maint_start = time.time()
+                logger.info("Maintenance cycle starting (run %d)", run_count)
+
+                try:
+                    t0 = time.time()
+                    lint_report = self.ingestor.wiki_manager.get_health()
+                    logger.info(
+                        "Maintenance [1/5] lint done in %.1fs: orphans=%d stale=%d broken=%d",
+                        time.time() - t0,
+                        len(lint_report.get("orphans", [])),
+                        len(lint_report.get("stale_pages", [])),
+                        len(lint_report.get("broken_links", [])),
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Maintenance [1/5] lint failed after %d analyses: %s",
+                        run_count,
+                        exc,
                     )
 
-                    if not probe_result.get("used_extractive_fallback"):
-                        break
-
-                    can_reduce = (
-                        self.analysis_retry_on_fallback
-                        and not source_only_mode
-                        and reductions_done < self.analysis_max_retries
-                    )
-                    if can_reduce:
-                        next_override = self._reduced_context_override(attempt_override)
-                        if source_chars is not None and next_override is not None:
-                            next_override = max(next_override, source_chars)
-                        if next_override is not None:
-                            logger.info(
-                                "Auto wiki analysis fallback for %s (reason=%s). "
-                                "Retrying with smaller context (%s -> %s chars).",
-                                file_path.name,
-                                probe_result.get("fallback_reason"),
-                                attempt_override,
-                                next_override,
-                            )
-                            attempt_override = next_override
-                            reductions_done += 1
-                            continue
-
-                    if (
-                        self.analysis_source_only_final_retry
-                        and source_chars is not None
-                        and not self.analysis_source_only
-                        and not source_only_mode
-                    ):
-                        source_only_mode = True
-                        attempt_override = (
-                            source_chars
-                            if attempt_override is None
-                            else max(attempt_override, source_chars)
+                if self.maintenance_retry_fallback_max_pages > 0:
+                    try:
+                        t0 = time.time()
+                        retry_report = self.ingestor.wiki_manager.retry_fallback_analysis_pages(
+                            dry_run = False,
+                            max_analysis_pages = self.maintenance_retry_fallback_max_pages,
                         )
                         logger.info(
-                            "Auto wiki analysis fallback for %s (reason=%s). "
-                            "Final retry with source-only context.",
-                            file_path.name,
-                            probe_result.get("fallback_reason"),
+                            "Maintenance [2/5] fallback-retry done in %.1fs: scanned=%d fallback=%d regenerated=%d",
+                            time.time() - t0,
+                            int(retry_report.get("scanned_pages", 0)),
+                            int(retry_report.get("fallback_pages_found", 0)),
+                            int(retry_report.get("regenerated_pages", 0)),
                         )
-                        continue
-
-                    break
-
-                result = probe_result if isinstance(probe_result, dict) else {}
-                answer_page = None
-                persisted_from_probe = False
-
-                persist_probe_fn = getattr(
-                    self.ingestor.wiki_manager,
-                    "persist_query_probe_result",
-                    None,
-                )
-                if callable(persist_probe_fn):
-                    try:
-                        answer_page = persist_probe_fn(result, question = question)
                     except Exception as exc:
                         logger.warning(
-                            "Auto wiki analysis probe persistence failed for %s: %s",
-                            file_path.name,
-                            exc,
+                            "Maintenance [2/5] fallback-retry failed: %s", exc
                         )
-                        answer_page = None
 
-                if answer_page:
-                    persisted_from_probe = True
-                    result = dict(result)
-                    result["status"] = str(result.get("status", "ok") or "ok")
-                    result["answer_page"] = answer_page
-                else:
-                    result = self.ingestor.wiki_manager.query_rag(
-                        question,
-                        query_context_max_chars_override = attempt_override,
-                        save_answer = True,
-                        preferred_context_page = source_page_rel,
-                        keep_preferred_context_full = True,
-                        preferred_context_only = source_only_mode,
+                try:
+                    t0 = time.time()
+                    enrich_report = (
+                        self.ingestor.wiki_manager.enrich_analysis_pages(
+                            dry_run = False,
+                            compact_knowledge_pages = True,
+                        )
                     )
-                    answer_page = result.get("answer_page")
+                    logger.info(
+                        "Maintenance [3/5] enrichment done in %.1fs: scanned=%d updated=%d",
+                        time.time() - t0,
+                        int(enrich_report.get("scanned_pages", 0)),
+                        int(enrich_report.get("updated_pages", 0)),
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Maintenance [3/5] enrichment failed: %s", exc
+                    )
 
-                with self._lock:
-                    self._analysis_runs += 1
-                    run_count = self._analysis_runs
+                try:
+                    t0 = time.time()
+                    backlinks_report = (
+                        self.ingestor.wiki_manager.refresh_analysis_backlinks(
+                            dry_run = False
+                        )
+                    )
+                    logger.info(
+                        "Maintenance [4/5] backlinks done in %.1fs: scanned=%d linked=%d updated=%d",
+                        time.time() - t0,
+                        int(backlinks_report.get("scanned_analysis_pages", 0)),
+                        int(backlinks_report.get("linked_target_pages", 0)),
+                        int(backlinks_report.get("updated_pages", 0)),
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Maintenance [4/5] backlinks failed: %s", exc
+                    )
+
+                # Rebuild god-nodes community index now that backlinks exist
+                try:
+                    t0 = time.time()
+                    self.ingestor.wiki_manager.engine._rebuild_index_godnodes()
+                    logger.info(
+                        "Maintenance [5/5] god-nodes index rebuilt in %.1fs",
+                        time.time() - t0,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Maintenance [5/5] god-nodes rebuild failed: %s", exc
+                    )
 
                 logger.info(
-                    "Auto wiki analysis complete for %s (run=%d, answer_page=%s, "
-                    "context_chars_override=%s, source_only=%s, fallback=%s, reason=%s, "
-                    "persisted_from_probe=%s)",
-                    file_path.name,
-                    run_count,
-                    answer_page,
-                    attempt_override,
-                    source_only_mode,
-                    result.get("used_extractive_fallback"),
-                    result.get("fallback_reason"),
-                    persisted_from_probe,
+                    "Maintenance cycle complete in %.1fs",
+                    time.time() - maint_start,
                 )
-
-                if self.lint_every > 0 and run_count % self.lint_every == 0:
-                    maint_start = time.time()
-                    logger.info("Maintenance cycle starting (run %d)", run_count)
-
-                    try:
-                        t0 = time.time()
-                        lint_report = self.ingestor.wiki_manager.get_health()
-                        logger.info(
-                            "Maintenance [1/5] lint done in %.1fs: orphans=%d stale=%d broken=%d",
-                            time.time() - t0,
-                            len(lint_report.get("orphans", [])),
-                            len(lint_report.get("stale_pages", [])),
-                            len(lint_report.get("broken_links", [])),
-                        )
-                    except Exception as exc:
-                        logger.warning(
-                            "Maintenance [1/5] lint failed after %d analyses: %s",
-                            run_count,
-                            exc,
-                        )
-
-                    if self.maintenance_retry_fallback_max_pages > 0:
-                        try:
-                            t0 = time.time()
-                            retry_report = self.ingestor.wiki_manager.retry_fallback_analysis_pages(
-                                dry_run = False,
-                                max_analysis_pages = self.maintenance_retry_fallback_max_pages,
-                            )
-                            logger.info(
-                                "Maintenance [2/5] fallback-retry done in %.1fs: scanned=%d fallback=%d regenerated=%d",
-                                time.time() - t0,
-                                int(retry_report.get("scanned_pages", 0)),
-                                int(retry_report.get("fallback_pages_found", 0)),
-                                int(retry_report.get("regenerated_pages", 0)),
-                            )
-                        except Exception as exc:
-                            logger.warning(
-                                "Maintenance [2/5] fallback-retry failed: %s", exc
-                            )
-
-                    try:
-                        t0 = time.time()
-                        enrich_report = (
-                            self.ingestor.wiki_manager.enrich_analysis_pages(
-                                dry_run = False,
-                                compact_knowledge_pages = True,
-                            )
-                        )
-                        logger.info(
-                            "Maintenance [3/5] enrichment done in %.1fs: scanned=%d updated=%d",
-                            time.time() - t0,
-                            int(enrich_report.get("scanned_pages", 0)),
-                            int(enrich_report.get("updated_pages", 0)),
-                        )
-                    except Exception as exc:
-                        logger.warning(
-                            "Maintenance [3/5] enrichment failed: %s", exc
-                        )
-
-                    try:
-                        t0 = time.time()
-                        backlinks_report = (
-                            self.ingestor.wiki_manager.refresh_analysis_backlinks(
-                                dry_run = False
-                            )
-                        )
-                        logger.info(
-                            "Maintenance [4/5] backlinks done in %.1fs: scanned=%d linked=%d updated=%d",
-                            time.time() - t0,
-                            int(backlinks_report.get("scanned_analysis_pages", 0)),
-                            int(backlinks_report.get("linked_target_pages", 0)),
-                            int(backlinks_report.get("updated_pages", 0)),
-                        )
-                    except Exception as exc:
-                        logger.warning(
-                            "Maintenance [4/5] backlinks failed: %s", exc
-                        )
-
-                    # Rebuild god-nodes community index now that backlinks exist
-                    try:
-                        t0 = time.time()
-                        self.ingestor.wiki_manager.engine._rebuild_index_godnodes()
-                        logger.info(
-                            "Maintenance [5/5] god-nodes index rebuilt in %.1fs",
-                            time.time() - t0,
-                        )
-                    except Exception as exc:
-                        logger.warning(
-                            "Maintenance [5/5] god-nodes rebuild failed: %s", exc
-                        )
-
-                    logger.info(
-                        "Maintenance cycle complete in %.1fs",
-                        time.time() - maint_start,
-                    )
-            except Exception as exc:
-                logger.warning("Auto wiki analysis failed for %s: %s", file_path, exc)
+        except Exception as exc:
+            logger.warning("Auto wiki analysis failed for %s: %s", file_path, exc)
 
 
 class WikiIngestionWatcher:

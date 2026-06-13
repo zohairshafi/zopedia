@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -464,38 +465,156 @@ WIKI_WEB_SEARCH_TOOL = {
     },
 }
 
-WIKI_TOOLS = [WIKI_READ_PAGE_TOOL, WIKI_WEB_SEARCH_TOOL]
+WIKI_SEARCH_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "search_wiki",
+        "description": (
+            "Search the wiki for pages matching a query. "
+            "Returns ranked results with page paths, titles, and content previews. "
+            "Prefer reading godnodes and following links over searching, but if you have a hard time finding something,"
+            "Use this to discover relevant pages BEFORE using read_wiki_page to read them. "
+            "Unlike browsing the index, this searches all page content, not just titles. "
+            "Search when you don't know exactly which pages to read — then use read_wiki_page "
+            "on the top results to get full content."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Search query. Use keywords and phrases to find relevant wiki pages.",
+                },
+            },
+            "required": ["query"],
+        },
+    },
+}
+
+WIKI_TOOLS = [WIKI_READ_PAGE_TOOL, WIKI_WEB_SEARCH_TOOL, WIKI_SEARCH_TOOL]
 
 
 async def execute_web_search(query: str, max_results: int = 5, timelimit: str = "m") -> str:
-    """Search the web using DuckDuckGo and return JSON results.
+    """Search the web and return JSON results.
+
+    Uses Google via ddgs with primp browser impersonation.  Two fixes for
+    upstream ddgs issues:
+    1. DuckDuckGo's HTML endpoint returns 202 (rejected by ddgs) and CAPTCHA
+       pages — so we default to Google only.
+    2. Google's current HTML uses classes that ddgs's XPath selectors don't
+       match — we monkey-patch extract_results with a working fallback.
     timelimit: 'd' (day), 'w' (week), 'm' (month), 'y' (year), or '' (no limit)."""
     try:
         from ddgs import DDGS
+        from ddgs.base import BaseSearchEngine
+        from ddgs.engines.google import Google
 
         # Normalize "all" (frontend "Any time" selection) to empty string
         if timelimit == "all":
             timelimit = ""
 
-        results = []
-        kwargs: dict = {"max_results": max_results, "backend": "duckduckgo,google,brave"}
-        if timelimit:
-            kwargs["timelimit"] = timelimit
-        with DDGS() as ddgs:
-            for r in ddgs.text(query, **kwargs):
-                results.append({
-                    "title": r.get("title", ""),
-                    "url": r.get("href", ""),
-                    "snippet": (r.get("body", "") or "")[:300],
-                })
+        backends = _env_str("ZOPEDIA_WEB_SEARCH_BACKENDS", "google")
+
+        def _search():
+            # ── Fix 1: Accept 202 status (DDG returns 202) ─────────
+            _original_request = BaseSearchEngine.request
+
+            def _patched_request(self, *args, **kwargs):
+                resp = self.http_client.request(*args, **kwargs)
+                if resp.status_code in (200, 202):
+                    return resp.text
+                return None
+
+            BaseSearchEngine.request = _patched_request
+
+            # ── Fix 2: Fallback XPath for modern Google HTML ────────
+            _original_extract = Google.extract_results
+
+            def _patched_extract(self, html_text):
+                results = _original_extract(self, html_text)
+                if results:
+                    return results
+                # Primary XPath found nothing.
+                # Save HTML for debugging and try fallback selectors.
+                import tempfile, os as _os
+                _debug_path = _os.path.join(tempfile.gettempdir(), "zopedia_google_search.html")
+                with open(_debug_path, "w") as _f:
+                    _f.write(html_text)
+                logger.warning("Google XPath found 0 results — saved HTML to %s (%d chars)",
+                               _debug_path, len(html_text))
+
+                from lxml import html as lhtml
+                tree = lhtml.fromstring(html_text)
+
+                # Check if this is a CAPTCHA / bot-detection page
+                body_text = " ".join(
+                    t.strip() for t in tree.xpath("//body//text()") if t.strip()
+                )
+                if "unusual traffic" in body_text.lower() or "captcha" in body_text.lower():
+                    logger.warning("Google returned a bot-detection page")
+
+                # Try broad result-container patterns
+                items = []
+                for container_xpath in [
+                    "//div[.//h3 and .//a[contains(@href,'http')]]",
+                    "//div[contains(@class,'Gx5Zad')]",
+                    "//div[contains(@class,'MjjYud')]",
+                    "//div[@data-sokoban-container]",
+                    "//div[contains(@class,'g ')]",
+                    "//a[.//h3]",  # link wrapping the title
+                ]:
+                    items = tree.xpath(container_xpath)
+                    if items:
+                        logger.debug("Google fallback XPath matched: %s → %d items",
+                                     container_xpath, len(items))
+                        break
+                if not items:
+                    # Last resort: grab any h3 + adjacent link
+                    logger.warning("All Google XPath fallbacks failed — body preview: %.300s",
+                                   body_text)
+                for item in items[:max_results * 2]:
+                    result = self.result_type()
+                    title_el = item.xpath(".//h3//text()")
+                    result.title = " ".join("".join(title_el).split()).strip() if title_el else ""
+                    href_el = item.xpath(".//a[contains(@href,'http')]/@href")
+                    result.href = href_el[0] if href_el else ""
+                    body_el = item.xpath(".//div[last()]//text()")
+                    result.body = " ".join("".join(body_el).split()).strip() if body_el else ""
+                    if result.title and result.href:
+                        results.append(result)
+                return results
+
+            Google.extract_results = _patched_extract
+
+            try:
+                results = []
+                kwargs: dict = {"max_results": max_results, "backend": backends}
+                if timelimit:
+                    kwargs["timelimit"] = timelimit
+                with DDGS() as ddgs:
+                    for r in ddgs.text(query, **kwargs):
+                        results.append({
+                            "title": r.get("title", ""),
+                            "url": r.get("href", ""),
+                            "snippet": (r.get("body", "") or "")[:300],
+                        })
+                return results
+            finally:
+                BaseSearchEngine.request = _original_request
+                Google.extract_results = _original_extract
+
+        results = await asyncio.to_thread(_search)
 
         if not results:
             return json.dumps({"results": [], "query": query, "hint": "No results found."})
 
         return json.dumps({"results": results, "query": query}, ensure_ascii=False)
-    except ImportError:
-        return json.dumps({"error": "duckduckgo_search package not installed. Run: pip install duckduckgo_search"})
+    except ImportError as exc:
+        return json.dumps({"error": f"Dependency not installed: {exc}"})
     except Exception as exc:
+        err_name = type(exc).__name__
+        if "DDGS" in err_name or "Timeout" in err_name or "Ratelimit" in err_name:
+            return json.dumps({"results": [], "query": query, "hint": str(exc) or "No results found."})
         return json.dumps({"error": f"Web search failed: {exc}"})
 
 
@@ -504,23 +623,40 @@ async def execute_video_search(query: str, max_results: int = 5, timelimit: str 
     Use for YouTube source type — much better than text search with site:youtube.com."""
     try:
         from ddgs import DDGS
+        from ddgs.base import BaseSearchEngine
 
         # Normalize "all" (frontend "Any time" selection) to empty string
         if timelimit == "all":
             timelimit = ""
 
-        results = []
-        kwargs: dict = {"max_results": max_results}
-        if timelimit:
-            kwargs["timelimit"] = timelimit
-            kwargs["backend"] = "duckduckgo,google,brave"
-        with DDGS() as ddgs:
-            for r in ddgs.videos(query, **kwargs):
-                results.append({
-                    "title": r.get("title", ""),
-                    "url": r.get("content", ""),  # ddgs videos use 'content' for URL
-                    "snippet": (r.get("description", "") or "")[:300],
-                })
+        backends = _env_str("ZOPEDIA_WEB_SEARCH_BACKENDS", "duckduckgo")
+
+        def _search():
+            # Fix: DDG endpoints return 202, but ddgs only accepts 200
+            _original_request = BaseSearchEngine.request
+            def _patched_request(self, *args, **kwargs):
+                resp = self.http_client.request(*args, **kwargs)
+                if resp.status_code in (200, 202):
+                    return resp.text
+                return None
+            BaseSearchEngine.request = _patched_request
+            try:
+                results = []
+                kwargs: dict = {"max_results": max_results, "backend": backends}
+                if timelimit:
+                    kwargs["timelimit"] = timelimit
+                with DDGS() as ddgs:
+                    for r in ddgs.videos(query, **kwargs):
+                        results.append({
+                            "title": r.get("title", ""),
+                            "url": r.get("content", ""),  # ddgs videos use 'content' for URL
+                            "snippet": (r.get("description", "") or "")[:300],
+                        })
+                return results
+            finally:
+                BaseSearchEngine.request = _original_request
+
+        results = await asyncio.to_thread(_search)
 
         if not results:
             return json.dumps({"results": [], "query": query, "hint": "No video results found."})
@@ -529,6 +665,9 @@ async def execute_video_search(query: str, max_results: int = 5, timelimit: str 
     except ImportError:
         return json.dumps({"error": "duckduckgo_search package not installed."})
     except Exception as exc:
+        err_name = type(exc).__name__
+        if "DDGS" in err_name or "Timeout" in err_name or "Ratelimit" in err_name:
+            return json.dumps({"results": [], "query": query, "hint": str(exc) or "No video results found."})
         return json.dumps({"error": f"Video search failed: {exc}"})
 
 

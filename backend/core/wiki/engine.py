@@ -16,6 +16,8 @@ from datetime import datetime, timezone
 from urllib.parse import unquote, urlparse
 from urllib.request import Request, urlopen
 
+from .concurrency import run_parallel, page_lock, index_lock
+
 logger = logging.getLogger(__name__)
 
 # --- Memory Compaction Logic ---
@@ -1083,7 +1085,8 @@ class LLMWikiEngine:
                 updated_at = now,
             )
 
-        self._rebuild_index()
+        with index_lock():
+            self._rebuild_index()
         self._append_log(
             f"## [{self._today()}] ingest | {source_title}\n"
             f"- Source page: [[sources/{source_slug}]]\n"
@@ -1216,91 +1219,157 @@ class LLMWikiEngine:
         expected_chunk_analysis_slugs: Set[str] = set()
 
         total_chunks = len(chunk_items)
+
+        # -- pre-compute chunk metadata (pure computation, no I/O or LLM) --
+        chunk_tasks: list[dict[str, Any]] = []
         for chunk in chunk_items:
-            chunk_index = max(1, int(chunk.get("index", len(chunk_source_pages) + 1)))
+            chunk_index = max(1, int(chunk.get("index", len(chunk_tasks) + 1)))
             chunk_text = str(chunk.get("text", ""))
 
             chunk_source_slug = self._chunk_source_slug(
-                source_slug = source_slug,
-                chunk_index = chunk_index,
-                chunk_count = total_chunks,
+                source_slug=source_slug,
+                chunk_index=chunk_index,
+                chunk_count=total_chunks,
             )
-            expected_chunk_source_slugs.add(chunk_source_slug)
             chunk_source_rel = f"sources/{chunk_source_slug}"
-            chunk_source_pages.append(chunk_source_rel)
-
             chunk_title = f"{source_title} - Chunk {chunk_index}/{total_chunks}"
             chunk_ref = self._chunk_source_ref(
-                source_ref = source_ref,
-                source_page = source_page,
-                chunk_index = chunk_index,
-                chunk_count = total_chunks,
+                source_ref=source_ref,
+                source_page=source_page,
+                chunk_index=chunk_index,
+                chunk_count=total_chunks,
             )
+            chunk_analysis_slug = self._chunk_analysis_slug(
+                source_slug=source_slug,
+                chunk_index=chunk_index,
+                chunk_count=total_chunks,
+            )
+            chunk_analysis_rel = f"analysis/{chunk_analysis_slug}"
 
+            chunk_tasks.append({
+                "chunk_index": chunk_index,
+                "chunk_text": chunk_text,
+                "chunk_source_slug": chunk_source_slug,
+                "chunk_source_rel": chunk_source_rel,
+                "chunk_title": chunk_title,
+                "chunk_ref": chunk_ref,
+                "chunk_analysis_slug": chunk_analysis_slug,
+                "chunk_analysis_rel": chunk_analysis_rel,
+            })
+
+        # -- parallel chunk processing --
+        def _process_chunk(task: dict[str, Any]) -> dict[str, Any] | None:
+            """Process one chunk: extract + write source + query + move analysis.
+
+            Each chunk writes to unique files (slugs include chunk_index), so no
+            file conflicts between parallel workers.
+            """
+            chunk_index = task["chunk_index"]
+            chunk_text = task["chunk_text"]
+            chunk_source_slug = task["chunk_source_slug"]
+            chunk_source_rel = task["chunk_source_rel"]
+            chunk_title = task["chunk_title"]
+            chunk_ref = task["chunk_ref"]
+            chunk_analysis_slug = task["chunk_analysis_slug"]
+            chunk_analysis_rel = task["chunk_analysis_rel"]
+
+            # Extract + write source page
             chunk_extraction = self._extract_from_source(chunk_title, chunk_text)
             chunk_source_md = self._render_source_page(
-                title = chunk_title,
-                source_ref = chunk_ref,
-                extracted = chunk_extraction,
-                source_text = chunk_text,
-                ingested_at = self._now_iso(),
+                title=chunk_title,
+                source_ref=chunk_ref,
+                extracted=chunk_extraction,
+                source_text=chunk_text,
+                ingested_at=self._now_iso(),
             )
-            (self.sources_dir / f"{chunk_source_slug}.md").write_text(
-                chunk_source_md,
-                encoding = "utf-8",
-            )
+            with page_lock(f"sources/{chunk_source_slug}"):
+                (self.sources_dir / f"{chunk_source_slug}.md").write_text(
+                    chunk_source_md,
+                    encoding="utf-8",
+                )
 
+            # Query LLM for analysis
             chunk_question = self._source_first_summary_question(
-                title = chunk_title,
-                source_slug = chunk_source_rel,
+                title=chunk_title,
+                source_slug=chunk_source_rel,
             )
             chunk_query_report = self.query(
-                question = chunk_question,
-                save_answer = True,
-                query_context_max_chars_override = effective_context_window_chars,
-                preferred_context_page = chunk_source_rel,
-                keep_preferred_context_full = True,
-                preferred_context_only = True,
+                question=chunk_question,
+                save_answer=True,
+                query_context_max_chars_override=effective_context_window_chars,
+                preferred_context_page=chunk_source_rel,
+                keep_preferred_context_full=True,
+                preferred_context_only=True,
             )
 
             raw_answer_page = str(chunk_query_report.get("answer_page", "")).strip()
             if not raw_answer_page:
-                failed_chunks.append(
-                    {
-                        "chunk_index": chunk_index,
-                        "source_page": chunk_source_rel,
-                        "reason": "chunk_analysis_page_missing",
-                    }
-                )
-                continue
+                return {
+                    "chunk_index": chunk_index,
+                    "chunk_source_rel": chunk_source_rel,
+                    "chunk_source_slug": chunk_source_slug,
+                    "chunk_analysis_slug": chunk_analysis_slug,
+                    "chunk_analysis_rel": chunk_analysis_rel,
+                    "error": "chunk_analysis_page_missing",
+                }
 
             raw_answer_rel = self._normalize_wikilink(raw_answer_page)
             raw_answer_path = self.wiki_dir / f"{raw_answer_rel}.md"
-            chunk_analysis_slug = self._chunk_analysis_slug(
-                source_slug = source_slug,
-                chunk_index = chunk_index,
-                chunk_count = total_chunks,
-            )
-            chunk_analysis_rel = f"analysis/{chunk_analysis_slug}"
             chunk_analysis_path = self.analysis_dir / f"{chunk_analysis_slug}.md"
 
             if not raw_answer_path.exists():
-                failed_chunks.append(
-                    {
-                        "chunk_index": chunk_index,
-                        "source_page": chunk_source_rel,
-                        "reason": "chunk_analysis_file_not_found",
-                    }
-                )
-                continue
+                return {
+                    "chunk_index": chunk_index,
+                    "chunk_source_rel": chunk_source_rel,
+                    "chunk_source_slug": chunk_source_slug,
+                    "chunk_analysis_slug": chunk_analysis_slug,
+                    "chunk_analysis_rel": chunk_analysis_rel,
+                    "error": "chunk_analysis_file_not_found",
+                }
 
-            if chunk_analysis_path.exists() and chunk_analysis_path != raw_answer_path:
-                chunk_analysis_path.unlink()
+            # Move answer to the expected analysis path
+            with page_lock(f"analysis/{chunk_analysis_slug}"):
+                if chunk_analysis_path.exists() and chunk_analysis_path != raw_answer_path:
+                    chunk_analysis_path.unlink()
             if chunk_analysis_path != raw_answer_path:
                 shutil.move(str(raw_answer_path), str(chunk_analysis_path))
 
-            expected_chunk_analysis_slugs.add(chunk_analysis_slug)
-            chunk_analysis_pages.append(chunk_analysis_rel)
+            return {
+                "chunk_index": chunk_index,
+                "chunk_source_rel": chunk_source_rel,
+                "chunk_source_slug": chunk_source_slug,
+                "chunk_analysis_slug": chunk_analysis_slug,
+                "chunk_analysis_rel": chunk_analysis_rel,
+                "error": None,
+            }
+
+        logger.info(
+            "Parallel chunk ingest: processing %d chunk(s) with up to %d workers",
+            len(chunk_tasks),
+            min(4, len(chunk_tasks)),
+        )
+        chunk_results = run_parallel(
+            chunk_tasks,
+            _process_chunk,
+            max_workers=min(4, len(chunk_tasks)),
+            description="ingest_source_with_chunked_analysis",
+        )
+
+        # -- collect results (sequential) --
+        for result in chunk_results:
+            if result is None:
+                continue
+            expected_chunk_source_slugs.add(result["chunk_source_slug"])
+            chunk_source_pages.append(result["chunk_source_rel"])
+            if result["error"]:
+                failed_chunks.append({
+                    "chunk_index": result["chunk_index"],
+                    "source_page": result["chunk_source_rel"],
+                    "reason": result["error"],
+                })
+            else:
+                expected_chunk_analysis_slugs.add(result["chunk_analysis_slug"])
+                chunk_analysis_pages.append(result["chunk_analysis_rel"])
 
         stale_chunk_source_pages_removed = self._cleanup_stale_chunk_source_pages(
             source_slug = source_slug,
@@ -1345,7 +1414,8 @@ class LLMWikiEngine:
                 f"window_chars={adaptive_replan_initial_context_window_chars}->{effective_context_window_chars}, "
                 f"chunk_count={adaptive_replan_initial_chunk_count}->{len(chunk_items)}\n"
             )
-        self._rebuild_index()
+        with index_lock():
+            self._rebuild_index()
         self._append_log(
             f"## [{self._today()}] chunk-analysis | {source_title}\n"
             f"- Source page: [[{source_page}]]\n"
@@ -1477,7 +1547,8 @@ class LLMWikiEngine:
             f"- Result page: [[{rel}]]\n"
             f"- Context pages used: {len(used_pages)}\n"
         )
-        self._rebuild_index()
+        with index_lock():
+            self._rebuild_index()
         return rel
 
     def persist_query_probe_result(
@@ -1748,52 +1819,74 @@ class LLMWikiEngine:
         known_concepts = {p.stem for p in self.concepts_dir.glob("*.md")}
         low_coverage_sources: List[str] = []
         semantic_source_cards: List[Dict[str, str]] = []
-        for source_page in sorted(self.sources_dir.glob("*.md")):
-            source_text = source_page.read_text(encoding = "utf-8", errors = "ignore")
+        source_paths = sorted(self.sources_dir.glob("*.md"))
+        if source_paths:
+            def _build_source_card(source_page: Path) -> dict[str, Any] | None:
+                source_text = source_page.read_text(encoding="utf-8", errors="ignore")
+                source_rel = f"sources/{source_page.stem}"
 
-            if (
-                "## Entities Mentioned\n- none" in source_text
-                and "## Concepts Mentioned\n- none" in source_text
-            ) or "- status: fallback" in source_text:
-                low_coverage_sources.append(f"sources/{source_page.stem}.md")
+                is_low_coverage = (
+                    "## Entities Mentioned\n- none" in source_text
+                    and "## Concepts Mentioned\n- none" in source_text
+                ) or "- status: fallback" in source_text
 
-            source_rel = f"sources/{source_page.stem}"
-            source_summary = self._extract_markdown_section(source_text, "Summary")
-            if not source_summary.strip():
-                source_summary = self._clean_source_text(source_text)
-            source_summary = self._normalize_web_text(
-                self._first_sentences(source_summary, 320),
-                320,
-            )
+                source_summary = self._extract_markdown_section(source_text, "Summary")
+                if not source_summary.strip():
+                    source_summary = self._clean_source_text(source_text)
+                source_summary = self._normalize_web_text(
+                    self._first_sentences(source_summary, 320),
+                    320,
+                )
 
-            entities = self._extract_markdown_bullets(
-                self._extract_markdown_section(source_text, "Entities Mentioned"),
-                limit = 6,
-            )
-            concepts = self._extract_markdown_bullets(
-                self._extract_markdown_section(source_text, "Concepts Mentioned"),
-                limit = 6,
-            )
+                entities = self._extract_markdown_bullets(
+                    self._extract_markdown_section(source_text, "Entities Mentioned"),
+                    limit=6,
+                )
+                concepts = self._extract_markdown_bullets(
+                    self._extract_markdown_section(source_text, "Concepts Mentioned"),
+                    limit=6,
+                )
 
-            frontmatter, _ = self._split_frontmatter_block(source_text)
-            source_title = ""
-            if frontmatter:
-                title_match = re.search(r"(?mi)^title:\s*(.+?)\s*$", frontmatter)
-                if title_match:
-                    source_title = self._normalize_web_text(
-                        title_match.group(1).strip().strip("\"'"),
-                        140,
-                    )
+                frontmatter, _ = self._split_frontmatter_block(source_text)
+                source_title = ""
+                if frontmatter:
+                    title_match = re.search(r"(?mi)^title:\s*(.+?)\s*$", frontmatter)
+                    if title_match:
+                        source_title = self._normalize_web_text(
+                            title_match.group(1).strip().strip("\"'"),
+                            140,
+                        )
 
-            semantic_source_cards.append(
-                {
-                    "source": source_rel,
-                    "title": source_title,
-                    "summary": source_summary,
-                    "entities": ", ".join(entities[:4]),
-                    "concepts": ", ".join(concepts[:4]),
+                return {
+                    "source_rel": source_rel,
+                    "low_coverage": is_low_coverage,
+                    "card": {
+                        "source": source_rel,
+                        "title": source_title,
+                        "summary": source_summary,
+                        "entities": ", ".join(entities[:4]),
+                        "concepts": ", ".join(concepts[:4]),
+                    },
                 }
+
+            workers = min(8, len(source_paths))
+            logger.info(
+                "Parallel lint sources: scanning %d source(s) with up to %d workers",
+                len(source_paths), workers,
             )
+            source_results = run_parallel(
+                source_paths,
+                _build_source_card,
+                max_workers=workers,
+                description="lint source scan",
+            )
+
+            for result in source_results:
+                if result is None:
+                    continue
+                if result["low_coverage"]:
+                    low_coverage_sources.append(f"{result['source_rel']}.md")
+                semantic_source_cards.append(result["card"])
 
         missing_concepts, semantic_missing_concepts = (
             self._semantic_filter_missing_or_related_concepts(
@@ -1962,79 +2055,104 @@ class LLMWikiEngine:
         errors: List[str] = []
         applied_merges = 0
 
-        for item in selected:
-            canonical_rel = str(item.get("canonical", "")).strip().replace("\\", "/")
-            duplicate_rel = str(item.get("duplicate", "")).strip().replace("\\", "/")
-            similarity = float(item.get("similarity", 0.0))
-            merge_reason = str(item.get("reason", "")).strip()
-            kind = str(item.get("kind", "unknown")).strip() or "unknown"
+        if selected:
+            def _merge_one_pair(item: dict[str, Any]) -> dict[str, Any] | None:
+                canonical_rel = str(item.get("canonical", "")).strip().replace("\\", "/")
+                duplicate_rel = str(item.get("duplicate", "")).strip().replace("\\", "/")
+                similarity = float(item.get("similarity", 0.0))
+                merge_reason = str(item.get("reason", "")).strip()
+                kind = str(item.get("kind", "unknown")).strip() or "unknown"
 
-            canonical_path = self.wiki_dir / canonical_rel
-            duplicate_path = self.wiki_dir / duplicate_rel
-            merge_record: Dict[str, Any] = {
-                "kind": kind,
-                "canonical": canonical_rel,
-                "duplicate": duplicate_rel,
-                "similarity": round(similarity, 3),
-            }
-            if merge_reason:
-                merge_record["reason"] = merge_reason
+                canonical_path = self.wiki_dir / canonical_rel
+                duplicate_path = self.wiki_dir / duplicate_rel
+                merge_record: Dict[str, Any] = {
+                    "kind": kind,
+                    "canonical": canonical_rel,
+                    "duplicate": duplicate_rel,
+                    "similarity": round(similarity, 3),
+                }
+                if merge_reason:
+                    merge_record["reason"] = merge_reason
 
-            if not canonical_path.exists() or not duplicate_path.exists():
-                missing = []
-                if not canonical_path.exists():
-                    missing.append(canonical_rel)
-                if not duplicate_path.exists():
-                    missing.append(duplicate_rel)
-                reason = f"missing_pages: {', '.join(missing)}"
-                merge_record["status"] = "error"
-                merge_record["reason"] = reason
-                errors.append(reason)
-                merges.append(merge_record)
-                continue
+                if not canonical_path.exists() or not duplicate_path.exists():
+                    missing = []
+                    if not canonical_path.exists():
+                        missing.append(canonical_rel)
+                    if not duplicate_path.exists():
+                        missing.append(duplicate_rel)
+                    merge_record["status"] = "error"
+                    merge_record["reason"] = f"missing_pages: {', '.join(missing)}"
+                    return {"merge_record": merge_record, "error": merge_record["reason"]}
 
-            canonical_text = canonical_path.read_text(encoding = "utf-8", errors = "ignore")
-            duplicate_text = duplicate_path.read_text(encoding = "utf-8", errors = "ignore")
+                canonical_text = canonical_path.read_text(encoding="utf-8", errors="ignore")
+                duplicate_text = duplicate_path.read_text(encoding="utf-8", errors="ignore")
 
-            semantic_merge: Optional[Dict[str, Any]] = None
-            if kind == "concept" and semantic_merge_writeback:
-                semantic_merge = self._llm_synthesize_concept_merge_content(
-                    canonical_rel = canonical_rel,
-                    duplicate_rel = duplicate_rel,
-                    canonical_text = canonical_text,
-                    duplicate_text = duplicate_text,
-                )
-                if semantic_merge:
-                    merge_record["semantic_confidence"] = round(
-                        float(semantic_merge.get("confidence", 0.0)),
-                        3,
+                semantic_merge: Optional[Dict[str, Any]] = None
+                if kind == "concept" and semantic_merge_writeback:
+                    semantic_merge = self._llm_synthesize_concept_merge_content(
+                        canonical_rel=canonical_rel,
+                        duplicate_rel=duplicate_rel,
+                        canonical_text=canonical_text,
+                        duplicate_text=duplicate_text,
                     )
-                    rationale = str(semantic_merge.get("rationale", "")).strip()
-                    if rationale:
-                        merge_record["semantic_rationale"] = rationale
+                    if semantic_merge:
+                        merge_record["semantic_confidence"] = round(
+                            float(semantic_merge.get("confidence", 0.0)), 3,
+                        )
+                        rationale = str(semantic_merge.get("rationale", "")).strip()
+                        if rationale:
+                            merge_record["semantic_rationale"] = rationale
 
-            archive_target, archive_rel = self._archive_target_for_page(duplicate_rel)
-            merged_canonical = self._merge_canonical_with_duplicate(
-                canonical_text,
-                duplicate_text,
-                duplicate_rel = duplicate_rel,
-                archived_rel = archive_rel,
-                similarity = similarity,
-                semantic_merge = semantic_merge,
+                archive_target, archive_rel = self._archive_target_for_page(duplicate_rel)
+                merged_canonical = self._merge_canonical_with_duplicate(
+                    canonical_text,
+                    duplicate_text,
+                    duplicate_rel=duplicate_rel,
+                    archived_rel=archive_rel,
+                    similarity=similarity,
+                    semantic_merge=semantic_merge,
+                )
+
+                merge_record["archived_to"] = archive_rel
+                merge_record["status"] = "planned" if dry_run else "merged"
+
+                if not dry_run:
+                    with page_lock(canonical_rel):
+                        canonical_path.write_text(merged_canonical, encoding="utf-8")
+                    archive_target.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.move(str(duplicate_path), str(archive_target))
+
+                return {
+                    "merge_record": merge_record,
+                    "canonical_rel": canonical_rel,
+                    "duplicate_rel": duplicate_rel,
+                    "archive_rel": archive_rel,
+                    "applied": not dry_run,
+                }
+
+            workers = min(4, len(selected))
+            logger.info(
+                "Parallel merge: processing %d pair(s) with up to %d workers",
+                len(selected), workers,
+            )
+            merge_results = run_parallel(
+                selected,
+                _merge_one_pair,
+                max_workers=workers,
+                description="merge_duplicate_knowledge_pages",
             )
 
-            merge_record["archived_to"] = archive_rel
-            merge_record["status"] = "planned" if dry_run else "merged"
-            merges.append(merge_record)
-
-            replacements[duplicate_rel[:-3]] = canonical_rel[:-3]
-            archived_pages.append(archive_rel)
-
-            if not dry_run:
-                canonical_path.write_text(merged_canonical, encoding = "utf-8")
-                archive_target.parent.mkdir(parents = True, exist_ok = True)
-                shutil.move(str(duplicate_path), str(archive_target))
-                applied_merges += 1
+            for result in merge_results:
+                if result is None:
+                    continue
+                merges.append(result["merge_record"])
+                if "error" in result:
+                    errors.append(result["error"])
+                else:
+                    replacements[result["duplicate_rel"][:-3]] = result["canonical_rel"][:-3]
+                    archived_pages.append(result["archive_rel"])
+                    if result["applied"]:
+                        applied_merges += 1
 
         rewritten_pages = 0
         rewritten_links = 0
@@ -2073,7 +2191,8 @@ class LLMWikiEngine:
             )
 
         if not dry_run and (applied_merges > 0 or rewritten_pages > 0):
-            self._rebuild_index()
+            with index_lock():
+                self._rebuild_index()
             self._append_log(
                 f"## [{self._today()}] merge-maintenance | wiki\n"
                 f"- Applied merges: {applied_merges}\n"
@@ -2418,7 +2537,8 @@ class LLMWikiEngine:
 
         had_changes = bool(report["archived_pages"] or report["deleted_pages"])
         if not dry_run and had_changes:
-            self._rebuild_index()
+            with index_lock():
+                self._rebuild_index()
             self._append_log(
                 f"## [{self._today()}] delete | wiki\n"
                 f"- entry_type: {str(report.get('entry_type', 'unknown'))}\n"
@@ -2492,31 +2612,54 @@ class LLMWikiEngine:
             len(candidates), len(taken), cap,
         )
 
-        for overflow, rel_page, page_path, original in taken:
-            updated, trimmed = self._trim_incremental_update_section(
-                original,
-                max_incremental_updates = limit,
-            )
-            if trimmed <= 0:
-                continue
+        if taken:
+            def _compact_one_page(task: tuple[int, str, Path, str]) -> dict[str, Any] | None:
+                overflow, rel_page, page_path, original = task
+                updated, trimmed = self._trim_incremental_update_section(
+                    original,
+                    max_incremental_updates=limit,
+                )
+                if trimmed <= 0:
+                    return None
 
-            compacted_pages += 1
-            trimmed_update_blocks += trimmed
-            changes.append(
-                {
-                    "page": rel_page,
-                    "overflow_blocks": overflow,
-                    "merged_update_blocks": trimmed,
+                if not dry_run:
+                    with page_lock(rel_page):
+                        page_path.write_text(updated, encoding="utf-8")
+
+                return {
+                    "rel_page": rel_page,
+                    "overflow": overflow,
+                    "trimmed": trimmed,
+                }
+
+            workers = min(4, len(taken))
+            logger.info(
+                "Parallel compaction: processing %d page(s) with up to %d workers",
+                len(taken), workers,
+            )
+            compact_results = run_parallel(
+                taken,
+                _compact_one_page,
+                max_workers=workers,
+                description="compact_knowledge_pages",
+            )
+
+            for result in compact_results:
+                if result is None:
+                    continue
+                compacted_pages += 1
+                trimmed_update_blocks += result["trimmed"]
+                changes.append({
+                    "page": result["rel_page"],
+                    "overflow_blocks": result["overflow"],
+                    "merged_update_blocks": result["trimmed"],
                     "max_incremental_updates": limit,
                     "method": "llm-rewrite",
-                }
-            )
-
-            if not dry_run:
-                page_path.write_text(updated, encoding = "utf-8")
+                })
 
         if compacted_pages > 0 and not dry_run:
-            self._rebuild_index()
+            with index_lock():
+                self._rebuild_index()
             self._append_log(
                 f"## [{self._today()}] compact-knowledge | maintenance\n"
                 f"- Candidate pages (exceeded limit): {len(candidates)}\n"
@@ -2563,60 +2706,68 @@ class LLMWikiEngine:
         total_scanned = len(analysis_pages)
         scanned = 0
         logger.info("Retry-fallback: scanning %d analysis pages", total_scanned)
-
+        # -- pre-filter: find fallback pages and extract context (I/O only, sequential) --
+        fallback_tasks: list[dict[str, Any]] = []
         for page_path in analysis_pages:
             scanned += 1
-            if scanned % 5 == 0:
-                logger.info("Retry-fallback: %d/%d scanned, %d fallback found, %d regenerated",
-                            scanned, total_scanned, fallback_pages_found, regenerated_pages)
             rel_page = f"analysis/{page_path.name}"
-            text = page_path.read_text(encoding = "utf-8", errors = "ignore")
+            text = page_path.read_text(encoding="utf-8", errors="ignore")
             if not self._analysis_page_uses_fallback(text):
                 continue
-
             fallback_pages_found += 1
             question = self._extract_analysis_question(text)
             if not question:
                 skipped_no_question += 1
-                retried.append(
-                    {
-                        "source_page": rel_page,
-                        "status": "skipped",
-                        "reason": "missing_question",
-                    }
-                )
+                retried.append({
+                    "source_page": rel_page,
+                    "status": "skipped",
+                    "reason": "missing_question",
+                })
                 continue
+            preferred_source_page, source_chars = self._analysis_primary_source_context(text)
+            fallback_tasks.append({
+                "page_path": page_path,
+                "rel_page": rel_page,
+                "text": text,
+                "question": question,
+                "preferred_source_page": preferred_source_page,
+                "source_chars": source_chars,
+            })
 
-            preferred_source_page, source_chars = self._analysis_primary_source_context(
-                text
-            )
-            retry_question = self._retry_question_for_analysis(
-                analysis_text = text,
-                question = question,
-                preferred_source_page = preferred_source_page,
-            )
-            attempt_override = self._retry_initial_context_override(source_chars)
-            source_only_mode = self.cfg.analysis_source_only
-            if source_only_mode and source_chars is not None:
-                attempt_override = (
-                    source_chars
-                    if attempt_override is None
-                    else max(attempt_override, source_chars)
+        if fallback_tasks:
+            def _retry_one_fallback(task: dict[str, Any]) -> dict[str, Any] | None:
+                page_path = task["page_path"]
+                rel_page = task["rel_page"]
+                text = task["text"]
+                question = task["question"]
+                preferred_source_page = task["preferred_source_page"]
+                source_chars = task["source_chars"]
+
+                retry_question = self._retry_question_for_analysis(
+                    analysis_text=text,
+                    question=question,
+                    preferred_source_page=preferred_source_page,
                 )
+                attempt_override = self._retry_initial_context_override(source_chars)
+                source_only_mode = self.cfg.analysis_source_only
+                if source_only_mode and source_chars is not None:
+                    attempt_override = (
+                        source_chars if attempt_override is None
+                        else max(attempt_override, source_chars)
+                    )
 
-            reductions_done = 0
-            force_chunk_report: Optional[Dict[str, Any]] = None
-
-            try:
+                reductions_done = 0
+                force_chunk_report: Optional[Dict[str, Any]] = None
                 probe_result = None
+
                 while True:
                     probe_result = self.query(
                         retry_question,
-                        save_answer = False,
-                        query_context_max_chars_override = attempt_override,
-                        preferred_context_page = preferred_source_page,
-                        keep_preferred_context_full = True,
-                        preferred_context_only = source_only_mode,
+                        save_answer=False,
+                        query_context_max_chars_override=attempt_override,
+                        preferred_context_page=preferred_source_page,
+                        keep_preferred_context_full=True,
+                        preferred_context_only=source_only_mode,
                     )
 
                     if not probe_result.get("used_extractive_fallback"):
@@ -2628,20 +2779,10 @@ class LLMWikiEngine:
                         and reductions_done < self.cfg.analysis_max_retries
                     )
                     if can_reduce:
-                        next_override = self._reduced_retry_context_override(
-                            attempt_override
-                        )
+                        next_override = self._reduced_retry_context_override(attempt_override)
                         if source_chars is not None and next_override is not None:
                             next_override = max(next_override, source_chars)
                         if next_override is not None:
-                            logger.info(
-                                "Fallback retry for %s still low quality (reason=%s). "
-                                "Retrying with smaller context (%s -> %s chars).",
-                                rel_page,
-                                probe_result.get("fallback_reason"),
-                                attempt_override,
-                                next_override,
-                            )
                             attempt_override = next_override
                             reductions_done += 1
                             continue
@@ -2654,101 +2795,116 @@ class LLMWikiEngine:
                     ):
                         source_only_mode = True
                         attempt_override = (
-                            source_chars
-                            if attempt_override is None
+                            source_chars if attempt_override is None
                             else max(attempt_override, source_chars)
-                        )
-                        logger.info(
-                            "Fallback retry for %s still low quality (reason=%s). "
-                            "Final retry with source-only context.",
-                            rel_page,
-                            probe_result.get("fallback_reason"),
                         )
                         continue
 
                     break
 
                 if probe_result is None:
-                    raise RuntimeError("Probe query did not return a result")
+                    return {
+                        "page_path": page_path,
+                        "rel_page": rel_page,
+                        "text": text,
+                        "status": "error",
+                        "question": question,
+                        "error": "Probe query did not return a result",
+                    }
+
+                return {
+                    "page_path": page_path,
+                    "rel_page": rel_page,
+                    "text": text,
+                    "question": question,
+                    "probe_result": probe_result,
+                    "attempt_override": attempt_override,
+                    "source_only_mode": source_only_mode,
+                    "reductions_done": reductions_done,
+                    "force_chunk_report": force_chunk_report,
+                }
+
+            workers = min(4, len(fallback_tasks))
+            logger.info(
+                "Parallel retry-fallback: processing %d page(s) with up to %d workers",
+                len(fallback_tasks), workers,
+            )
+            retry_results = run_parallel(
+                fallback_tasks,
+                _retry_one_fallback,
+                max_workers=workers,
+                description="retry_fallback_analysis_pages",
+            )
+
+            # -- collect results (sequential) --
+            for result in retry_results:
+                if result is None:
+                    continue
+                rel_page = result["rel_page"]
+                question = result["question"]
+
+                if result.get("status") == "error":
+                    errors.append(f"{rel_page}: {result['error']}")
+                    retried.append({
+                        "source_page": rel_page,
+                        "status": "error",
+                        "question": question,
+                        "error": result["error"],
+                    })
+                    continue
+
+                probe_result = result["probe_result"]
+                attempt_override = result["attempt_override"]
+                source_only_mode = result["source_only_mode"]
+                reductions_done = result["reductions_done"]
+                force_chunk_report = result["force_chunk_report"]
+                text = result["text"]
+                page_path = result["page_path"]
 
                 if probe_result.get("used_extractive_fallback"):
-                    if self.cfg.analysis_force_chunk_on_fallback_retry:
-                        if dry_run:
-                            force_chunk_report = {
-                                "status": "skipped",
-                                "reason": "dry_run",
-                                "analysis_page": rel_page,
-                                "source_page": preferred_source_page,
-                            }
-                        elif (
-                            force_chunk_attempted
-                            >= self.cfg.analysis_force_chunk_max_pages
-                        ):
-                            force_chunk_report = {
-                                "status": "skipped",
-                                "reason": "max_pages_reached",
-                                "analysis_page": rel_page,
-                                "source_page": preferred_source_page,
-                                "max_pages": self.cfg.analysis_force_chunk_max_pages,
-                            }
-                        else:
-                            force_chunk_attempted += 1
-                            force_chunk_report = (
-                                self._attempt_force_chunk_retry_for_analysis(
-                                    analysis_page = rel_page,
-                                    preferred_source_page = preferred_source_page,
-                                    dry_run = dry_run,
-                                )
+                    if self.cfg.analysis_force_chunk_on_fallback_retry and not dry_run:
+                        force_chunk_attempted += 1
+                        force_chunk_report = (
+                            self._attempt_force_chunk_retry_for_analysis(
+                                analysis_page=rel_page,
+                                preferred_source_page=result.get("preferred_source_page", ""),
+                                dry_run=dry_run,
                             )
-
-                            if force_chunk_report.get("status") in {
-                                "chunked",
-                                "single_chunk",
-                            }:
-                                force_chunk_actionable += 1
-                                retry_source_page = (
-                                    str(
-                                        force_chunk_report.get(
-                                            "source_page",
-                                            preferred_source_page or "",
-                                        )
-                                    ).strip()
-                                    or preferred_source_page
+                        )
+                        if force_chunk_report.get("status") in {"chunked", "single_chunk"}:
+                            force_chunk_actionable += 1
+                            retry_source_page = str(
+                                force_chunk_report.get("source_page", result.get("preferred_source_page", ""))
+                            ).strip() or result.get("preferred_source_page", "")
+                            retry_source_chars: Optional[int] = result.get("source_chars")
+                            source_chars_raw = force_chunk_report.get("source_chars")
+                            if isinstance(source_chars_raw, int):
+                                retry_source_chars = source_chars_raw
+                            retry_override = self._retry_initial_context_override(retry_source_chars)
+                            if source_only_mode and retry_source_chars is not None:
+                                retry_override = (
+                                    retry_source_chars if retry_override is None
+                                    else max(retry_override, retry_source_chars)
                                 )
+                            probe_result = self.query(
+                                retry_question=self._retry_question_for_analysis(
+                                    analysis_text=text,
+                                    question=question,
+                                    preferred_source_page=result.get("preferred_source_page", ""),
+                                ),
+                                save_answer=False,
+                                query_context_max_chars_override=retry_override,
+                                preferred_context_page=retry_source_page,
+                                keep_preferred_context_full=True,
+                                preferred_context_only=source_only_mode,
+                            )
+                            attempt_override = retry_override
+                            if not probe_result.get("used_extractive_fallback"):
+                                force_chunk_resolved += 1
 
-                                retry_source_chars: Optional[int] = source_chars
-                                source_chars_raw = force_chunk_report.get(
-                                    "source_chars"
-                                )
-                                if isinstance(source_chars_raw, int):
-                                    retry_source_chars = source_chars_raw
-
-                                retry_override = self._retry_initial_context_override(
-                                    retry_source_chars
-                                )
-                                if source_only_mode and retry_source_chars is not None:
-                                    retry_override = (
-                                        retry_source_chars
-                                        if retry_override is None
-                                        else max(retry_override, retry_source_chars)
-                                    )
-
-                                probe_result = self.query(
-                                    retry_question,
-                                    save_answer = False,
-                                    query_context_max_chars_override = retry_override,
-                                    preferred_context_page = retry_source_page,
-                                    keep_preferred_context_full = True,
-                                    preferred_context_only = source_only_mode,
-                                )
-                                attempt_override = retry_override
-                                if not probe_result.get("used_extractive_fallback"):
-                                    force_chunk_resolved += 1
-
-                if probe_result.get("used_extractive_fallback"):
-                    fallback_still += 1
-                    retried.append(
-                        {
+                    if probe_result.get("used_extractive_fallback"):
+                        fallback_still += 1
+                        retried.append({
                             "source_page": rel_page,
                             "status": "fallback_still",
                             "question": question,
@@ -2758,9 +2914,8 @@ class LLMWikiEngine:
                             "retries_attempted": reductions_done,
                             "force_chunk_retry": force_chunk_report,
                             "new_answer_page": None,
-                        }
-                    )
-                    continue
+                        })
+                        continue
 
                 resolved_page = rel_page[:-3] if rel_page.endswith(".md") else rel_page
                 new_answer_page = None
@@ -2805,66 +2960,19 @@ class LLMWikiEngine:
                         diagnostics_lines.append(
                             f"- force_chunk_status: {force_chunk_report.get('status')}"
                         )
-                        if force_chunk_report.get("reason"):
-                            diagnostics_lines.append(
-                                f"- force_chunk_reason: {force_chunk_report.get('reason')}"
-                            )
-                        if force_chunk_report.get("source_text_origin"):
-                            diagnostics_lines.append(
-                                "- force_chunk_source_text_origin: "
-                                f"{force_chunk_report.get('source_text_origin')}"
-                            )
-                        if force_chunk_report.get("source_chars") is not None:
-                            diagnostics_lines.append(
-                                "- force_chunk_source_chars: "
-                                f"{force_chunk_report.get('source_chars')}"
-                            )
-                        if force_chunk_report.get("context_window_chars") is not None:
-                            diagnostics_lines.append(
-                                "- force_chunk_context_window_chars: "
-                                f"{force_chunk_report.get('context_window_chars')}"
-                            )
-                        if force_chunk_report.get("chunk_count") is not None:
-                            diagnostics_lines.append(
-                                f"- force_chunk_chunk_count: {force_chunk_report.get('chunk_count')}"
-                            )
-                        if force_chunk_report.get("merged_analysis_page"):
-                            diagnostics_lines.append(
-                                "- force_chunk_merged_analysis_page: "
-                                f"[[{force_chunk_report.get('merged_analysis_page')}]]"
-                            )
 
                     updated_text = text
-                    updated_text = self._remove_markdown_section(
-                        updated_text, "Fallback Reason"
-                    )
-                    updated_text = self._remove_markdown_section(
-                        updated_text, "LLM Raw Answer Preview"
+                    updated_text = self._remove_markdown_section(updated_text, "Fallback Reason")
+                    updated_text = self._remove_markdown_section(updated_text, "LLM Raw Answer Preview")
+                    updated_text = self._replace_markdown_section(updated_text, "Answer Mode", "llm")
+                    updated_text = self._replace_markdown_section(updated_text, "Answer", answer_text)
+                    updated_text = self._replace_markdown_section(
+                        updated_text, "Retrieval Diagnostics", "\n".join(diagnostics_lines),
                     )
                     updated_text = self._replace_markdown_section(
-                        updated_text,
-                        "Answer Mode",
-                        "llm",
+                        updated_text, "Context Pages", "\n".join(context_lines),
                     )
-                    updated_text = self._replace_markdown_section(
-                        updated_text,
-                        "Answer",
-                        answer_text,
-                    )
-                    updated_text = self._replace_markdown_section(
-                        updated_text,
-                        "Retrieval Diagnostics",
-                        "\n".join(diagnostics_lines),
-                    )
-                    updated_text = self._replace_markdown_section(
-                        updated_text,
-                        "Context Pages",
-                        "\n".join(context_lines),
-                    )
-                    updated_text = self._remove_markdown_section(
-                        updated_text,
-                        "Retry Status",
-                    )
+                    updated_text = self._remove_markdown_section(updated_text, "Retry Status")
 
                     if self._analysis_page_uses_fallback(updated_text):
                         fallback_still += 1
@@ -2874,44 +2982,27 @@ class LLMWikiEngine:
                             or fallback_reason
                         )
                     else:
-                        # Only mark as resolved after the regenerated page no longer
-                        # matches fallback criteria.
                         updated_text = self._upsert_retry_status_section(
-                            text = updated_text,
-                            resolved_by = resolved_page,
-                            status = "resolved_in_place",
+                            text=updated_text,
+                            resolved_by=resolved_page,
+                            status="resolved_in_place",
                         )
-                        page_path.write_text(updated_text, encoding = "utf-8")
+                        with page_lock(rel_page):
+                            page_path.write_text(updated_text, encoding="utf-8")
                         regenerated_pages += 1
                         new_answer_page = resolved_page
 
-                retried.append(
-                    {
-                        "source_page": rel_page,
-                        "status": status_value,
-                        "question": question,
-                        "fallback_reason": fallback_reason,
-                        "context_chars_override": attempt_override,
-                        "source_only": source_only_mode,
-                        "retries_attempted": reductions_done,
-                        "force_chunk_retry": force_chunk_report,
-                        "new_answer_page": new_answer_page,
-                    }
-                )
-            except Exception as exc:
-                errors.append(f"{rel_page}: {exc}")
-                retried.append(
-                    {
-                        "source_page": rel_page,
-                        "status": "error",
-                        "question": question,
-                        "context_chars_override": attempt_override,
-                        "source_only": source_only_mode,
-                        "retries_attempted": reductions_done,
-                        "force_chunk_retry": force_chunk_report,
-                        "error": str(exc),
-                    }
-                )
+                retried.append({
+                    "source_page": rel_page,
+                    "status": status_value,
+                    "question": question,
+                    "fallback_reason": fallback_reason,
+                    "context_chars_override": attempt_override,
+                    "source_only": source_only_mode,
+                    "retries_attempted": reductions_done,
+                    "force_chunk_retry": force_chunk_report,
+                    "new_answer_page": new_answer_page,
+                })
 
         logger.info("Retry-fallback: done. %d scanned, %d fallback found, %d regenerated, %d still fallback",
                     scanned, fallback_pages_found, regenerated_pages, fallback_still)
@@ -2919,7 +3010,8 @@ class LLMWikiEngine:
         if not dry_run:
             # Retry flow may update existing fallback pages (Retry Status section), so
             # rebuild index after the run to refresh fallback markers and metadata lines.
-            self._rebuild_index()
+            with index_lock():
+                self._rebuild_index()
             self._append_log(
                 f"## [{self._today()}] retry-fallback-analysis | maintenance\n"
                 f"- Scanned analysis pages: {len(analysis_pages)}\n"
@@ -2986,7 +3078,8 @@ class LLMWikiEngine:
             )
             if web_gap_fill_report.get("concepts_created", 0) > 0 and not dry_run:
                 # New concept pages should be visible to enrichment candidate selection.
-                self._rebuild_index()
+                with index_lock():
+                    self._rebuild_index()
 
         refresh_oldest_count = (
             int(self.cfg.enrichment_refresh_oldest_non_fallback_pages)
@@ -3055,80 +3148,108 @@ class LLMWikiEngine:
         total_pages = len(analysis_pages)
         logger.info("Enrichment: scanning %d analysis pages", total_pages)
 
-        for i, page_path in enumerate(analysis_pages):
-            if i > 0 and i % 10 == 0:
-                logger.info("Enrichment: %d/%d pages scanned, %d updated so far", i, total_pages, updated_pages)
-            rel_page = f"analysis/{page_path.name}"
-            original_text = page_path.read_text(encoding = "utf-8", errors = "ignore")
-            repaired_text, repair_change = self._repair_analysis_maintenance_links(
-                text = original_text,
-                valid_targets = valid_targets,
-                repair_answer_links = repair_answer_links_enabled,
-            )
-            working_text = repaired_text
-
-            if int(repair_change.get("removed_links", 0)) > 0:
-                link_repair_report["repaired_pages"] += 1
-                link_repair_report["removed_links"] += int(
-                    repair_change.get("removed_links", 0)
+        # -- parallel enrichment phase --
+        if analysis_pages:
+            def _enrich_one_page(page_path: Path) -> dict[str, Any] | None:
+                rel_page = f"analysis/{page_path.name}"
+                original_text = page_path.read_text(encoding="utf-8", errors="ignore")
+                repaired_text, repair_change = self._repair_analysis_maintenance_links(
+                    text=original_text,
+                    valid_targets=valid_targets,
+                    repair_answer_links=repair_answer_links_enabled,
                 )
-                link_repair_report["changes"].append(
-                    {
-                        "page": rel_page,
-                        "removed_links": list(repair_change.get("links", [])),
-                        "removed_by_section": dict(
-                            repair_change.get("removed_by_section", {})
-                        ),
+                working_text = repaired_text
+
+                existing_links = self._extract_link_targets(working_text)
+
+                selected_by_group: Dict[str, List[str]] = {}
+                for group_name, links in candidate_groups.items():
+                    limit = 4 if group_name == "sources" else 6
+                    selected_links = self._select_enrichment_links(
+                        analysis_text=working_text,
+                        candidates=links,
+                        existing_links=existing_links,
+                        limit=limit,
+                        group_name=group_name,
+                        god_nodes=god_nodes,
+                    )
+                    if selected_links:
+                        selected_by_group[group_name] = selected_links
+
+                added_links = [
+                    link
+                    for group_name in ("sources", "entities", "concepts")
+                    for link in selected_by_group.get(group_name, [])
+                ]
+                if not added_links:
+                    if not dry_run and working_text != original_text:
+                        with page_lock(rel_page):
+                            page_path.write_text(working_text, encoding="utf-8")
+                    return {
+                        "rel_page": rel_page,
+                        "updated": False,
+                        "repair_change": repair_change,
+                        "change": None,
                     }
+
+                enrichment_body = self._render_enrichment_body(selected_by_group)
+                updated_text = self._upsert_top_section(
+                    text=working_text,
+                    section_title="Enrichment",
+                    section_body=enrichment_body,
                 )
 
-            existing_links = self._extract_link_targets(working_text)
+                if not dry_run:
+                    with page_lock(rel_page):
+                        page_path.write_text(updated_text, encoding="utf-8")
 
-            selected_by_group: Dict[str, List[str]] = {}
-            for group_name, links in candidate_groups.items():
-                limit = 4 if group_name == "sources" else 6
-                selected_links = self._select_enrichment_links(
-                    analysis_text = working_text,
-                    candidates = links,
-                    existing_links = existing_links,
-                    limit = limit,
-                    group_name = group_name,
-                    god_nodes = god_nodes,
-                )
-                if selected_links:
-                    selected_by_group[group_name] = selected_links
-
-            added_links = [
-                link
-                for group_name in ("sources", "entities", "concepts")
-                for link in selected_by_group.get(group_name, [])
-            ]
-            if not added_links:
-                if not dry_run and working_text != original_text:
-                    page_path.write_text(working_text, encoding = "utf-8")
-                continue
-
-            enrichment_body = self._render_enrichment_body(selected_by_group)
-            updated_text = self._upsert_top_section(
-                text = working_text,
-                section_title = "Enrichment",
-                section_body = enrichment_body,
-            )
-
-            if not dry_run:
-                page_path.write_text(updated_text, encoding = "utf-8")
-
-            updated_pages += 1
-            changes.append(
-                {
-                    "page": rel_page,
-                    "added_links": [f"[[{link}]]" for link in added_links],
-                    "added_by_group": {
-                        group: [f"[[{link}]]" for link in links]
-                        for group, links in selected_by_group.items()
+                return {
+                    "rel_page": rel_page,
+                    "updated": True,
+                    "repair_change": repair_change,
+                    "change": {
+                        "page": rel_page,
+                        "added_links": [f"[[{link}]]" for link in added_links],
+                        "added_by_group": {
+                            group: [f"[[{link}]]" for link in links]
+                            for group, links in selected_by_group.items()
+                        },
                     },
                 }
+
+            workers = min(6, total_pages)
+            logger.info(
+                "Parallel enrich: processing %d page(s) with up to %d workers",
+                total_pages, workers,
             )
+            enrich_results = run_parallel(
+                analysis_pages,
+                _enrich_one_page,
+                max_workers=workers,
+                description="enrich_analysis_pages",
+            )
+
+            # -- collect results (sequential) --
+            for result in enrich_results:
+                if result is None:
+                    continue
+
+                if int(result["repair_change"].get("removed_links", 0)) > 0:
+                    link_repair_report["repaired_pages"] += 1
+                    link_repair_report["removed_links"] += int(
+                        result["repair_change"].get("removed_links", 0)
+                    )
+                    link_repair_report["changes"].append({
+                        "page": result["rel_page"],
+                        "removed_links": list(result["repair_change"].get("links", [])),
+                        "removed_by_section": dict(
+                            result["repair_change"].get("removed_by_section", {})
+                        ),
+                    })
+
+                if result["updated"] and result["change"]:
+                    updated_pages += 1
+                    changes.append(result["change"])
 
         logger.info("Enrichment: %d/%d pages scanned, %d updated", total_pages, total_pages, updated_pages)
 
@@ -3140,7 +3261,8 @@ class LLMWikiEngine:
                 if repair_answer_links_enabled
                 else "maintained sections"
             )
-            self._rebuild_index()
+            with index_lock():
+                self._rebuild_index()
             self._append_log(
                 f"## [{self._today()}] enrich | analysis pages\n"
                 f"- Updated analysis pages: {updated_pages}\n"
@@ -3175,7 +3297,8 @@ class LLMWikiEngine:
         # bipartite projection and community detection.
         if not dry_run:
             try:
-                self._rebuild_index_godnodes()
+                with index_lock():
+                    self._rebuild_index_godnodes()
             except Exception as exc:
                 logger.warning("God-nodes index rebuild failed: %s", exc)
 
@@ -3324,104 +3447,159 @@ class LLMWikiEngine:
         }
         resolved_primary_source_pages = 0
 
-        for page_path in analysis_pages:
-            rel_page = f"analysis/{page_path.stem}"
-            text = page_path.read_text(encoding = "utf-8", errors = "ignore")
+        if analysis_pages:
+            def _scan_one_analysis(page_path: Path) -> dict[str, Any] | None:
+                rel_page = f"analysis/{page_path.stem}"
+                text = page_path.read_text(encoding="utf-8", errors="ignore")
 
-            explicit_targets = self._analysis_backlink_targets(text).intersection(
-                target_rel_set
+                explicit_targets = self._analysis_backlink_targets(text).intersection(
+                    target_rel_set
+                )
+                analysis_mention_targets = self._analysis_backlink_targets_from_mentions(
+                    text,
+                    target_phrase_catalog,
+                ).intersection(target_rel_set)
+
+                source_link_targets: Set[str] = set()
+                source_mention_targets: Set[str] = set()
+                resolved_source = 0
+                source_page, _source_chars = self._analysis_primary_source_context(text)
+                if source_page and source_page.startswith("sources/"):
+                    source_path = self.wiki_dir / f"{source_page}.md"
+                    if source_path.exists():
+                        resolved_source = 1
+                        source_text = source_path.read_text(
+                            encoding="utf-8",
+                            errors="ignore",
+                        )
+                        source_link_targets = self._analysis_backlink_targets(
+                            source_text
+                        ).intersection(target_rel_set)
+                        source_mention_targets = self._analysis_backlink_targets_from_mentions(
+                            source_text,
+                            target_phrase_catalog,
+                        ).intersection(target_rel_set)
+
+                return {
+                    "rel_page": rel_page,
+                    "explicit_targets": explicit_targets,
+                    "analysis_mention_targets": analysis_mention_targets,
+                    "source_link_targets": source_link_targets,
+                    "source_mention_targets": source_mention_targets,
+                    "resolved_source": resolved_source,
+                }
+
+            workers = min(8, len(analysis_pages))
+            logger.info(
+                "Parallel backlink scan: reading %d analysis page(s) with up to %d workers",
+                len(analysis_pages), workers,
             )
-            analysis_mention_targets = self._analysis_backlink_targets_from_mentions(
-                text,
-                target_phrase_catalog,
-            ).intersection(target_rel_set)
+            scan_results = run_parallel(
+                analysis_pages,
+                _scan_one_analysis,
+                max_workers=workers,
+                description="refresh_analysis_backlinks scan",
+            )
 
-            source_link_targets: Set[str] = set()
-            source_mention_targets: Set[str] = set()
-            source_page, _source_chars = self._analysis_primary_source_context(text)
-            if source_page and source_page.startswith("sources/"):
-                source_path = self.wiki_dir / f"{source_page}.md"
-                if source_path.exists():
-                    resolved_primary_source_pages += 1
-                    source_text = source_path.read_text(
-                        encoding = "utf-8",
-                        errors = "ignore",
-                    )
-                    source_link_targets = self._analysis_backlink_targets(
-                        source_text
-                    ).intersection(target_rel_set)
-                    source_mention_targets = self._analysis_backlink_targets_from_mentions(
-                        source_text,
-                        target_phrase_catalog,
-                    ).intersection(target_rel_set)
-
-            signal_counts["analysis_link"] += len(explicit_targets)
-            signal_counts["analysis_mention"] += len(analysis_mention_targets)
-            signal_counts["source_link"] += len(source_link_targets)
-            signal_counts["source_mention"] += len(source_mention_targets)
-
-            for signal_name, targets in (
-                ("analysis_link", explicit_targets),
-                ("analysis_mention", analysis_mention_targets),
-                ("source_link", source_link_targets),
-                ("source_mention", source_mention_targets),
-            ):
-                for target in targets:
-                    analysis_refs_by_target.setdefault(target, set()).add(rel_page)
-                    link_signals_by_target.setdefault(target, set()).add(signal_name)
+            # -- aggregate scan results (sequential) --
+            for result in scan_results:
+                if result is None:
+                    continue
+                resolved_primary_source_pages += result["resolved_source"]
+                signal_counts["analysis_link"] += len(result["explicit_targets"])
+                signal_counts["analysis_mention"] += len(result["analysis_mention_targets"])
+                signal_counts["source_link"] += len(result["source_link_targets"])
+                signal_counts["source_mention"] += len(result["source_mention_targets"])
+                for signal_name, targets in (
+                    ("analysis_link", result["explicit_targets"]),
+                    ("analysis_mention", result["analysis_mention_targets"]),
+                    ("source_link", result["source_link_targets"]),
+                    ("source_mention", result["source_mention_targets"]),
+                ):
+                    for target in targets:
+                        analysis_refs_by_target.setdefault(target, set()).add(result["rel_page"])
+                        link_signals_by_target.setdefault(target, set()).add(signal_name)
 
         updated_pages = 0
         removed_sections = 0
         linked_target_pages = 0
         changes: List[Dict[str, Any]] = []
 
-        for target_rel, page_path in target_pages:
-            original_text = page_path.read_text(encoding = "utf-8", errors = "ignore")
-            analysis_refs = sorted(analysis_refs_by_target.get(target_rel, set()))
-            listed_refs = analysis_refs[:max_links]
+        if target_pages:
+            def _update_one_target(task: tuple[str, Path]) -> dict[str, Any] | None:
+                target_rel, page_path = task
+                original_text = page_path.read_text(encoding="utf-8", errors="ignore")
+                analysis_refs = sorted(analysis_refs_by_target.get(target_rel, set()))
+                listed_refs = analysis_refs[:max_links]
 
-            if analysis_refs:
-                linked_target_pages += 1
-                section_lines = [f"- [[{rel}]]" for rel in listed_refs]
-                overflow_count = max(0, len(analysis_refs) - len(listed_refs))
-                if overflow_count > 0:
-                    section_lines.append(f"- ... +{overflow_count} more")
+                if analysis_refs:
+                    section_lines = [f"- [[{rel}]]" for rel in listed_refs]
+                    overflow_count = max(0, len(analysis_refs) - len(listed_refs))
+                    if overflow_count > 0:
+                        section_lines.append(f"- ... +{overflow_count} more")
+                    updated_text = self._upsert_bottom_section(
+                        text=original_text,
+                        section_title="Referenced by Analyses",
+                        section_body="\n".join(section_lines),
+                    )
+                else:
+                    had_section = "## Referenced by Analyses" in original_text
+                    updated_text = self._remove_markdown_section(
+                        original_text,
+                        "Referenced by Analyses",
+                    ).rstrip()
+                    if updated_text:
+                        updated_text += "\n"
 
-                updated_text = self._upsert_bottom_section(
-                    text = original_text,
-                    section_title = "Referenced by Analyses",
-                    section_body = "\n".join(section_lines),
-                )
-            else:
-                had_section = "## Referenced by Analyses" in original_text
-                updated_text = self._remove_markdown_section(
-                    original_text,
-                    "Referenced by Analyses",
-                ).rstrip()
-                if updated_text:
-                    updated_text += "\n"
-                if had_section:
+                if updated_text != original_text:
+                    if not dry_run:
+                        with page_lock(target_rel):
+                            page_path.write_text(updated_text, encoding="utf-8")
+
+                return {
+                    "target_rel": target_rel,
+                    "linked": bool(analysis_refs),
+                    "removed_section": bool(not analysis_refs and updated_text != original_text
+                        and "## Referenced by Analyses" in original_text),
+                    "updated": updated_text != original_text,
+                    "listed_refs": listed_refs,
+                    "analysis_refs_total": len(analysis_refs),
+                    "link_signals": sorted(link_signals_by_target.get(target_rel, set())),
+                }
+
+            workers = min(8, len(target_pages))
+            logger.info(
+                "Parallel backlink update: processing %d target(s) with up to %d workers",
+                len(target_pages), workers,
+            )
+            update_results = run_parallel(
+                target_pages,
+                _update_one_target,
+                max_workers=workers,
+                description="refresh_analysis_backlinks update",
+            )
+
+            for result in update_results:
+                if result is None:
+                    continue
+                if result["linked"]:
+                    linked_target_pages += 1
+                if result["removed_section"]:
                     removed_sections += 1
-
-            if updated_text != original_text:
-                updated_pages += 1
-                if not dry_run:
-                    page_path.write_text(updated_text, encoding = "utf-8")
-
-            if analysis_refs or updated_text != original_text:
-                changes.append(
-                    {
-                        "page": target_rel,
-                        "analysis_pages": [f"[[{rel}]]" for rel in listed_refs],
-                        "analysis_pages_total": len(analysis_refs),
-                        "analysis_pages_listed": len(listed_refs),
-                        "removed_section": bool(not analysis_refs and updated_text != original_text),
-                        "link_signals": sorted(link_signals_by_target.get(target_rel, set())),
-                    }
-                )
+                if result["updated"]:
+                    updated_pages += 1
+                changes.append({
+                    "page": result["target_rel"],
+                    "analysis_pages": [f"[[{rel}]]" for rel in result["listed_refs"]],
+                    "analysis_pages_total": result["analysis_refs_total"],
+                    "analysis_pages_listed": len(result["listed_refs"]),
+                    "removed_section": result["removed_section"],
+                    "link_signals": result["link_signals"],
+                })
 
         if updated_pages > 0 and not dry_run:
-            self._rebuild_index()
+            with index_lock():
+                self._rebuild_index()
             self._append_log(
                 f"## [{self._today()}] analysis-backlinks | maintenance\n"
                 f"- Scanned analysis pages: {len(analysis_pages)}\n"
@@ -3583,119 +3761,96 @@ class LLMWikiEngine:
 
         report["candidate_pages"] = len(selected_pages)
 
-        for page_path, original_text in selected_pages:
-            rel_page = f"analysis/{page_path.name}"
-            question = self._extract_analysis_question(original_text)
-            if not question:
-                report["skipped_no_question"] += 1
-                report["results"].append(
-                    {
-                        "page": rel_page,
+        if selected_pages:
+            def _refresh_one_page(task: tuple[Path, str]) -> dict[str, Any] | None:
+                page_path, original_text = task
+                rel_page = f"analysis/{page_path.name}"
+                question = self._extract_analysis_question(original_text)
+                if not question:
+                    return {
+                        "rel_page": rel_page,
                         "status": "skipped",
                         "reason": "missing_question",
                     }
+
+                preferred_source_page, _source_chars = (
+                    self._analysis_primary_source_context(original_text)
                 )
-                continue
 
-            preferred_source_page, _source_chars = (
-                self._analysis_primary_source_context(original_text)
-            )
-
-            try:
                 refreshed = self.query(
                     question,
-                    save_answer = False,
-                    preferred_context_page = preferred_source_page,
-                    keep_preferred_context_full = bool(preferred_source_page),
+                    save_answer=False,
+                    preferred_context_page=preferred_source_page,
+                    keep_preferred_context_full=bool(preferred_source_page),
                 )
-            except Exception as exc:
-                report["errors"].append(f"{rel_page}: {exc}")
-                report["results"].append(
-                    {
-                        "page": rel_page,
-                        "status": "error",
-                        "question": question,
-                        "error": str(exc),
-                    }
-                )
-                continue
 
-            if refreshed.get("used_extractive_fallback"):
-                report["skipped_refresh_fallback"] += 1
-                report["results"].append(
-                    {
-                        "page": rel_page,
+                if refreshed.get("used_extractive_fallback"):
+                    return {
+                        "rel_page": rel_page,
                         "status": "skipped",
                         "question": question,
                         "reason": "refresh_used_fallback",
                         "fallback_reason": refreshed.get("fallback_reason"),
                     }
-                )
-                continue
 
-            answer_text = str(refreshed.get("answer", "")).strip()
-            context_pages = [str(page) for page in refreshed.get("context_pages", [])]
-            refreshed_at = self._now_iso()
+                answer_text = str(refreshed.get("answer", "")).strip()
+                context_pages = [str(page) for page in refreshed.get("context_pages", [])]
+                refreshed_at = self._now_iso()
 
-            if not dry_run:
-                context_lines = [
-                    f"- [[{page[:-3] if page.endswith('.md') else page}]]"
-                    for page in context_pages
-                ]
-                if not context_lines:
-                    context_lines = ["- (none)"]
+                if not dry_run:
+                    context_lines = [
+                        f"- [[{page[:-3] if page.endswith('.md') else page}]]"
+                        for page in context_pages
+                    ]
+                    if not context_lines:
+                        context_lines = ["- (none)"]
 
-                diagnostics_lines = [
-                    "- refresh_strategy: oldest_non_fallback",
-                    f"- refreshed_at: {refreshed_at}",
-                    f"- max_context_pages: {self.cfg.max_context_pages}",
-                    f"- max_chars_per_page: {self.cfg.max_chars_per_page}",
-                    f"- query_context_max_chars: {refreshed.get('query_context_max_chars')}",
-                    f"- pages_used: {len(context_pages)}",
-                ]
+                    diagnostics_lines = [
+                        "- refresh_strategy: oldest_non_fallback",
+                        f"- refreshed_at: {refreshed_at}",
+                        f"- max_context_pages: {self.cfg.max_context_pages}",
+                        f"- max_chars_per_page: {self.cfg.max_chars_per_page}",
+                        f"- query_context_max_chars: {refreshed.get('query_context_max_chars')}",
+                        f"- pages_used: {len(context_pages)}",
+                    ]
 
-                updated_text = original_text
-                updated_text = self._remove_markdown_section(
-                    updated_text, "Fallback Reason"
-                )
-                updated_text = self._remove_markdown_section(
-                    updated_text, "LLM Raw Answer Preview"
-                )
-                updated_text = self._replace_markdown_section(
-                    updated_text,
-                    "Answer Mode",
-                    "llm",
-                )
-                updated_text = self._replace_markdown_section(
-                    updated_text,
-                    "Answer",
-                    answer_text,
-                )
-                updated_text = self._replace_markdown_section(
-                    updated_text,
-                    "Retrieval Diagnostics",
-                    "\n".join(diagnostics_lines),
-                )
-                updated_text = self._replace_markdown_section(
-                    updated_text,
-                    "Context Pages",
-                    "\n".join(context_lines),
-                )
-                updated_text = self._upsert_top_section(
-                    updated_text,
-                    "Refresh Status",
-                    (
-                        f"- refreshed_at: {refreshed_at}\n"
-                        "- strategy: oldest non-fallback analysis refresh\n"
-                        f"- context_pages_used: {len(context_pages)}"
-                    ),
-                )
-                page_path.write_text(updated_text, encoding = "utf-8")
+                    updated_text = original_text
+                    updated_text = self._remove_markdown_section(
+                        updated_text, "Fallback Reason"
+                    )
+                    updated_text = self._remove_markdown_section(
+                        updated_text, "LLM Raw Answer Preview"
+                    )
+                    updated_text = self._replace_markdown_section(
+                        updated_text, "Answer Mode", "llm",
+                    )
+                    updated_text = self._replace_markdown_section(
+                        updated_text, "Answer", answer_text,
+                    )
+                    updated_text = self._replace_markdown_section(
+                        updated_text,
+                        "Retrieval Diagnostics",
+                        "\n".join(diagnostics_lines),
+                    )
+                    updated_text = self._replace_markdown_section(
+                        updated_text,
+                        "Context Pages",
+                        "\n".join(context_lines),
+                    )
+                    updated_text = self._upsert_top_section(
+                        updated_text,
+                        "Refresh Status",
+                        (
+                            f"- refreshed_at: {refreshed_at}\n"
+                            "- strategy: oldest non-fallback analysis refresh\n"
+                            f"- context_pages_used: {len(context_pages)}"
+                        ),
+                    )
+                    with page_lock(rel_page):
+                        page_path.write_text(updated_text, encoding="utf-8")
 
-            report["refreshed_pages"] += 1
-            report["results"].append(
-                {
-                    "page": rel_page,
+                return {
+                    "rel_page": rel_page,
                     "status": "refreshed",
                     "question": question,
                     "context_pages": [
@@ -3704,10 +3859,38 @@ class LLMWikiEngine:
                     ],
                     "refreshed_at": refreshed_at,
                 }
+
+            workers = min(4, len(selected_pages))
+            logger.info(
+                "Parallel refresh: processing %d page(s) with up to %d workers",
+                len(selected_pages), workers,
+            )
+            refresh_results = run_parallel(
+                selected_pages,
+                _refresh_one_page,
+                max_workers=workers,
+                description="refresh_oldest_non_fallback_analysis_pages",
             )
 
+            # -- collect results (sequential) --
+            for result in refresh_results:
+                if result is None:
+                    continue
+                status = result.get("status", "")
+                if status == "skipped":
+                    reason = result.get("reason", "")
+                    if reason == "missing_question":
+                        report["skipped_no_question"] += 1
+                    elif reason == "refresh_used_fallback":
+                        report["skipped_refresh_fallback"] += 1
+                    report["results"].append(result)
+                elif status == "refreshed":
+                    report["refreshed_pages"] += 1
+                    report["results"].append(result)
+
         if report["refreshed_pages"] > 0 and not dry_run:
-            self._rebuild_index()
+            with index_lock():
+                self._rebuild_index()
             self._append_log(
                 f"## [{self._today()}] refresh-oldest-non-fallback | maintenance\n"
                 f"- Requested oldest pages: {refresh_limit}\n"
@@ -4718,169 +4901,207 @@ class LLMWikiEngine:
         llm_direct_results_used = 0
         web_discovery_audit: List[Dict[str, Any]] = []
 
+        # Pre-filter: skip concepts that already have pages, and cap at a
+        # reasonable batch size since each parallel worker receives the full
+        # query budget (soft limit — total queries may exceed max_queries
+        # by up to worker_count * max_queries in the worst case).
+        concept_tasks: list[str] = []
         for slug in missing_concepts:
-            if queries_used >= max_queries:
+            if len(concept_tasks) >= max_queries * 2:
                 break
-
-            concepts_considered += 1
             concept_page = self.concepts_dir / f"{slug}.md"
             if concept_page.exists():
                 continue
+            concept_tasks.append(slug)
 
-            remaining_query_budget = max(0, max_queries - queries_used)
-            search_results, search_meta = self._llm_web_discover_results_for_concept(
-                concept_slug = slug,
-                query_budget = remaining_query_budget,
-                max_results = self.cfg.enrichment_web_gap_max_results,
-            )
+        if concept_tasks:
+            max_results = self.cfg.enrichment_web_gap_max_results
 
-            queries_used += max(0, int(search_meta.get("queries_consumed", 0)))
-            if str(search_meta.get("plan_status", "")).strip() == "ok":
-                llm_plan_ok_concepts += 1
-            if str(search_meta.get("selector_status", "")).strip() == "ok":
-                llm_selector_ok_concepts += 1
-            llm_direct_results_used += max(0, int(search_meta.get("direct_results", 0)))
+            def _fill_gap_one_concept(slug: str) -> dict[str, Any] | None:
+                concept_page = self.concepts_dir / f"{slug}.md"
+                if concept_page.exists():
+                    return None
 
-            web_discovery_audit.append(
-                {
-                    "concept": slug,
-                    "plan_status": str(search_meta.get("plan_status", "")).strip(),
-                    "plan_reason": str(search_meta.get("plan_reason", "")).strip(),
-                    "selector_status": str(
-                        search_meta.get("selector_status", "")
-                    ).strip(),
-                    "selector_reason": str(
-                        search_meta.get("selector_reason", "")
-                    ).strip(),
-                    "planned_queries": [
-                        self._normalize_web_text(str(item).strip(), 180)
-                        for item in search_meta.get("planned_queries", [])
-                        if str(item).strip()
-                    ],
-                    "selected_urls": [
-                        str(item).strip()
-                        for item in search_meta.get("selected_urls", [])
-                        if str(item).strip()
-                    ],
-                    "queries_consumed": max(
-                        0, int(search_meta.get("queries_consumed", 0))
-                    ),
-                }
-            )
-
-            if not search_results:
-                failed_concepts.append(slug)
-                continue
-
-            concept_title = slug.replace("-", " ").title()
-            summary = (
-                search_results[0].get("snippet")
-                or f"Web discovery notes for {concept_title}."
-            )
-
-            facts = [
-                item.get("snippet", "")
-                for item in search_results
-                if item.get("snippet", "")
-            ]
-            if not facts:
-                facts = [
-                    f"External references mention {concept_title}, but snippets were unavailable."
-                ]
-
-            external_refs = [
-                f"- [{item.get('title', item.get('url', 'source'))}]({item.get('url', '')})"
-                for item in search_results
-                if item.get("url", "")
-            ]
-            if not external_refs:
-                failed_concepts.append(slug)
-                continue
-
-            external_summary_refs: List[str] = []
-            if not dry_run:
-                for item in search_results:
-                    source_url = str(item.get("url", "")).strip()
-                    if not source_url:
-                        continue
-
-                    try:
-                        summary_report = self._ingest_and_summarize_external_source(
-                            concept_title = concept_title,
-                            search_result = item,
-                        )
-                    except Exception as exc:
-                        failed_external_sources.append(f"{slug}: {source_url} ({exc})")
-                        continue
-
-                    if summary_report.get("status") != "ok":
-                        reason = str(
-                            summary_report.get("reason", "unknown_error")
-                        ).strip()
-                        failed_external_sources.append(
-                            f"{slug}: {source_url} ({reason})"
-                        )
-                        continue
-
-                    source_page = str(summary_report.get("source_page", "")).strip()
-                    summary_page = str(summary_report.get("summary_page", "")).strip()
-                    reused_source = bool(summary_report.get("reused_source", False))
-                    reused_summary = bool(summary_report.get("reused_summary", False))
-
-                    if source_page:
-                        source_page_md = (
-                            f"{source_page}.md"
-                            if not source_page.endswith(".md")
-                            else source_page
-                        )
-                        if not reused_source:
-                            external_source_pages_created.append(source_page_md)
-
-                    if not reused_source:
-                        external_sources_ingested += 1
-                    if summary_page:
-                        external_summary_refs.append(summary_page)
-                        if not reused_summary:
-                            external_summary_pages_created.append(summary_page)
-
-            summary_refs_md = [
-                f"- [[{ref[:-3] if ref.endswith('.md') else ref}]]"
-                for ref in external_summary_refs
-                if str(ref).strip()
-            ]
-            if not summary_refs_md:
-                summary_refs_md = ["- none"]
-
-            page_md = (
-                "---\n"
-                f"title: {concept_title}\n"
-                "type: concept\n"
-                f"updated_at: {self._now_iso()}\n"
-                "---\n\n"
-                f"# {concept_title}\n\n"
-                "## Summary\n"
-                f"{summary}\n\n"
-                "## Facts\n"
-                + "\n".join(
-                    [
-                        f"- {fact}"
-                        for fact in facts[: self.cfg.enrichment_web_gap_max_results]
-                    ]
+                search_results, search_meta = self._llm_web_discover_results_for_concept(
+                    concept_slug=slug,
+                    query_budget=max_queries,
+                    max_results=max_results,
                 )
-                + "\n\n"
-                + "## External Sources\n"
-                + "\n".join(external_refs)
-                + "\n\n"
-                + "## External Source Summaries\n"
-                + "\n".join(summary_refs_md)
-                + "\n"
+
+                result: dict[str, Any] = {
+                    "slug": slug,
+                    "queries_consumed": max(0, int(search_meta.get("queries_consumed", 0))),
+                    "plan_ok": str(search_meta.get("plan_status", "")).strip() == "ok",
+                    "selector_ok": str(search_meta.get("selector_status", "")).strip() == "ok",
+                    "direct_results": max(0, int(search_meta.get("direct_results", 0))),
+                    "audit": {
+                        "concept": slug,
+                        "plan_status": str(search_meta.get("plan_status", "")).strip(),
+                        "plan_reason": str(search_meta.get("plan_reason", "")).strip(),
+                        "selector_status": str(search_meta.get("selector_status", "")).strip(),
+                        "selector_reason": str(search_meta.get("selector_reason", "")).strip(),
+                        "planned_queries": [
+                            self._normalize_web_text(str(item).strip(), 180)
+                            for item in search_meta.get("planned_queries", [])
+                            if str(item).strip()
+                        ],
+                        "selected_urls": [
+                            str(item).strip()
+                            for item in search_meta.get("selected_urls", [])
+                            if str(item).strip()
+                        ],
+                        "queries_consumed": max(0, int(search_meta.get("queries_consumed", 0))),
+                    },
+                    "created": False,
+                    "created_page": "",
+                    "failed_external": [],  # type: list[str]
+                    "external_sources": 0,
+                    "external_source_pages": [],  # type: list[str]
+                    "external_summary_pages": [],  # type: list[str]
+                }
+
+                if not search_results:
+                    result["failed"] = True
+                    return result
+
+                concept_title = slug.replace("-", " ").title()
+                summary = (
+                    search_results[0].get("snippet")
+                    or f"Web discovery notes for {concept_title}."
+                )
+
+                facts = [
+                    item.get("snippet", "")
+                    for item in search_results
+                    if item.get("snippet", "")
+                ]
+                if not facts:
+                    facts = [
+                        f"External references mention {concept_title}, but snippets were unavailable."
+                    ]
+
+                external_refs = [
+                    f"- [{item.get('title', item.get('url', 'source'))}]({item.get('url', '')})"
+                    for item in search_results
+                    if item.get("url", "")
+                ]
+                if not external_refs:
+                    result["failed"] = True
+                    return result
+
+                external_summary_refs: List[str] = []
+                if not dry_run:
+                    for item in search_results:
+                        source_url = str(item.get("url", "")).strip()
+                        if not source_url:
+                            continue
+
+                        try:
+                            summary_report = self._ingest_and_summarize_external_source(
+                                concept_title=concept_title,
+                                search_result=item,
+                            )
+                        except Exception as exc:
+                            result["failed_external"].append(f"{slug}: {source_url} ({exc})")
+                            continue
+
+                        if summary_report.get("status") != "ok":
+                            reason = str(summary_report.get("reason", "unknown_error")).strip()
+                            result["failed_external"].append(f"{slug}: {source_url} ({reason})")
+                            continue
+
+                        source_page = str(summary_report.get("source_page", "")).strip()
+                        summary_page = str(summary_report.get("summary_page", "")).strip()
+                        reused_source = bool(summary_report.get("reused_source", False))
+                        reused_summary = bool(summary_report.get("reused_summary", False))
+
+                        if source_page:
+                            source_page_md = (
+                                f"{source_page}.md"
+                                if not source_page.endswith(".md")
+                                else source_page
+                            )
+                            if not reused_source:
+                                result["external_source_pages"].append(source_page_md)
+
+                        if not reused_source:
+                            result["external_sources"] += 1
+                        if summary_page:
+                            external_summary_refs.append(summary_page)
+                            if not reused_summary:
+                                result["external_summary_pages"].append(summary_page)
+
+                summary_refs_md = [
+                    f"- [[{ref[:-3] if ref.endswith('.md') else ref}]]"
+                    for ref in external_summary_refs
+                    if str(ref).strip()
+                ]
+                if not summary_refs_md:
+                    summary_refs_md = ["- none"]
+
+                page_md = (
+                    "---\n"
+                    f"title: {concept_title}\n"
+                    "type: concept\n"
+                    f"updated_at: {self._now_iso()}\n"
+                    "---\n\n"
+                    f"# {concept_title}\n\n"
+                    "## Summary\n"
+                    f"{summary}\n\n"
+                    "## Facts\n"
+                    + "\n".join(
+                        [f"- {fact}" for fact in facts[:max_results]]
+                    )
+                    + "\n\n"
+                    + "## External Sources\n"
+                    + "\n".join(external_refs)
+                    + "\n\n"
+                    + "## External Source Summaries\n"
+                    + "\n".join(summary_refs_md)
+                    + "\n"
+                )
+
+                if not dry_run:
+                    with page_lock(f"concepts/{slug}"):
+                        concept_page.write_text(page_md, encoding="utf-8")
+
+                result["created"] = True
+                result["created_page"] = f"concepts/{slug}.md"
+                return result
+
+            workers = min(3, len(concept_tasks))
+            logger.info(
+                "Parallel fill gaps: processing %d concept(s) with up to %d workers",
+                len(concept_tasks), workers,
+            )
+            gap_results = run_parallel(
+                concept_tasks,
+                _fill_gap_one_concept,
+                max_workers=workers,
+                description="_fill_gaps_from_lint_via_web",
             )
 
-            if not dry_run:
-                concept_page.write_text(page_md, encoding = "utf-8")
-
-            concepts_created += 1
-            created_pages.append(f"concepts/{slug}.md")
+            # -- collect results (sequential) --
+            for result in gap_results:
+                if result is None:
+                    continue
+                concepts_considered += 1
+                queries_used += result["queries_consumed"]
+                if result["plan_ok"]:
+                    llm_plan_ok_concepts += 1
+                if result["selector_ok"]:
+                    llm_selector_ok_concepts += 1
+                llm_direct_results_used += result["direct_results"]
+                web_discovery_audit.append(result["audit"])
+                if result.get("failed"):
+                    failed_concepts.append(result["slug"])
+                if result["created"]:
+                    concepts_created += 1
+                    created_pages.append(result["created_page"])
+                external_sources_ingested += result["external_sources"]
+                external_source_pages_created.extend(result["external_source_pages"])
+                external_summary_pages_created.extend(result["external_summary_pages"])
+                failed_external_sources.extend(result["failed_external"])
 
         if concepts_created > 0 and not dry_run:
             audit_lines = ["- Web discovery audit:"]
@@ -9154,27 +9375,49 @@ class LLMWikiEngine:
         broken: List[Dict[str, str]] = []
         broken_pairs: Set[Tuple[str, str]] = set()
 
-        for rel in pages:
-            if rel == "log.md":
-                continue
+        # Filter out log.md for processing
+        processable = [rel for rel in pages if rel != "log.md"]
 
-            txt = (self.wiki_dir / rel).read_text(encoding = "utf-8", errors = "ignore")
-            links = re.findall(r"\[\[([^\]]+)\]\]", txt)
-            for l in links:
-                normalized_target = self._normalize_wikilink(l)
-                if not normalized_target:
+        if processable:
+            def _read_page_links(rel: str) -> dict[str, Any] | None:
+                txt = (self.wiki_dir / rel).read_text(encoding="utf-8", errors="ignore")
+                links = re.findall(r"\[\[([^\]]+)\]\]", txt)
+                parsed: list[tuple[str, str]] = []
+                for l in links:
+                    normalized_target = self._normalize_wikilink(l)
+                    if normalized_target:
+                        target_rel = f"{normalized_target}.md"
+                        parsed.append((l, target_rel))
+                return {"rel": rel, "links": parsed}
+
+            workers = min(8, len(processable))
+            logger.info(
+                "Parallel link graph: reading %d page(s) with up to %d workers",
+                len(processable), workers,
+            )
+            link_results = run_parallel(
+                processable,
+                _read_page_links,
+                max_workers=workers,
+                description="_build_link_graph",
+            )
+
+            # -- sequential aggregation --
+            for result in link_results:
+                if result is None:
                     continue
+                rel = result["rel"]
+                for _raw, target_rel in result["links"]:
+                    normalized_target = target_rel[:-3] if target_rel.endswith(".md") else target_rel
+                    if normalized_target in page_set and target_rel in inbound:
+                        outbound[rel].append(target_rel)
+                        inbound[target_rel].append(rel)
+                    else:
+                        pair = (rel, target_rel)
+                        if pair not in broken_pairs:
+                            broken_pairs.add(pair)
+                            broken.append({"source": rel, "target": target_rel})
 
-                target_rel = f"{normalized_target}.md"
-                if normalized_target in page_set and target_rel in inbound:
-                    outbound[rel].append(target_rel)
-                    inbound[target_rel].append(rel)
-                else:
-                    pair = (rel, target_rel)
-                    if pair in broken_pairs:
-                        continue
-                    broken_pairs.add(pair)
-                    broken.append({"source": rel, "target": target_rel})
         return {"inbound": inbound, "outbound": outbound, "broken": broken}
 
     def _rank_pages_by_recency(
