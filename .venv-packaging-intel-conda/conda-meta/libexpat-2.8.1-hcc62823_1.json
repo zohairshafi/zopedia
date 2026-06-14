@@ -1,0 +1,53 @@
+{
+  "build": "hcc62823_1",
+  "build_number": 1,
+  "channel": "https://conda.anaconda.org/conda-forge/osx-64",
+  "constrains": [
+    "expat 2.8.1.*"
+  ],
+  "depends": [
+    "__osx >=11.0"
+  ],
+  "extracted_package_dir": "/Users/zohairshafi/miniforge3/pkgs/libexpat-2.8.1-hcc62823_1",
+  "features": "",
+  "files": [
+    "lib/libexpat.1.12.1.dylib",
+    "lib/libexpat.1.dylib"
+  ],
+  "fn": "libexpat-2.8.1-hcc62823_1.conda",
+  "license": "MIT",
+  "license_family": "MIT",
+  "link": {
+    "source": "/Users/zohairshafi/miniforge3/pkgs/libexpat-2.8.1-hcc62823_1",
+    "type": 1
+  },
+  "md5": "dcfdea7b7013beef0a4d744d776ea38f",
+  "name": "libexpat",
+  "package_tarball_full_path": "/Users/zohairshafi/miniforge3/pkgs/libexpat-2.8.1-hcc62823_1.conda",
+  "paths_data": {
+    "paths": [
+      {
+        "_path": "lib/libexpat.1.12.1.dylib",
+        "path_type": "hardlink",
+        "sha256": "7d56f592b52ef69a7002e63de9a3067c241a888dd7fa2f7fd4d3ae3342cf6b65",
+        "sha256_in_prefix": "7d56f592b52ef69a7002e63de9a3067c241a888dd7fa2f7fd4d3ae3342cf6b65",
+        "size_in_bytes": 181072
+      },
+      {
+        "_path": "lib/libexpat.1.dylib",
+        "path_type": "softlink",
+        "sha256": "7d56f592b52ef69a7002e63de9a3067c241a888dd7fa2f7fd4d3ae3342cf6b65",
+        "size_in_bytes": 181072
+      }
+    ],
+    "paths_version": 1
+  },
+  "requested_spec": "None",
+  "sha256": "9c96cc05e056e1bba5b545cbbd57b6e01db622dc2c82934caaaa25cfb22fe666",
+  "size": 76020,
+  "subdir": "osx-64",
+  "timestamp": 1781204303305,
+  "track_features": "",
+  "url": "https://conda.anaconda.org/conda-forge/osx-64/libexpat-2.8.1-hcc62823_1.conda",
+  "version": "2.8.1"
+}

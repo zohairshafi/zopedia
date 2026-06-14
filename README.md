@@ -59,7 +59,7 @@ Ask questions  →  Model reads index  →  Picks relevant community  →  Reads
 
 ## Quick Start
 
-For a downloadable .dmg file, please check [Releases](https://github.com/zohairshafi/zopedia/releases).
+For a downloadable .dmg file, please check [Releases](https://github.com/zohairshafi/zopedia/releases). Both Apple Silicon (`arm64`) and Intel (`x86_64`) builds are available.
 
 ```bash
 # Clone and install

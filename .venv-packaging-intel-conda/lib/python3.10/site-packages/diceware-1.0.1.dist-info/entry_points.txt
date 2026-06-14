@@ -1,0 +1,5 @@
+[console_scripts]
+diceware = diceware:main
+
+[diceware_source_of_randomness]
+system = diceware.random_sources:SystemRandomSource
