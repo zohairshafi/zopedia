@@ -14,8 +14,10 @@ from .authentication import (
     reload_secret,
 )
 from .storage import (
+    API_KEY_PREFIX,
     DEFAULT_ADMIN_USERNAME,
     clear_bootstrap_password,
+    create_api_key,
     generate_bootstrap_password,
     get_bootstrap_password,
     is_initialized,
@@ -23,16 +25,20 @@ from .storage import (
     ensure_default_admin,
     get_jwt_secret,
     get_user_and_secret,
+    list_api_keys,
     load_jwt_secret,
     requires_password_change,
+    revoke_api_key,
     save_refresh_token,
     update_password,
+    validate_api_key,
     verify_refresh_token,
     revoke_user_refresh_tokens,
 )
 from .hashing import hash_password, verify_password
 
 __all__ = [
+    "API_KEY_PREFIX",
     "create_access_token",
     "create_refresh_token",
     "refresh_access_token",
@@ -41,6 +47,7 @@ __all__ = [
     "reload_secret",
     "DEFAULT_ADMIN_USERNAME",
     "clear_bootstrap_password",
+    "create_api_key",
     "generate_bootstrap_password",
     "get_bootstrap_password",
     "is_initialized",
@@ -48,10 +55,13 @@ __all__ = [
     "ensure_default_admin",
     "get_jwt_secret",
     "get_user_and_secret",
+    "list_api_keys",
     "load_jwt_secret",
     "requires_password_change",
+    "revoke_api_key",
     "save_refresh_token",
     "update_password",
+    "validate_api_key",
     "verify_refresh_token",
     "revoke_user_refresh_tokens",
     "hash_password",

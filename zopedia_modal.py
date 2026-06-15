@@ -30,7 +30,7 @@ image = (
     modal.Image.from_registry("python:3.12-slim")
     .run_commands(
         "pip install --no-cache-dir fastapi uvicorn pydantic httpx watchdog "
-        "ddgs networkx markitdown openai pyjwt diceware",
+        'ddgs networkx "markitdown[all]" openai pyjwt diceware asyncpg',
     )
     .add_local_dir("backend", "/app", copy=True, ignore=["wiki_data"])
     .add_local_dir("graphify/graphify", "/app/graphify", copy=True)

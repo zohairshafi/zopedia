@@ -14,11 +14,14 @@ from .authentication import (
 )
 from .hashing import verify_password
 from .storage import (
+    create_api_key,
     create_initial_user,
     ensure_default_admin,
     get_user_and_secret,
     is_initialized,
+    list_api_keys,
     requires_password_change,
+    revoke_api_key,
     revoke_user_refresh_tokens,
     update_password,
 )
@@ -162,3 +165,55 @@ async def auth_register(
             detail=f"User '{body.username}' already exists.",
         )
     return {"status": "ok", "username": body.username}
+
+
+# ── API key management ──────────────────────────────────────────────
+
+
+class CreateApiKeyRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=128)
+    expires_in_days: int | None = Field(None, ge=1)
+
+
+class CreateApiKeyResponse(BaseModel):
+    key: str
+    api_key: dict
+
+
+@router.get("/auth/api-keys")
+async def auth_list_api_keys(
+    current_subject: str = Depends(get_current_subject),
+):
+    """List all API keys for the authenticated user."""
+    keys = list_api_keys(current_subject)
+    return {"api_keys": keys}
+
+
+@router.post("/auth/api-keys")
+async def auth_create_api_key(
+    body: CreateApiKeyRequest,
+    current_subject: str = Depends(get_current_subject),
+):
+    """Create a new API key. The raw key is returned only once."""
+    from datetime import datetime, timedelta, timezone
+
+    expires_at: str | None = None
+    if body.expires_in_days is not None:
+        expires_at = (datetime.now(timezone.utc) + timedelta(days=body.expires_in_days)).isoformat()
+
+    raw_key, row = create_api_key(current_subject, body.name.strip(), expires_at)
+    return CreateApiKeyResponse(key=raw_key, api_key=row)
+
+
+@router.delete("/auth/api-keys/{key_id}")
+async def auth_revoke_api_key(
+    key_id: int,
+    current_subject: str = Depends(get_current_subject),
+):
+    """Revoke an API key belonging to the authenticated user."""
+    if not revoke_api_key(current_subject, key_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="API key not found.",
+        )
+    return {"status": "ok"}

@@ -327,6 +327,7 @@ app.include_router(chat_router, prefix="/v1")
 # ── Chat History API (server-side, per-user) ────────────────────────
 
 from fastapi import APIRouter as _APIRouter, HTTPException
+from starlette import status
 from pydantic import BaseModel as _BaseModel
 
 _chat_history_router = _APIRouter()
@@ -541,6 +542,24 @@ if _AUTH_DISABLED:
             "must_change_password": False,
         }
 
+    @_auth_stub.get("/auth/api-keys")
+    async def _auth_list_api_keys():
+        return {"api_keys": []}
+
+    @_auth_stub.post("/auth/api-keys")
+    async def _auth_create_api_key():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="API keys require authentication to be enabled.",
+        )
+
+    @_auth_stub.delete("/auth/api-keys/{key_id}")
+    async def _auth_revoke_api_key(key_id: int):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="API keys require authentication to be enabled.",
+        )
+
     app.include_router(_auth_stub, prefix="/api")
 else:
     from auth.router import router as _auth_router
@@ -601,6 +620,41 @@ if _frontend_available:
     @app.get("/")
     async def serve_index():
         return FileResponse(str(_FRONTEND_DIR / "index.html"))
+else:
+    _NO_FRONTEND_HTML = """\
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>zopedia — frontend not built</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 540px; margin: 80px auto; padding: 0 20px; line-height: 1.6; color: #1a1a1a; background: #fafafa; }
+  h1 { font-size: 1.3rem; }
+  code { background: #e5e5e5; padding: 2px 6px; border-radius: 4px; font-size: 0.9rem; }
+  pre { background: #2d2d2d; color: #e0e0e0; padding: 14px 18px; border-radius: 8px; overflow-x: auto; font-size: 0.85rem; line-height: 1.7; }
+  a { color: #0f766e; }
+</style>
+<h1>Frontend not built</h1>
+<p>
+  The zopedia backend is running, but the frontend UI hasn&rsquo;t been built yet.
+  <code>frontend/dist/</code> is not included in the git repository — you must build it locally.
+</p>
+<pre>cd frontend
+npm install
+npm run build</pre>
+<p>Then restart the backend. If you already built it, check that
+  <code>ZOPEDIA_FRONTEND_DIR</code> points to the <code>frontend/dist</code> directory.
+</p>
+<p><a href="/api/status">Check backend status</a></p>
+"""
+
+    @app.get("/{full_path:path}")
+    async def _no_frontend_catchall(full_path: str):
+        return HTMLResponse(content=_NO_FRONTEND_HTML, status_code=200)
+
+    @app.get("/")
+    async def _no_frontend_index():
+        return HTMLResponse(content=_NO_FRONTEND_HTML, status_code=200)
 
 
 # ── Main ───────────────────────────────────────────────────────────
