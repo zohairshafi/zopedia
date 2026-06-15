@@ -84,6 +84,32 @@ cd ../backend && python main.py
 
 Drop files into `backend/wiki_data/raw/` or use the **Upload Files** button in the sidebar under Wiki Options.
 
+### Windows Setup
+
+On Windows, use PowerShell and replace `export` with `$env:`:
+
+```powershell
+# Clone and install
+git clone https://github.com/zohairshafi/zopedia.git
+cd zopedia
+cd backend; pip install -r requirements.txt
+cd ../frontend; npm install; npm run build
+
+# Configure
+$env:ZOPEDIA_LLM_BASE_URL = "https://api.deepseek.com/v1"
+$env:ZOPEDIA_LLM_API_KEY = "sk-your-key"
+$env:ZOPEDIA_LLM_MODEL = "deepseek-v4-flash"
+
+# Optional: Brave Search API
+$env:ZOPEDIA_BRAVE_API_KEY = "BSA..."
+
+# Run
+cd ../backend; python main.py
+# Open http://localhost:8000
+```
+
+> **Note:** The frontend must be built (`npm run build`) before the backend can serve the UI. If you see "Not Found" or "Frontend not built", run `cd frontend && npm install && npm run build` then restart the backend.
+
 ### Multi-User Setup
 
 ```bash
@@ -383,6 +409,10 @@ npm run dev                 # Starts Vite dev server
 # Build for production
 npm run build               # Output to frontend/dist/
 ```
+
+> **Note:** The production backend serves the UI from `frontend/dist/`. If that directory doesn't exist (e.g. after a fresh clone), the backend shows a "Frontend not built" page with setup instructions. Build the frontend first with `cd frontend && npm install && npm run build`.
+
+On Windows, use the same commands in PowerShell. For the desktop app, see `packaging/build-exe.bat`.
 
 ### Key Dependencies
 
