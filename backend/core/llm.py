@@ -44,16 +44,24 @@ _LLM_MODEL = _env_str("ZOPEDIA_LLM_MODEL", "default")
 _LLM_TIMEOUT_SECONDS = _env_int("ZOPEDIA_LLM_TIMEOUT_SECONDS", 300)
 _WIKI_LLM_MAX_TOKENS = _env_int("ZOPEDIA_WIKI_LLM_MAX_TOKENS", 6000)
 _BRAVE_API_KEY = _env_str("ZOPEDIA_BRAVE_API_KEY")
+_DATABASE_URL = _env_str("ZOPEDIA_DATABASE_URL")
+_DB_MAX_ROWS = _env_int("ZOPEDIA_DB_MAX_ROWS", 100)
+_DB_TIMEOUT_SECONDS = _env_int("ZOPEDIA_DB_TIMEOUT_SECONDS", 10)
 
 
 def refresh_llm_config():
     """Re-read LLM config from os.environ (for soft reload after Apply and Restart)."""
     global _LLM_BASE_URL, _LLM_API_KEY, _LLM_MODEL, _LLM_TIMEOUT_SECONDS, _WIKI_LLM_MAX_TOKENS
+    global _BRAVE_API_KEY, _DATABASE_URL, _DB_MAX_ROWS, _DB_TIMEOUT_SECONDS
     _LLM_BASE_URL = _env_str("ZOPEDIA_LLM_BASE_URL")
     _LLM_API_KEY = _env_str("ZOPEDIA_LLM_API_KEY")
     _LLM_MODEL = _env_str("ZOPEDIA_LLM_MODEL", "default")
     _LLM_TIMEOUT_SECONDS = _env_int("ZOPEDIA_LLM_TIMEOUT_SECONDS", 300)
     _WIKI_LLM_MAX_TOKENS = _env_int("ZOPEDIA_WIKI_LLM_MAX_TOKENS", 6000)
+    _BRAVE_API_KEY = _env_str("ZOPEDIA_BRAVE_API_KEY")
+    _DATABASE_URL = _env_str("ZOPEDIA_DATABASE_URL")
+    _DB_MAX_ROWS = _env_int("ZOPEDIA_DB_MAX_ROWS", 100)
+    _DB_TIMEOUT_SECONDS = _env_int("ZOPEDIA_DB_TIMEOUT_SECONDS", 10)
 
 
 def _normalize_base_url(url: str) -> str:
@@ -493,6 +501,59 @@ WIKI_SEARCH_TOOL = {
 }
 
 WIKI_TOOLS = [WIKI_READ_PAGE_TOOL, WIKI_WEB_SEARCH_TOOL, WIKI_SEARCH_TOOL]
+
+# ── Database tools (PostgreSQL) ────────────────────────────────────
+
+DESCRIBE_DATABASE_SCHEMA_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "describe_database_schema",
+        "description": (
+            "Show the database schema. Call with no arguments to list all available tables "
+            "and their approximate row counts. Call with a table_name to see that table's "
+            "columns (name, type, nullable, constraints). "
+            "Use this BEFORE writing any SQL query to understand what tables and columns exist."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "table_name": {
+                    "type": "string",
+                    "description": "Optional. The table to describe. Leave empty to list all tables.",
+                },
+            },
+            "required": [],
+        },
+    },
+}
+
+EXECUTE_SQL_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "execute_sql_query",
+        "description": (
+            "Execute a read-only SQL query against the configured PostgreSQL database. "
+            "The query MUST be a single SELECT statement — INSERT, UPDATE, DELETE, DROP "
+            "and other modifications will be rejected. "
+            "Use describe_database_schema first to understand the available tables and columns. "
+            "Use explicit column names (avoid SELECT *). "
+            f"Results are limited to {_DB_MAX_ROWS} rows. "
+            "Standard PostgreSQL syntax is supported."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "A read-only SQL SELECT query to execute.",
+                },
+            },
+            "required": ["query"],
+        },
+    },
+}
+
+DB_TOOLS = [DESCRIBE_DATABASE_SCHEMA_TOOL, EXECUTE_SQL_TOOL]
 
 
 async def execute_web_search(query: str, max_results: int = 5, timelimit: str = "m") -> str:

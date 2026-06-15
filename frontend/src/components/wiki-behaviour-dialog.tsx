@@ -67,6 +67,7 @@ const CATEGORY_ORDER = [
   "RAG & Logging",
   "Wiki LLM",
   "Upstream API",
+  "Database",
   "Engine Context",
   "Ranking",
   "Auto Analysis",
@@ -96,6 +97,9 @@ function editableBaselineValue(item: WikiEnvVariable): string {
 }
 
 function categoryForVariable(name: string): WikiVariableCategory {
+  if (name.startsWith("ZOPEDIA_DB_") || name === "ZOPEDIA_DATABASE_URL") {
+    return "Database";
+  }
   if (name.startsWith("ZOPEDIA_LLM_")) {
     return "Upstream API";
   }

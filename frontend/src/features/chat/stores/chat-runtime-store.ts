@@ -216,6 +216,7 @@ type ChatRuntimeStore = {
   supportsTools: boolean;
   toolsEnabled: boolean;
   codeToolsEnabled: boolean;
+  dbQueryEnabled: boolean;
   toolStatus: string | null;
   generatingStatus: string | null;
   autoHealToolCalls: boolean;
@@ -263,6 +264,7 @@ type ChatRuntimeStore = {
   setPreserveThinking: (value: boolean) => void;
   setToolsEnabled: (enabled: boolean) => void;
   setCodeToolsEnabled: (enabled: boolean) => void;
+  setDbQueryEnabled: (enabled: boolean) => void;
   setToolStatus: (status: string | null) => void;
   setGeneratingStatus: (status: string | null) => void;
   setAutoHealToolCalls: (enabled: boolean) => void;
@@ -306,6 +308,7 @@ export const useChatRuntimeStore = create<ChatRuntimeStore>((set) => ({
   supportsTools: false,
   toolsEnabled: initialUseUpstream,
   codeToolsEnabled: initialUseUpstream,
+  dbQueryEnabled: false,
   toolStatus: null,
   generatingStatus: null,
   autoHealToolCalls: loadBool(AUTO_HEAL_TOOL_CALLS_KEY, true),
@@ -461,6 +464,7 @@ export const useChatRuntimeStore = create<ChatRuntimeStore>((set) => ({
     }),
   setToolsEnabled: (toolsEnabled) => set({ toolsEnabled }),
   setCodeToolsEnabled: (codeToolsEnabled) => set({ codeToolsEnabled }),
+  setDbQueryEnabled: (dbQueryEnabled: boolean) => set({ dbQueryEnabled }),
   setToolStatus: (toolStatus) => set({ toolStatus }),
   setGeneratingStatus: (generatingStatus) => set({ generatingStatus }),
   setAutoHealToolCalls: (autoHealToolCalls) =>

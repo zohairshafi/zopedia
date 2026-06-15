@@ -9,3 +9,4 @@ markitdown[all]>=0.1.0
 openai>=1.0.0
 pyjwt>=2.0
 diceware>=1.0
+asyncpg>=0.29.0

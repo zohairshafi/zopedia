@@ -211,6 +211,17 @@ async def lifespan(app: FastAPI):
         logger.warning("Periodic scheduler startup failed: %s", exc)
         app.state.periodic_scheduler = None
 
+    # Initialize database connection pool (PostgreSQL — optional)
+    try:
+        from core.database import create_pool
+        _db_url = os.getenv("ZOPEDIA_DATABASE_URL", "").strip()
+        if _db_url:
+            await create_pool(_db_url)
+        else:
+            logger.info("No ZOPEDIA_DATABASE_URL set — database tools disabled.")
+    except Exception as exc:
+        logger.warning("Database pool initialization failed: %s", exc)
+
     # Wire restart support for wiki env editing.
     # Does an in-process soft reload: re-applies stored env overrides and
     # bridge defaults, then refreshes all module-level constants and wiki
@@ -252,6 +263,20 @@ async def lifespan(app: FastAPI):
         _AUTH_DISABLED = _env_bool("ZOPEDIA_AUTH_DISABLED", True)
         logger.info("Auth flag refreshed: _AUTH_DISABLED=%s", _AUTH_DISABLED)
 
+        try:
+            from core.database import close_pool, create_pool
+
+            async def _refresh_db():
+                await close_pool()
+                _new_db_url = os.getenv("ZOPEDIA_DATABASE_URL", "").strip()
+                if _new_db_url:
+                    await create_pool(_new_db_url)
+                    logger.info("Database pool re-initialized after soft reload.")
+
+            asyncio.ensure_future(_refresh_db())
+        except Exception as exc:
+            logger.warning("Database pool re-initialization failed: %s", exc)
+
     app.state.trigger_restart = _trigger_restart
 
     yield
@@ -273,6 +298,12 @@ async def lifespan(app: FastAPI):
             logger.info("Periodic scheduler stopped.")
         except Exception as exc:
             logger.warning("Error stopping periodic scheduler: %s", exc)
+    # Close database connection pool
+    try:
+        from core.database import close_pool
+        await close_pool()
+    except Exception as exc:
+        logger.warning("Error closing database pool: %s", exc)
 
 
 # ── App ────────────────────────────────────────────────────────────

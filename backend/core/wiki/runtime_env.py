@@ -226,6 +226,29 @@ WIKI_ENV_SPECS: tuple[WikiEnvSpec, ...] = (
         minimum=1,
         maximum=64,
     ),
+    # ── Database ───────────────────────────────────────────────────
+    WikiEnvSpec(
+        name="ZOPEDIA_DATABASE_URL",
+        kind="string",
+        default="",
+        description="PostgreSQL connection string for the database query tool (e.g. postgresql://user:pass@host:5432/dbname). Leave empty to disable database features.",
+    ),
+    WikiEnvSpec(
+        name="ZOPEDIA_DB_MAX_ROWS",
+        kind="int",
+        default="100",
+        description="Maximum rows returned per SQL query. A LIMIT is auto-appended to queries that don't already have one.",
+        minimum=1,
+        maximum=10000,
+    ),
+    WikiEnvSpec(
+        name="ZOPEDIA_DB_TIMEOUT_SECONDS",
+        kind="int",
+        default="10",
+        description="Per-query statement timeout in seconds. Queries exceeding this are cancelled.",
+        minimum=1,
+        maximum=300,
+    ),
 )
 
 _WIKI_ENV_SPECS_BY_NAME = {spec.name: spec for spec in WIKI_ENV_SPECS}

@@ -25,6 +25,7 @@ from fastapi.responses import StreamingResponse
 from core.llm import (
     _base_url,
     _headers,
+    DB_TOOLS,
     WIKI_TOOLS,
     chat_completions_non_streaming,
     chat_completions_stream,
@@ -33,6 +34,8 @@ from core.llm import (
     execute_wiki_search,
     llm_available,
 )
+
+import core.database as db
 from routes.wiki import (
     _get_route_rag_context,
     _ingest_pending_raw_files,
@@ -304,6 +307,71 @@ async def _resolve_tool_calls_stream(
                     "tool_call_id": tc_id,
                     "result": tool_result,
                 }
+            elif name == "describe_database_schema":
+                table = str(args.get("table_name", "")).strip()
+                yield {
+                    "type": "tool_start",
+                    "tool_name": "describe_database_schema",
+                    "tool_call_id": tc_id,
+                    "arguments": {"table_name": table} if table else {},
+                }
+                if table:
+                    yield {"type": "tool_status", "text": f"Describing {table}..."}
+                    tool_result = await db.describe_table(table)
+                else:
+                    yield {"type": "tool_status", "text": "Listing database tables..."}
+                    tool_result = await db.list_tables()
+                try:
+                    result_data = json.loads(tool_result)
+                    if "columns" in result_data:
+                        yield {"type": "tool_status", "text": f"Described {table}: {result_data.get('column_count', 0)} columns"}
+                    elif "tables" in result_data:
+                        yield {"type": "tool_status", "text": f"Database has {result_data.get('count', 0)} tables"}
+                    elif "error" in result_data:
+                        yield {"type": "tool_status", "text": result_data["error"]}
+                except Exception:
+                    pass
+                yield {
+                    "type": "tool_end",
+                    "tool_name": "describe_database_schema",
+                    "tool_call_id": tc_id,
+                    "result": tool_result,
+                }
+
+            elif name == "execute_sql_query":
+                query_str = str(args.get("query", ""))
+                yield {
+                    "type": "tool_start",
+                    "tool_name": "execute_sql_query",
+                    "tool_call_id": tc_id,
+                    "arguments": {"query": query_str},
+                }
+                yield {"type": "tool_status", "text": "Running SQL query..."}
+                tool_result = await db.execute_query(
+                    query_str,
+                    max_rows=int(os.getenv("ZOPEDIA_DB_MAX_ROWS", "100")),
+                    timeout_seconds=int(os.getenv("ZOPEDIA_DB_TIMEOUT_SECONDS", "10")),
+                )
+                try:
+                    result_data = json.loads(tool_result)
+                    if "error" in result_data:
+                        yield {"type": "tool_status", "text": result_data["error"]}
+                    else:
+                        row_count = result_data.get("row_count", 0)
+                        truncated = result_data.get("truncated", False)
+                        msg = f"Query returned {row_count} rows"
+                        if truncated:
+                            msg += " (truncated)"
+                        yield {"type": "tool_status", "text": msg}
+                except Exception:
+                    pass
+                yield {
+                    "type": "tool_end",
+                    "tool_name": "execute_sql_query",
+                    "tool_call_id": tc_id,
+                    "result": tool_result,
+                }
+
             else:
                 tool_result = json.dumps({"error": f"Unknown tool: {name}"})
                 yield {
@@ -381,10 +449,17 @@ async def openai_chat_completions(request: Request):
         else:
             enabled_set = {"read_wiki_page", "web_search", "search_wiki"}
 
+        # Add database tools if a database URL is configured
+        has_db = bool(os.getenv("ZOPEDIA_DATABASE_URL", "").strip()) and db.pool_available()
+        if has_db:
+            enabled_set.update(t["function"]["name"] for t in DB_TOOLS)
+
         wiki_tools = [t for t in WIKI_TOOLS if t["function"]["name"] in enabled_set]
-        # Add any custom tools from the request (only those not already in WIKI_TOOLS)
-        _wiki_tool_names = {t["function"]["name"] for t in WIKI_TOOLS}
-        wiki_tools += [t for t in tools if t.get("function", {}).get("name") not in _wiki_tool_names]
+        if has_db:
+            wiki_tools += DB_TOOLS
+        # Add any custom tools from the request (only those not already in WIKI_TOOLS or DB_TOOLS)
+        _known_tool_names = {t["function"]["name"] for t in WIKI_TOOLS} | {t["function"]["name"] for t in DB_TOOLS}
+        wiki_tools += [t for t in tools if t.get("function", {}).get("name") not in _known_tool_names]
 
         has_wiki = "read_wiki_page" in enabled_set
         has_web = "web_search" in enabled_set
@@ -457,6 +532,32 @@ async def openai_chat_completions(request: Request):
             prompt_parts.append(
                 "Use web_search when the user asks for information that requires external or up-to-date sources.\n\n"
             )
+
+        # Database schema summary
+        if has_db:
+            prompt_parts.append(
+                "DATABASE USAGE:\n"
+                "- Use describe_database_schema (no arguments) to list all available tables.\n"
+                "- Use describe_database_schema with a table_name to see column names, types, and constraints.\n"
+                "- Always explore the schema BEFORE writing any SQL query.\n"
+                "- Use execute_sql_query with a single SELECT statement. Use explicit column names (no SELECT *).\n"
+                "- Results are limited to 100 rows by default.\n\n"
+            )
+            # Inject a table listing so the LLM has immediate context
+            try:
+                tables_json = await db.list_tables()
+                tables_data = json.loads(tables_json)
+                table_list = tables_data.get("tables", [])
+                if table_list:
+                    lines = ["DATABASE SCHEMA:\n"]
+                    for t in table_list:
+                        lines.append(
+                            f"- {t['schema']}.{t['table']} (~{t['approx_rows']:,} rows)"
+                        )
+                    lines.append("\n")
+                    prompt_parts.append("".join(lines))
+            except Exception:
+                pass
 
         # Wiki index
         if has_wiki and index_text:

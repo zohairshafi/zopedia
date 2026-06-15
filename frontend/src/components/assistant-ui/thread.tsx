@@ -15,6 +15,7 @@ import { ToolFallback } from "@/components/assistant-ui/tool-fallback";
 import { ToolGroup } from "@/components/assistant-ui/tool-group";
 import { PythonToolUI } from "@/components/assistant-ui/tool-ui-python";
 import { TerminalToolUI } from "@/components/assistant-ui/tool-ui-terminal";
+import { SqlToolUI } from "@/components/assistant-ui/tool-ui-sql";
 import { WebSearchToolUI } from "@/components/assistant-ui/tool-ui-web-search";
 import { TooltipIconButton } from "@/components/assistant-ui/tooltip-icon-button";
 import {
@@ -74,6 +75,7 @@ import {
   RefreshCwIcon,
   SquareIcon,
   TerminalIcon,
+  DatabaseIcon,
   Trash2Icon,
   XIcon,
 } from "lucide-react";
@@ -708,6 +710,32 @@ const WebSearchToggle: FC = () => {
   );
 };
 
+const DatabaseQueryToggle: FC = () => {
+  const useUpstream = useChatRuntimeStore((s) => s.useUpstream);
+  const dbQueryEnabled = useChatRuntimeStore((s) => s.dbQueryEnabled);
+  const setDbQueryEnabled = useChatRuntimeStore((s) => s.setDbQueryEnabled);
+  const disabled = !useUpstream;
+
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={() => setDbQueryEnabled(!dbQueryEnabled)}
+      className={cn(
+        "flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-colors",
+        disabled
+          ? "cursor-not-allowed opacity-40"
+          : dbQueryEnabled
+            ? "bg-primary/10 text-primary hover:bg-primary/20"
+            : "bg-muted text-muted-foreground hover:bg-muted-foreground/15",
+      )}
+      aria-label={dbQueryEnabled ? "Disable database query" : "Enable database query"}
+    >
+      <DatabaseIcon className="size-3.5" />
+      <span>DB</span>
+    </button>
+  );
+};
 
 
 
@@ -910,6 +938,7 @@ const ComposerAction: FC<{ disabled?: boolean }> = ({ disabled }) => {
         <ReasoningEffortControl />
         <PreserveThinkingToggle />
         <WebSearchToggle />
+        <DatabaseQueryToggle />
         <WikiChatHistoryToggle />
         <ExportHTMLButton />
       </div>
@@ -1011,6 +1040,7 @@ const AssistantMessage: FC = () => {
                 web_search: WebSearchToolUI,
                 python: PythonToolUI,
                 terminal: TerminalToolUI,
+                execute_sql_query: SqlToolUI,
               },
               Fallback: ToolFallback,
             },

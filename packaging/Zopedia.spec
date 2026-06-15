@@ -66,6 +66,7 @@ _hiddenimports = [
     "watchdog.observers.fsevents",
     "networkx",
     "httpx",
+    "asyncpg",
     "ddgs",
     "markitdown",
     "openai",
