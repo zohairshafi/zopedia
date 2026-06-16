@@ -489,8 +489,8 @@ def wiki_source_extraction_prompt(title: str, text: str, max_chars: int) -> str:
         "Extract structured knowledge from the source.\n"
         "Return strict JSON with keys:\n"
         "summary: string\n"
-        "entities: list of {name, summary, facts:[], contradictions:[]}\n"
-        "concepts: list of {name, summary, facts:[], contradictions:[]}\n\n"
+        "entities: list of {name, summary, facts:[], contradictions:[], assumptions:[], data:[]}\n"
+        "concepts: list of {name, summary, facts:[], contradictions:[], assumptions:[], data:[]}\n\n"
         "Definitions:\n"
         "- Entities = named people, companies, projects, products, APIs, tools, places, or specific named things mentioned in the source.\n"
         "- Concepts = key ideas, techniques, methodologies, patterns, frameworks, protocols, formats, principles, or abstract topics the source discusses or relies on. Concepts are NOT named entities — they describe what the source is about at a thematic level.\n\n"
@@ -515,8 +515,8 @@ def wiki_json_repair_prompt(title: str, model_output: str, source_hint: str) -> 
         "Schema:\n"
         "{\n"
         '  "summary": "string",\n'
-        '  "entities": [{"name":"string","summary":"string","facts":["string"],"contradictions":["string"]}],\n'
-        '  "concepts": [{"name":"string","summary":"string","facts":["string"],"contradictions":["string"]}]\n'
+        '  "entities": [{"name":"string","summary":"string","facts":["string"],"contradictions":["string"],"assumptions":["string"],"data":["string"]}],\n'
+        '  "concepts": [{"name":"string","summary":"string","facts":["string"],"contradictions":["string"],"assumptions":["string"],"data":["string"]}]\n'
         "}\n"
         "If a field is unknown, use empty string or empty array.\n"
         "Do not include markdown fences.\n\n"

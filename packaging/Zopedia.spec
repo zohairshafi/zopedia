@@ -89,13 +89,6 @@ _hiddenimports = [
     # YouTube transcript
     "youtube_transcript_api",
     "defusedxml",
-    # Audio transcription
-    "pydub",
-    "speech_recognition",
-    # Azure Document Intelligence
-    "azure.ai.documentintelligence",
-    "azure.core.credentials",
-    "azure.identity",
 ]
 
 # ── Data files ──────────────────────────────────────────────────────

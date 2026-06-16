@@ -451,14 +451,18 @@ async def openai_chat_completions(request: Request):
         else:
             enabled_set = {"read_wiki_page", "web_search", "search_wiki"}
 
-        # Add database tools if a database URL is configured
-        has_db = bool(os.getenv("ZOPEDIA_DATABASE_URL", "").strip()) and db.pool_available()
+        # Add database tools if a database URL is configured AND the frontend
+        # toggle is on. When enable_tools is false, DB tools are never included
+        # (the default enabled_set doesn't contain them).
+        has_db_env = bool(os.getenv("ZOPEDIA_DATABASE_URL", "").strip()) and db.pool_available()
+        db_tool_names = {t["function"]["name"] for t in DB_TOOLS}
+        has_db = has_db_env and (not enable_tools or bool(enabled_set & db_tool_names))
         if has_db:
-            enabled_set.update(t["function"]["name"] for t in DB_TOOLS)
+            enabled_set.update(db_tool_names)
 
         wiki_tools = [t for t in WIKI_TOOLS if t["function"]["name"] in enabled_set]
         if has_db:
-            wiki_tools += DB_TOOLS
+            wiki_tools += [t for t in DB_TOOLS if t["function"]["name"] in enabled_set]
         # Add any custom tools from the request (only those not already in WIKI_TOOLS or DB_TOOLS)
         _known_tool_names = {t["function"]["name"] for t in WIKI_TOOLS} | {t["function"]["name"] for t in DB_TOOLS}
         wiki_tools += [t for t in tools if t.get("function", {}).get("name") not in _known_tool_names]

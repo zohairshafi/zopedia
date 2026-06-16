@@ -374,6 +374,7 @@ BULLET_SECTIONS: List[Dict[str, str]] = [
     {"key": "facts",           "heading": "Facts",           "incremental_label": "New facts"},
     {"key": "contradictions",  "heading": "Contradictions",  "incremental_label": "New contradictions"},
     {"key": "assumptions",     "heading": "Assumptions",     "incremental_label": "New assumptions"},
+    {"key": "data",            "heading": "Data",            "incremental_label": "New data"},
 ]
 
 
@@ -5542,12 +5543,12 @@ class LLMWikiEngine:
         cleaned = self._clean_source_text(text)
         summary = self._first_sentences(cleaned, max_chars = 600)
 
+        _empty_bullets = {sec["key"]: [] for sec in BULLET_SECTIONS}
         entities = [
             {
                 "name": name,
                 "summary": "Mentioned in source text.",
-                "facts": [],
-                "contradictions": [],
+                **_empty_bullets,
             }
             for name in self._top_entities(cleaned, limit = 8)
         ]
@@ -5556,8 +5557,7 @@ class LLMWikiEngine:
             {
                 "name": name,
                 "summary": "Recurring concept in source text.",
-                "facts": [],
-                "contradictions": [],
+                **_empty_bullets,
             }
             for name in self._top_concepts(cleaned, limit = 8)
         ]
@@ -5598,23 +5598,22 @@ class LLMWikiEngine:
             if not name:
                 continue
 
-            facts = item.get("facts", [])
-            contradictions = item.get("contradictions", [])
+            # Preserve ALL fields from the LLM response — not just the known ones.
+            # BULLET_SECTIONS keys (facts, contradictions, assumptions, etc.) and
+            # any future fields pass through automatically.
+            entry: Dict[str, Any] = {
+                "name": name,
+                "summary": str(item.get("summary", "")).strip(),
+            }
+            for key, value in item.items():
+                if key in ("name", "summary"):
+                    continue  # Already handled above
+                if isinstance(value, list):
+                    entry[key] = [str(v).strip() for v in value if str(v).strip()]
+                else:
+                    entry[key] = value
 
-            normalized.append(
-                {
-                    "name": name,
-                    "summary": str(item.get("summary", "")).strip(),
-                    "facts": [str(f).strip() for f in facts if str(f).strip()]
-                    if isinstance(facts, list)
-                    else [],
-                    "contradictions": [
-                        str(c).strip() for c in contradictions if str(c).strip()
-                    ]
-                    if isinstance(contradictions, list)
-                    else [],
-                }
-            )
+            normalized.append(entry)
 
         return normalized
 
