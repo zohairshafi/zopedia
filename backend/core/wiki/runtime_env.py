@@ -249,6 +249,12 @@ WIKI_ENV_SPECS: tuple[WikiEnvSpec, ...] = (
         minimum=1,
         maximum=300,
     ),
+    WikiEnvSpec(
+        name="ZOPEDIA_DB_ALLOWED_TABLES",
+        kind="string",
+        default="",
+        description="Comma-separated list of schema.table names to expose to the LLM. Empty = all tables allowed (e.g. public.clients,public.trades).",
+    ),
 )
 
 _WIKI_ENV_SPECS_BY_NAME = {spec.name: spec for spec in WIKI_ENV_SPECS}

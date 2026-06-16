@@ -503,8 +503,33 @@ async def health():
         "llm_model": _LLM_MODEL or "default",
         "auth_disabled": _AUTH_DISABLED,
         "device_type": "web",
-        "chat_only": False,
     }
+
+
+class _DbTestRequest(_BaseModel):
+    host: str = "localhost"
+    port: int = 5432
+    dbname: str = ""
+    user: str = ""
+    password: str = ""
+
+
+@app.post("/api/db/test-connection")
+async def test_db_connection(body: _DbTestRequest):
+    """Test a PostgreSQL connection and return available tables.
+
+    Creates a temporary connection — does NOT affect the main pool.
+    Used by the database connection setup wizard in the frontend.
+    """
+    from core.database import test_connection
+    result = await test_connection(
+        host=body.host.strip(),
+        port=body.port,
+        dbname=body.dbname.strip(),
+        user=body.user.strip(),
+        password=body.password,
+    )
+    return result
 
 
 # ── Auth stubs (when auth is disabled) ──────────────────────────────

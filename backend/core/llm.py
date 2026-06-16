@@ -13,6 +13,20 @@ from typing import Any, Callable, Optional
 
 import httpx
 
+from prompts import (
+    LLM_JSON_MODE_PROMPT,
+    TOOL_DESC_DESCRIBE_DATABASE_SCHEMA,
+    TOOL_DESC_EXECUTE_SQL as _tool_desc_execute_sql,
+    TOOL_DESC_READ_WIKI_PAGE,
+    TOOL_DESC_SEARCH_WIKI,
+    TOOL_DESC_WEB_SEARCH,
+    TOOL_PARAM_PATH_DESC,
+    TOOL_PARAM_SQL_QUERY_DESC,
+    TOOL_PARAM_TABLE_NAME_DESC,
+    TOOL_PARAM_WEB_QUERY_DESC,
+    TOOL_PARAM_WIKI_QUERY_DESC,
+)
+
 logger = logging.getLogger(__name__)
 
 # ── Config from environment ────────────────────────────────────────
@@ -166,7 +180,7 @@ def wiki_llm_fn(prompt: str) -> str:
     if wants_json:
         strict_body = dict(base_body)
         strict_body["messages"] = [
-            {"role": "system", "content": "Return only a valid JSON object matching the requested schema. Do not include markdown fences, reasoning text, or any other prose."},
+            {"role": "system", "content": LLM_JSON_MODE_PROMPT},
             {"role": "user", "content": prompt},
         ]
         strict_body["response_format"] = {"type": "json_object"}
@@ -432,18 +446,13 @@ WIKI_READ_PAGE_TOOL = {
     "type": "function",
     "function": {
         "name": "read_wiki_page",
-        "description": (
-            "Read the full content of a wiki page by its exact path. "
-            "Use paths from the wiki index provided in the system message. "
-            "Page paths look like 'entities/person.md', 'concepts/topic.md', 'analysis/2024-01-01-query-topic.md', or 'sources/my-doc.md'. "
-            "Entity and concept pages often contain [[wikilinks]] to related analysis and source pages — follow those links for deeper detail."
-        ),
+        "description": TOOL_DESC_READ_WIKI_PAGE,
         "parameters": {
             "type": "object",
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "The wiki page path to read (e.g. 'entities/person.md', 'concepts/topic.md'). Use exact paths from the index.",
+                    "description": TOOL_PARAM_PATH_DESC,
                 },
             },
             "required": ["path"],
@@ -455,18 +464,13 @@ WIKI_WEB_SEARCH_TOOL = {
     "type": "function",
     "function": {
         "name": "web_search",
-        "description": (
-            "Search the web for information not in the wiki. "
-            "Use this ONLY when the user explicitly asks you to search the web, "
-            "or when the wiki doesn't have the answer. "
-            "Returns search result snippets with URLs."
-        ),
+        "description": TOOL_DESC_WEB_SEARCH,
         "parameters": {
             "type": "object",
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": "Search query for the web.",
+                    "description": TOOL_PARAM_WEB_QUERY_DESC,
                 },
             },
             "required": ["query"],
@@ -478,21 +482,13 @@ WIKI_SEARCH_TOOL = {
     "type": "function",
     "function": {
         "name": "search_wiki",
-        "description": (
-            "Search the wiki for pages matching a query. "
-            "Returns ranked results with page paths, titles, and content previews. "
-            "Prefer reading godnodes and following links over searching, but if you have a hard time finding something,"
-            "Use this to discover relevant pages BEFORE using read_wiki_page to read them. "
-            "Unlike browsing the index, this searches all page content, not just titles. "
-            "Search when you don't know exactly which pages to read — then use read_wiki_page "
-            "on the top results to get full content."
-        ),
+        "description": TOOL_DESC_SEARCH_WIKI,
         "parameters": {
             "type": "object",
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": "Search query. Use keywords and phrases to find relevant wiki pages.",
+                    "description": TOOL_PARAM_WIKI_QUERY_DESC,
                 },
             },
             "required": ["query"],
@@ -508,18 +504,13 @@ DESCRIBE_DATABASE_SCHEMA_TOOL = {
     "type": "function",
     "function": {
         "name": "describe_database_schema",
-        "description": (
-            "Show the database schema. Call with no arguments to list all available tables "
-            "and their approximate row counts. Call with a table_name to see that table's "
-            "columns (name, type, nullable, constraints). "
-            "Use this BEFORE writing any SQL query to understand what tables and columns exist."
-        ),
+        "description": TOOL_DESC_DESCRIBE_DATABASE_SCHEMA,
         "parameters": {
             "type": "object",
             "properties": {
                 "table_name": {
                     "type": "string",
-                    "description": "Optional. The table to describe. Leave empty to list all tables.",
+                    "description": TOOL_PARAM_TABLE_NAME_DESC,
                 },
             },
             "required": [],
@@ -531,21 +522,13 @@ EXECUTE_SQL_TOOL = {
     "type": "function",
     "function": {
         "name": "execute_sql_query",
-        "description": (
-            "Execute a read-only SQL query against the configured PostgreSQL database. "
-            "The query MUST be a single SELECT statement — INSERT, UPDATE, DELETE, DROP "
-            "and other modifications will be rejected. "
-            "Use describe_database_schema first to understand the available tables and columns. "
-            "Use explicit column names (avoid SELECT *). "
-            f"Results are limited to {_DB_MAX_ROWS} rows. "
-            "Standard PostgreSQL syntax is supported."
-        ),
+        "description": _tool_desc_execute_sql(_DB_MAX_ROWS),
         "parameters": {
             "type": "object",
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": "A read-only SQL SELECT query to execute.",
+                    "description": TOOL_PARAM_SQL_QUERY_DESC,
                 },
             },
             "required": ["query"],

@@ -17,6 +17,21 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import AsyncGenerator, Callable, Optional
 from urllib.parse import urlparse
+from prompts import (
+    RESEARCH_RANKING_PROMPT,
+    RESEARCH_SURVEY_ANALYSIS_PROMPT,
+    RESEARCH_TITLE_GENERATION_SYSTEM,
+    research_final_summary_system_prompt,
+    research_final_summary_user_prompt,
+    research_query_gen_system_prompt,
+    research_query_gen_user_prompt,
+    research_source_type_hint,
+    research_survey_system_prompt,
+    research_survey_user_prompt,
+    research_synthesis_sections,
+    research_synthesis_user_prompt,
+    research_title_generation_user_prompt,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -159,36 +174,15 @@ class ResearchOrchestrator:
             yield {"type": "research_survey", "content": ""}
             return
 
-        system_prompt = (
-            "You are a research assistant surveying a wiki knowledge base. "
-            "Use the search_wiki, read_wiki_page, and web_search tools to explore pages "
-            "relevant to the topic. "
-            f"Today's date is {datetime.now(timezone.utc).strftime('%B %d, %Y')}.\n"
-            "Identify:\n"
-            "1. What is already known about this topic?\n"
-            "2. What gaps or missing areas exist?\n"
-            "3. What search queries would fill those gaps?\n\n"
-            f"--- Wiki index ---\n{index_content}\n---"
+        system_prompt = research_survey_system_prompt(
+            datetime.now(timezone.utc).strftime('%B %d, %Y'),
+            index_content,
+            prior_report,
         )
-        if prior_report:
-            prior_context = (
-                "\n\n## Prior Research Report\n"
-                "The following is the research report from the PREVIOUS run. "
-                "Use it to understand what was already covered. "
-                "Focus your wiki exploration on:\n"
-                "- New information not in the prior report\n"
-                "- Gaps or areas the prior report identified as needing more research\n"
-                "- Updates or changes to topics covered in the prior report\n\n"
-                f"{prior_report[:8000]}\n"
-            )
-            system_prompt += prior_context
 
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": (
-                f"Research topic: {topic}\n\n"
-                "Read relevant wiki pages, then provide your survey analysis."
-            )},
+            {"role": "user", "content": research_survey_user_prompt(topic)},
         ]
 
         tools: list[dict[str, Any]] = [WIKI_READ_PAGE_TOOL, WIKI_SEARCH_TOOL, WIKI_WEB_SEARCH_TOOL]
@@ -343,13 +337,7 @@ class ResearchOrchestrator:
         # Get the final survey analysis
         messages.append({
             "role": "user",
-            "content": (
-                "Based on what you've read, provide a concise survey analysis:\n"
-                "1. What is already known about this topic?\n"
-                "2. What gaps or missing areas exist?\n"
-                "3. What search queries would fill those gaps?\n"
-                "Focus on actionable gaps."
-            ),
+            "content": RESEARCH_SURVEY_ANALYSIS_PROMPT,
         })
 
         try:
@@ -379,40 +367,15 @@ class ResearchOrchestrator:
         if config.source_types:
             st_labels = [st for st in config.source_types if st != "webpage"]
             if st_labels:
-                source_type_hint = (
-                    f"\nIMPORTANT: Focus on these source types: {', '.join(st_labels)}. "
-                    "Generate queries that will find results from these specific platforms "
-                    "(e.g. include 'site:youtube.com' for youtube, 'site:x.com' for tweets, "
-                    "'site:arxiv.org' for papers)."
-                )
+                source_type_hint = research_source_type_hint(st_labels)
 
         query_prompt = [
-            {"role": "system", "content": (
-                "You are a research strategist. Generate diverse search queries to "
-                "explore a research topic from multiple angles. Return a JSON array "
-                "of query strings. Aim for variety: different phrasings, subtopics, "
-                "competing perspectives, recent developments.\n"
-                f"Today's date is {datetime.now(timezone.utc).strftime('%B %d, %Y')}. "
-                "Use date-specific queries where relevant "
-                "(e.g. include month/year/day terms for recent news but might be unnecessary for research papers"
-                " where old research might be relevent. Or include it if you want state of the art research, use your best judgement)."
-                f"{source_type_hint}\n"
-                "Format:\n"
-                '{"queries": ["query 1", "query 2", ...]}'
+            {"role": "system", "content": research_query_gen_system_prompt(
+                datetime.now(timezone.utc).strftime('%B %d, %Y'), source_type_hint,
             )},
-            {"role": "user", "content": (
-                f"Research topic: {topic}\n"
-                f"Round: {round_num}/{config.rounds}\n"
-                f"Generate {num_queries} diverse search queries."
-                + (
-                    f"\n\nPRIOR RESEARCH (from a previous run):\n"
-                    f"{prior_report[:5000]}\n\n"
-                    f"Today is {datetime.now(timezone.utc).strftime('%B %d, %Y')}. "
-                    f"Generate queries that find NEW or UPDATED information "
-                    f"NOT covered in the prior report above. Focus on developments, news, "
-                    f"or data published after the prior run."
-                    if prior_report else ""
-                )
+            {"role": "user", "content": research_query_gen_user_prompt(
+                topic, round_num, config.rounds, num_queries, prior_report,
+                today=datetime.now(timezone.utc).strftime('%B %d, %Y'),
             )},
         ]
 
@@ -591,28 +554,10 @@ class ResearchOrchestrator:
                 f"   Snippet: {(s.get('snippet', '') or '')[:200]}"
             )
 
-        prompt = f"""Research topic: "{topic}"
-
-Rank these sources by how USEFUL they are for researching this specific topic.
-
-CRITICAL RULES:
-1. PRIMARY RELEVANCE: Does this source directly address the topic, or does it only
-   mention keywords tangentially? A paper about "computing as the new oil" is NOT
-   relevant to actual oil markets. Demote sources that only use keywords metaphorically.
-2. DOMAIN AUTHORITY: For economics/finance topics, prioritize: .gov, .edu, major
-   financial publications (Bloomberg, Reuters, FT, WSJ, Economist, Investopedia),
-   international organizations (World Bank, IMF, EIA, BEA, Fed). For tech topics,
-   prioritize: major tech publications, official company sources, arxiv.org.
-3. SOURCE QUALITY: Penalize spam domains, SEO blogs, link farms, personal blogs,
-   social media (quora.com, tiktok.com, linkedin.com), and low-authority sites.
-4. A source with high domain authority that directly addresses the topic should
-   ALWAYS rank above a tangentially-relevant source, regardless of domain.
-
-Return ONLY a JSON array of indices (0-based), most useful first. Include ALL.
-Example: [3, 0, 5, 1, 2, 4]
-
-Sources:
-{chr(10).join(source_entries)}"""
+        prompt = RESEARCH_RANKING_PROMPT.format(
+            topic=topic,
+            sources=chr(10).join(source_entries),
+        )
 
         logger.info("Research ranking: full prompt (%d chars)", len(prompt))
         ranked = await self._llm_rank(sources, prompt, topic)
@@ -817,37 +762,14 @@ Sources:
             for r in all_ingested if r.get("status") == "ingested"
         )
 
-        system_prompt = (
-            f"You are a research synthesizer. Write a thorough research summary "
-            f"on the topic: '{topic}'.\n"
-            f"Today's date is {datetime.now(timezone.utc).strftime('%B %d, %Y')}.\n\n"
-            "You have access to a wiki knowledge base via the search_wiki, "
-            "read_wiki_page, and web_search tools. Use them to explore relevant "
-            "pages and find recent information, including both newly ingested "
-            "sources and pre-existing wiki content.\n\n"
-            "Plan your reads: start with key pages, then follow leads to related content.\n\n"
-            f"--- Wiki index ---\n{index_content}\n---\n\n"
-            f"Newly ingested during this research:\n{ingested_list or '(none)'}"
+        system_prompt = research_final_summary_system_prompt(
+            topic, datetime.now(timezone.utc).strftime('%B %d, %Y'),
+            index_content, ingested_list, prior_report,
         )
-        if prior_report:
-            system_prompt += (
-                "\n\n## Prior Report (from previous run)\n"
-                f"{prior_report[:8000]}\n\n"
-                "IMPORTANT: Your report MUST include a '## What Changed Since Last Run' "
-                "section that compares your findings against the prior report above. Highlight:\n"
-                "- New sources, entities, or concepts discovered this run\n"
-                "- Updated or changed information\n"
-                "- Gaps from the prior report that were addressed\n"
-                "- Gaps that remain unresolved"
-            )
 
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": (
-                f"Research topic: {topic}\n\n"
-                "Read relevant wiki pages to understand the current knowledge, "
-                "then tell me you're ready to write the final summary."
-            )},
+            {"role": "user", "content": research_final_summary_user_prompt(topic)},
         ]
 
         tools: list[dict[str, Any]] = [WIKI_READ_PAGE_TOOL, WIKI_SEARCH_TOOL, WIKI_WEB_SEARCH_TOOL]
@@ -1003,29 +925,10 @@ Sources:
                 break
 
         # Final synthesis — stream
-        synthesis_sections = (
-            "## What Changed Since Last Run\n"
-            "## Executive Summary\n"
-            "## Key Findings\n"
-            "## Source Analysis\n"
-            "## Gaps and Future Directions\n"
-            "## References\n"
-            if prior_report else
-            "## Executive Summary\n"
-            "## Key Findings\n"
-            "## Source Analysis\n"
-            "## Gaps and Future Directions\n"
-            "## References\n"
-        )
+        synthesis_sections = research_synthesis_sections(prior_report is not None)
         messages.append({
             "role": "user",
-            "content": (
-                "Now write a comprehensive final research summary based on everything "
-                "you've read. Structure it as a research report:\n\n"
-                f"{synthesis_sections}\n"
-                "Cite specific wiki pages. Note the current date and highlight "
-                "whether sources and findings are recent or older. Be thorough but concise."
-            ),
+            "content": research_synthesis_user_prompt(synthesis_sections),
         })
 
         async for event in chat_completions_stream(
@@ -1159,15 +1062,11 @@ Sources:
                 from core.llm import chat_completions_non_streaming, extract_content
                 title_response = await chat_completions_non_streaming(
                     [
-                        {"role": "system", "content": (
-                            "Generate a concise, descriptive title (5-8 words) for a research "
-                            "report. Return ONLY the title, no quotes, no punctuation at the end."
-                        )},
-                        {"role": "user", "content": (
-                            f"Research topic: {config.topic}\n"
-                            f"Sources ingested: {len([r for r in all_ingested if r.get('status') == 'ingested'])}\n"
-                            f"Rounds: {config.rounds}\n\n"
-                            "Generate a concise title for this research."
+                        {"role": "system", "content": RESEARCH_TITLE_GENERATION_SYSTEM},
+                        {"role": "user", "content": research_title_generation_user_prompt(
+                            config.topic,
+                            len([r for r in all_ingested if r.get('status') == 'ingested']),
+                            config.rounds,
                         )},
                     ],
                     temperature=0.4, max_tokens=64,
@@ -1283,15 +1182,11 @@ Sources:
                 from core.llm import chat_completions_non_streaming, extract_content
                 title_response = await chat_completions_non_streaming(
                     [
-                        {"role": "system", "content": (
-                            "Generate a concise, descriptive title (5-8 words) for a research "
-                            "report. Return ONLY the title, no quotes, no punctuation at the end."
-                        )},
-                        {"role": "user", "content": (
-                            f"Research topic: {config.topic}\n"
-                            f"Sources ingested: {len([r for r in all_ingested if r.get('status') == 'ingested'])}\n"
-                            f"Rounds: {config.rounds}\n\n"
-                            "Generate a concise title for this research."
+                        {"role": "system", "content": RESEARCH_TITLE_GENERATION_SYSTEM},
+                        {"role": "user", "content": research_title_generation_user_prompt(
+                            config.topic,
+                            len([r for r in all_ingested if r.get('status') == 'ingested']),
+                            config.rounds,
                         )},
                     ],
                     temperature=0.4, max_tokens=64,

@@ -11,7 +11,10 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import re
 from typing import Optional
+from urllib.parse import unquote
 
 import asyncpg
 
@@ -54,6 +57,90 @@ def pool_available() -> bool:
     return _pool is not None
 
 
+# ── Table allowlist ──────────────────────────────────────────────────
+
+def _get_allowed_tables() -> set[str] | None:
+    """Return the set of allowed schema.table names, or None if unfiltered."""
+    raw = os.getenv("ZOPEDIA_DB_ALLOWED_TABLES", "").strip()
+    if not raw:
+        return None
+    allowed = set()
+    for entry in raw.split(","):
+        entry = entry.strip()
+        if entry:
+            allowed.add(entry)
+    return allowed if allowed else None
+
+
+def _table_in_allowlist(schema: str, table: str, allowlist: set[str] | None) -> bool:
+    """Return True if the table is in the allowlist, or if no allowlist is set."""
+    if allowlist is None:
+        return True
+    return f"{schema}.{table}" in allowlist
+
+
+# ── Connection test ──────────────────────────────────────────────────
+
+async def test_connection(
+    host: str = "localhost",
+    port: int = 5432,
+    dbname: str = "",
+    user: str = "",
+    password: str = "",
+) -> dict:
+    """Test a database connection and return available tables.
+
+    Creates a temporary connection — does NOT affect the main pool.
+    Returns a dict with 'status' and either 'tables' / 'count' or 'detail' error.
+    """
+    import asyncpg
+
+    try:
+        conn = await asyncpg.connect(
+            host=host,
+            port=port,
+            database=dbname,
+            user=user,
+            password=password,
+            timeout=10,
+        )
+        try:
+            # Validate connectivity
+            await conn.execute("SELECT 1")
+
+            # Fetch tables (same query as list_tables, but via temp conn)
+            rows = await conn.fetch(
+                """
+                SELECT schemaname, tablename,
+                       (SELECT reltuples::bigint
+                        FROM pg_class
+                        WHERE oid = (schemaname || '.' || tablename)::regclass) AS approx_rows
+                FROM pg_tables
+                WHERE schemaname NOT IN ('pg_catalog', 'information_schema')
+                ORDER BY schemaname, tablename
+                """
+            )
+            tables = [
+                {
+                    "schema": r["schemaname"],
+                    "table": r["tablename"],
+                    "approx_rows": r["approx_rows"] or 0,
+                }
+                for r in rows
+            ]
+            return {"status": "ok", "tables": tables, "count": len(tables)}
+        finally:
+            await conn.close()
+    except asyncpg.exceptions.InvalidPasswordError:
+        return {"status": "error", "detail": "Invalid password."}
+    except asyncpg.exceptions.InvalidCatalogNameError:
+        return {"status": "error", "detail": f"Database '{dbname}' does not exist."}
+    except asyncpg.exceptions.ConnectionRejectedError as exc:
+        return {"status": "error", "detail": f"Connection rejected: {exc}"}
+    except Exception as exc:
+        return {"status": "error", "detail": f"Connection failed: {exc}"}
+
+
 # ── Table name validation ──────────────────────────────────────────
 
 _TABLE_NAME_RE_IMPORT = None  # cached regex
@@ -73,6 +160,7 @@ async def list_tables() -> str:
     """Return a JSON list of all user tables and their approximate row counts."""
     if not _pool:
         return json.dumps({"error": "No database connection configured."})
+    allowlist = _get_allowed_tables()
     try:
         async with _pool.acquire() as conn:
             rows = await conn.fetch(
@@ -93,6 +181,7 @@ async def list_tables() -> str:
                     "approx_rows": r["approx_rows"] or 0,
                 }
                 for r in rows
+                if _table_in_allowlist(r["schemaname"], r["tablename"], allowlist)
             ]
             return json.dumps({"tables": tables, "count": len(tables)}, default=str)
     except Exception as exc:
@@ -110,6 +199,10 @@ async def describe_table(table_name: str, schema: str = "public") -> str:
 
     if not _validate_table_name(table_name):
         return json.dumps({"error": f"Invalid table name: {table_name}"})
+
+    allowlist = _get_allowed_tables()
+    if not _table_in_allowlist(schema, table_name, allowlist):
+        return json.dumps({"error": f"Table '{schema}.{table_name}' is not in the allowed tables list."})
 
     try:
         async with _pool.acquire() as conn:

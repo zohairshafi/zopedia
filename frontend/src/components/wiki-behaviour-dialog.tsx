@@ -10,6 +10,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import { DbConnectionDialog } from "@/components/db-connection-dialog";
 import {
   Dialog,
   DialogContent,
@@ -22,6 +23,8 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { authFetch } from "@/features/auth";
 import { cn } from "@/lib/utils";
+import { Settings02Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 
@@ -178,6 +181,7 @@ export function WikiBehaviourDialog({
         boolean
       >,
   );
+  const [dbDialogOpen, setDbDialogOpen] = useState(false);
 
   const currentValues = useMemo(
     () => Object.fromEntries(variables.map((item) => [item.name, item.current_value])),
@@ -355,6 +359,7 @@ export function WikiBehaviourDialog({
   }
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-5xl gap-4 p-0 sm:max-w-[min(96vw,1200px)]">
         <DialogHeader className="border-b border-border/70 px-6 pt-5 pb-4">
@@ -478,17 +483,33 @@ export function WikiBehaviourDialog({
                                     <option value="false">false</option>
                                   </select>
                                 ) : (
-                                  <Input
-                                    type="text"
-                                    autoComplete="off"
-                                    value={value}
-                                    onChange={(event) => setDraftValue(item.name, event.target.value)}
-                                    disabled={saving}
-                                    className={cn(
-                                      "h-9 min-w-[240px] flex-1",
-                                      error && "border-destructive/70",
+                                  <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                                    <Input
+                                      type="text"
+                                      autoComplete="off"
+                                      value={value}
+                                      onChange={(event) => setDraftValue(item.name, event.target.value)}
+                                      disabled={saving}
+                                      className={cn(
+                                        "h-9 min-w-[200px] flex-1",
+                                        error && "border-destructive/70",
+                                      )}
+                                    />
+                                    {item.name === "ZOPEDIA_DATABASE_URL" && (
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-9 shrink-0 gap-1.5"
+                                        disabled={saving}
+                                        onClick={() => setDbDialogOpen(true)}
+                                        title="Open connection setup wizard"
+                                      >
+                                        <HugeiconsIcon icon={Settings02Icon} className="size-3.5" />
+                                        Setup
+                                      </Button>
                                     )}
-                                  />
+                                  </div>
                                 )}
 
                                 <Button
@@ -567,5 +588,17 @@ export function WikiBehaviourDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+
+    <DbConnectionDialog
+      open={dbDialogOpen}
+      onOpenChange={setDbDialogOpen}
+      initialUrl={draftValues["ZOPEDIA_DATABASE_URL"] ?? editableBaselineValues["ZOPEDIA_DATABASE_URL"] ?? ""}
+      allowedTables={draftValues["ZOPEDIA_DB_ALLOWED_TABLES"] ?? editableBaselineValues["ZOPEDIA_DB_ALLOWED_TABLES"] ?? ""}
+      onConnectionSaved={(url, allowed) => {
+        setDraftValue("ZOPEDIA_DATABASE_URL", url);
+        setDraftValue("ZOPEDIA_DB_ALLOWED_TABLES", allowed);
+      }}
+    />
+    </>
   );
 }

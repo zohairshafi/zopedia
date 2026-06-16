@@ -36,6 +36,18 @@ from core.llm import (
 )
 
 import core.database as db
+from prompts import (
+    CHAT_RAG_SYSTEM_PROMPT,
+    CHAT_WIKI_USAGE_PROMPT,
+    CHAT_WEB_SEARCH_GUIDELINE,
+    CHAT_DATABASE_USAGE_PROMPT,
+    CHAT_SYNTHESIS_PROMPT,
+    CHAT_TITLE_GENERATION_PROMPT,
+    chat_date_injection,
+    chat_intro_prompt,
+    chat_budget_prompt,
+    chat_wiki_index_prompt,
+)
 from routes.wiki import (
     _get_route_rag_context,
     _ingest_pending_raw_files,
@@ -121,17 +133,7 @@ def _inject_rag_context(messages: list[dict], query: str) -> tuple[list[dict], O
     if _WIKI_LOG_INJECTED_CONTEXT:
         logger.info("Injected RAG context (%d chars):\n%s", len(context), _loggable_rag_context(context))
 
-    system_block = (
-        "You are Zopedia, an AI assistant with access to a personal wiki knowledge base.\n\n"
-        "## Wiki Knowledge Base\n"
-        "The following pages from the user's wiki are relevant to this conversation.\n"
-        "Use this information to ground your answers. Cite specific pages when relevant.\n\n"
-        f"{context}\n\n"
-        "## Instructions\n"
-        "- Answer questions using the wiki context above when available.\n"
-        "- If the wiki doesn't cover something, use your general knowledge.\n"
-        "- Be concise and specific."
-    )
+    system_block = CHAT_RAG_SYSTEM_PROMPT.format(context=context)
     new_messages = [{"role": "system", "content": system_block}] + list(messages)
     return new_messages, context
 
@@ -480,23 +482,18 @@ async def openai_chat_completions(request: Request):
 
         # Intro line
         today = datetime.now(timezone.utc).strftime("%A, %B %d, %Y")
-        if has_wiki and has_web:
-            prompt_parts.append(f"Today's date is {today}. You have access to a personal wiki and web search.\n")
-        elif has_wiki:
-            prompt_parts.append(f"Today's date is {today}. You have access to a personal wiki.\n")
-        elif has_web:
-            prompt_parts.append(f"Today's date is {today}. You have access to web search.\n")
+        intro = chat_intro_prompt(today, has_wiki, has_web, has_db)
+        if intro:
+            prompt_parts.append(intro)
 
         # Budget info (only relevant when wiki is enabled)
         if has_wiki:
-            prompt_parts.append(
-                f"BUDGET: You have {_wiki_max_tool_turns()} turns (up to {_wiki_max_reads_per_turn()} wiki reads per turn, "
-                f"max {_wiki_max_tool_turns() * _wiki_max_reads_per_turn()} total reads). "
-                f"Each page is capped at {_wiki_max_chars_per_read():,} chars. "
-                f"Total read budget: {_wiki_max_cumulative_read_chars():,} chars cumulative. "
-                "Plan carefully: start with the most relevant entities/concepts, then follow their analysis backlinks. "
-                "Prioritize quality over quantity — you cannot read everything.\n\n"
-            )
+            prompt_parts.append(chat_budget_prompt(
+                max_turns=_wiki_max_tool_turns(),
+                max_reads_per_turn=_wiki_max_reads_per_turn(),
+                max_chars_per_read=_wiki_max_chars_per_read(),
+                max_cumulative_chars=_wiki_max_cumulative_read_chars(),
+            ))
 
         # Available tools
         if wiki_tools:
@@ -509,40 +506,15 @@ async def openai_chat_completions(request: Request):
 
         # Wiki usage instructions
         if has_wiki:
-            prompt_parts.append(
-                "HOW TO USE THE WIKI:\n"
-                "- The wiki index below is a table of contents. Each line is a community page (godnodes/*.md).\n"
-                "- Use read_wiki_page to expand a community — the page lists all entity/concept members.\n"
-                "- If you don't know which pages to read, use search_wiki to search all wiki content by keywords.\n"
-                "- Start with the community name that best matches the user's question, "
-                "read it, then read individual member pages and follow their [[wikilinks]].\n"
-                "- Entity and concept pages are the most curated and up-to-date. They contain [[wikilinks]] to related analysis and source pages.\n"
-                "- IMPORTANT: Entity/concept pages list analysis backlinks under '## Referenced by Analyses'. "
-                "ALWAYS check this section and read the linked analysis/* pages if the query needs a deeper answer - they contain detailed historical summaries.\n"
-                "- Follow the chain: read entities/concepts first, then their linked analysis pages, then sources if needed.\n"
-                "- Prefer analysis pages over source pages as sources can be large.\n\n"
-                "CRITICAL RULES:\n"
-                "- NEVER invent or shorten page paths. Only use EXACT paths you read via read_wiki_page.\n"
-                "- Analysis page paths contain timestamps. Use the full path exactly as it appears.\n"
-                "- When citing a page, use the exact path from the tool call result, not a made-up name.\n\n"
-            )
+            prompt_parts.append(CHAT_WIKI_USAGE_PROMPT)
 
         # Web search guideline
         if has_web and not has_wiki:
-            prompt_parts.append(
-                "Use web_search when the user asks for information that requires external or up-to-date sources.\n\n"
-            )
+            prompt_parts.append(CHAT_WEB_SEARCH_GUIDELINE)
 
         # Database schema summary
         if has_db:
-            prompt_parts.append(
-                "DATABASE USAGE:\n"
-                "- Use describe_database_schema (no arguments) to list all available tables.\n"
-                "- Use describe_database_schema with a table_name to see column names, types, and constraints.\n"
-                "- Always explore the schema BEFORE writing any SQL query.\n"
-                "- Use execute_sql_query with a single SELECT statement. Use explicit column names (no SELECT *).\n"
-                "- Results are limited to 100 rows by default.\n\n"
-            )
+            prompt_parts.append(CHAT_DATABASE_USAGE_PROMPT)
             # Inject a table listing so the LLM has immediate context
             try:
                 tables_json = await db.list_tables()
@@ -561,7 +533,7 @@ async def openai_chat_completions(request: Request):
 
         # Wiki index
         if has_wiki and index_text:
-            prompt_parts.append(f"WIKI INDEX (Entities & Concepts):\n\n{index_text}\n")
+            prompt_parts.append(chat_wiki_index_prompt(index_text))
 
         if prompt_parts:
             wiki_system = {
@@ -577,7 +549,7 @@ async def openai_chat_completions(request: Request):
             if messages[i].get("role") == "user":
                 content = messages[i].get("content", "")
                 if isinstance(content, str):
-                    messages[i]["content"] = f"Today's date is {_today}.\n\n{content}"
+                    messages[i]["content"] = chat_date_injection(_today, content)
                 break
 
         if stream:
@@ -602,13 +574,7 @@ async def openai_chat_completions(request: Request):
                         messages.pop()
                     # Add instruction to break the model out of tool-calling mode and force synthesis.
                     # Marked so we can remove it after streaming — it should not persist into the next turn.
-                    messages.append({"role": "user", "content": (
-                        "Now synthesize a complete, thorough answer using all the wiki pages and web results you "
-                        "just accessed. DO NOT use any more tools. Provide the answer directly as plain markdown. CRITICAL: Do NOT output "
-                        "XML tags, tool invocations (like <invoke> or <function_call>), JSON structures, or any "
-                        "other machine-readable format. The user will see your raw output — write only the final answer."
-                        "If you need more information, admit you don't know and provide the best answer you can with what you have. Do not make up information or use the wiki/web tools anymore."
-                    ), "_ephemeral": True})
+                    messages.append({"role": "user", "content": CHAT_SYNTHESIS_PROMPT, "_ephemeral": True})
                 except Exception as exc:
                     logger.warning("Tool-calling retrieval failed, falling back: %s", exc)
                     yield f"data: {json.dumps({'type': 'tool_status', 'content': f'Error: {exc}'})}\n\n"
@@ -642,14 +608,7 @@ async def openai_chat_completions(request: Request):
                 messages = await _resolve_tool_calls(list(messages), wiki_tools, resolved_model)
                 if messages and messages[-1].get("role") == "assistant" and messages[-1].get("content") and not messages[-1].get("tool_calls"):
                     messages.pop()
-                messages.append({"role": "user", "content": (
-                    "Now synthesize a complete, thorough answer using all the wiki pages and web results you "
-                    "just accessed. DO NOT use any more tools. Provide the answer directly as plain markdown. CRITICAL: Do NOT output "
-                    "XML tags, tool invocations (like <invoke> or <function_call>), JSON structures, or any "
-                    "other machine-readable format. The user will see your raw output — write only the final answer."
-                    "If you need more information, admit you don't know and provide the best answer you can with what you have. Do not make up information or use the wiki/web tools anymore."
-
-                ), "_ephemeral": True})
+                messages.append({"role": "user", "content": CHAT_SYNTHESIS_PROMPT, "_ephemeral": True})
             except Exception as exc:
                 logger.warning("Tool-calling retrieval failed, falling back: %s", exc)
                 if query:
@@ -696,11 +655,7 @@ async def generate_title(body: dict):
     messages = [
         {
             "role": "system",
-            "content": (
-                "Write a concise chat title (3-8 words) summarizing what the user is asking about. "
-                "Be specific — use topic names, proper nouns, and technical terms. "
-                "Output only the title, no quotes, no prefixes, no punctuation at the end."
-            ),
+            "content": CHAT_TITLE_GENERATION_PROMPT,
         },
         {"role": "user", "content": context},
     ]
