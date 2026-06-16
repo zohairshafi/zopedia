@@ -13,13 +13,14 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { createCodePlugin } from "./code-plugin";
 import { createMathPlugin } from "@streamdown/math";
 import { mermaid } from "@streamdown/mermaid";
-import { DownloadIcon, Maximize2Icon, Minimize2Icon } from "lucide-react";
+import { DownloadIcon, Maximize2Icon, Minimize2Icon, ChevronDownIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Block, type BlockProps, Streamdown } from "streamdown";
 import type { BundledTheme } from "shiki";
 import "katex/dist/katex.min.css";
 import { AudioPlayer } from "./audio-player";
 import { unslothDarkTheme, unslothLightTheme } from "./code-themes";
+import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 
 const SHIKI_THEMES = [
   unslothLightTheme,
@@ -351,6 +352,36 @@ function CodeBlockActions({
   );
 }
 
+function HtmlCodeCollapsible({
+  children,
+  sourceLength,
+}: {
+  children: React.ReactNode;
+  sourceLength: number;
+}) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <CollapsibleTrigger asChild>
+        <button
+          type="button"
+          className="mb-2 flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground cursor-pointer"
+        >
+          <ChevronDownIcon
+            className="size-3.5 transition-transform duration-150"
+            style={{ transform: open ? "rotate(0deg)" : "rotate(-90deg)" }}
+          />
+          {open ? "Hide HTML source" : `Show HTML source (${sourceLength.toLocaleString()} chars)`}
+        </button>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        {children}
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
 function StreamdownBlock(props: BlockProps) {
   const hasMermaidFence = props.content.includes("```mermaid");
   const mermaidSource = getMermaidSource(props.content);
@@ -397,16 +428,29 @@ function StreamdownBlock(props: BlockProps) {
   if (codeFence) {
     const svgSource = !props.isIncomplete && isSvgFence(codeFence) ? sanitizeSvg(codeFence.source) : null;
     const htmlSource = !props.isIncomplete && isHtmlFence(codeFence) ? codeFence.source : null;
+
+    const codeBlock = (
+      <div className="relative isolate">
+        <Block {...props} />
+        <CodeBlockActions
+          disabled={props.isIncomplete}
+          language={codeFence.language}
+          source={codeFence.source}
+        />
+      </div>
+    );
+
+    // For HTML fences: collapsible code + always-visible preview
+    // For everything else: code block only (SVG preview also shown below)
     return (
       <>
-        <div className="relative isolate">
-          <Block {...props} />
-          <CodeBlockActions
-            disabled={props.isIncomplete}
-            language={codeFence.language}
-            source={codeFence.source}
-          />
-        </div>
+        {htmlSource ? (
+          <HtmlCodeCollapsible sourceLength={htmlSource.length}>
+            {codeBlock}
+          </HtmlCodeCollapsible>
+        ) : (
+          codeBlock
+        )}
         {svgSource && <SvgPreview source={svgSource} />}
         {htmlSource && <HtmlPreview source={htmlSource} />}
       </>
