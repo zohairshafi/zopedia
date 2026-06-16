@@ -5581,14 +5581,13 @@ class LLMWikiEngine:
                 name = item.strip()
                 if not name:
                     continue
-                normalized.append(
-                    {
-                        "name": name,
-                        "summary": "",
-                        "facts": [],
-                        "contradictions": [],
-                    }
-                )
+                entry: Dict[str, Any] = {
+                    "name": name,
+                    "summary": "",
+                }
+                for sec in BULLET_SECTIONS:
+                    entry[sec["key"]] = []
+                normalized.append(entry)
                 continue
 
             if not isinstance(item, dict):
