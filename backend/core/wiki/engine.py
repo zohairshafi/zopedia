@@ -5650,15 +5650,16 @@ class LLMWikiEngine:
             best_match = self._find_closest_existing_page(folder, page_name, page_type)
             if best_match is not None:
                 match_slug, match_score, match_path = best_match
-                if match_score >= 0.85:
-                    # High confidence: redirect to the existing page
+                if match_score >= 8.0:
+                    # Very high confidence: titles share multiple rare terms.
+                    # Only near-duplicate titles reach this threshold.
                     logger.info(
                         "Ingest auto-merge: %r (%s) -> %s (bm25=%.2f)",
                         page_name, slug, match_slug, match_score,
                     )
                     p = match_path
                     # Fall through to the upsert path below
-                elif match_score >= 0.50:
+                elif match_score >= 4.0:
                     # Moderate confidence: create page but flag for review
                     potential_dup = (
                         f"- [[{page_type}s/{match_slug}]] "
