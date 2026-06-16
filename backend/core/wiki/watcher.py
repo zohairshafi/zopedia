@@ -557,7 +557,7 @@ class WikiIngestionWatcher:
 
         try:
             maintenance_retry_fallback_max_pages = int(
-                os.getenv("UNSLOTH_WIKI_AUTO_RETRY_FALLBACK_ANALYSES_MAX_PAGES", "24")
+                os.getenv("ZOPEDIA_WIKI_AUTO_RETRY_FALLBACK_ANALYSES_MAX_PAGES", "24")
             )
         except ValueError:
             maintenance_retry_fallback_max_pages = 24

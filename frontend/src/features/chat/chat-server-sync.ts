@@ -90,6 +90,7 @@ export async function saveThreadToServer(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
+      keepalive: true,
     });
     console.log("[sync] saveThreadToServer:", res.status, { threadId, msgCount: messages.length });
   } catch (err) {
@@ -107,18 +108,29 @@ export async function deleteThreadFromServer(threadId: string): Promise<void> {
 
 // ── Sync operations ──────────────────────────────────────────────────
 
-export async function syncThreadListFromServer(): Promise<void> {
-  console.log("[sync] syncThreadListFromServer: start");
-  const serverThreads = await fetchServerThreads();
-  if (serverThreads.length === 0) {
-    console.log("[sync] syncThreadListFromServer: no threads from server, returning");
-    return;
-  }
+let _syncListMutex: Promise<void> | null = null;
 
-  console.log("[sync] syncThreadListFromServer: writing threads to DB", { count: serverThreads.length });
-  for (const st of serverThreads) {
-    // Skip server threads with no messages — they're empty shells
-    if (!st.message_count) continue;
+export async function syncThreadListFromServer(): Promise<void> {
+  // Serialize concurrent calls — multiple callers (useEffect + list()) fire
+  // on mount, and overlapping IndexedDB r/w transactions corrupt state in Safari.
+  while (_syncListMutex) {
+    await _syncListMutex.catch(() => {}); // wait for prior sync, ignore its errors
+  }
+  let release: () => void;
+  _syncListMutex = new Promise<void>((resolve) => { release = resolve; });
+
+  try {
+    console.log("[sync] syncThreadListFromServer: start");
+    const serverThreads = await fetchServerThreads();
+    if (serverThreads.length === 0) {
+      console.log("[sync] syncThreadListFromServer: no threads from server, returning");
+      return;
+    }
+
+    console.log("[sync] syncThreadListFromServer: writing threads to DB", { count: serverThreads.length });
+    for (const st of serverThreads) {
+      // Skip server threads with no messages — they're empty shells
+      if (!st.message_count) continue;
     const local = await db.threads.get(st.id);
     // Always sync from server — server is the source of truth.
     // Preserve local createdAt if available (more accurate than server's).
@@ -144,6 +156,10 @@ export async function syncThreadListFromServer(): Promise<void> {
       await db.messages.where("threadId").equals(t.id).delete();
       await db.threads.delete(t.id);
     }
+  }
+  } finally {
+    release!();
+    _syncListMutex = null;
   }
 }
 

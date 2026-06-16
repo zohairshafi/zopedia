@@ -314,6 +314,7 @@ class WikiLintResponse(BaseModel):
     concept_merge_candidates: list[Dict[str, Any]] = Field(default_factory=list)
     total_pages: int
     graphify_insights: Dict[str, Any]
+    maintenance_running: bool = False
 
 
 # ── Wiki Env Config ────────────────────────────────────────────────

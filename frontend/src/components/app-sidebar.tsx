@@ -502,8 +502,8 @@ export function AppSidebar() {
         );
       }
 
-      const backlinksResponse = await authFetch(
-        "/api/inference/wiki/analysis-backlinks",
+      const rebuildResponse = await authFetch(
+        "/api/inference/wiki/rebuild-index",
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -513,17 +513,17 @@ export function AppSidebar() {
           }),
         },
       );
-      if (!backlinksResponse.ok) {
+      if (!rebuildResponse.ok) {
         throw new Error(
-          `Analysis backlink refresh failed: ${await parseApiErrorMessage(backlinksResponse)}`,
+          `Index rebuild failed: ${await parseApiErrorMessage(rebuildResponse)}`,
         );
       }
 
       const mergeResult = (await mergeResponse.json()) as WikiMaintenanceResult;
       const retryResult = (await retryResponse.json()) as WikiRetryFallbackResult;
       const enrichResult = (await enrichResponse.json()) as WikiEnrichResult;
-      const backlinksResult =
-        (await backlinksResponse.json()) as WikiAnalysisBacklinksResult;
+      const rebuildResult =
+        (await rebuildResponse.json()) as WikiAnalysisBacklinksResult;
 
       const appliedMerges = Number(mergeResult.applied_merges ?? 0);
       const rewrittenLinks = Number(mergeResult.rewritten_links ?? 0);
@@ -577,12 +577,12 @@ export function AppSidebar() {
       const repairedPages = Number(linkRepairResult?.repaired_pages ?? 0);
       const removedBrokenLinks = Number(linkRepairResult?.removed_links ?? 0);
 
-      const backlinkTargetPages = Number(backlinksResult.target_pages ?? 0);
+      const backlinkTargetPages = Number(rebuildResult.target_pages ?? 0);
       const backlinkLinkedTargets = Number(
-        backlinksResult.linked_target_pages ?? 0,
+        rebuildResult.linked_target_pages ?? 0,
       );
-      const backlinkUpdatedPages = Number(backlinksResult.updated_pages ?? 0);
-      const backlinkRemovedSections = Number(backlinksResult.removed_sections ?? 0);
+      const backlinkUpdatedPages = Number(rebuildResult.updated_pages ?? 0);
+      const backlinkRemovedSections = Number(rebuildResult.removed_sections ?? 0);
 
       const mergeErrors = Array.isArray(mergeResult.errors)
         ? mergeResult.errors.length

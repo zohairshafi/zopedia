@@ -12,6 +12,8 @@ import re
 import logging
 import importlib
 import sys
+import threading
+import functools
 from datetime import datetime, timezone
 from urllib.parse import unquote, urlparse
 from urllib.request import Request, urlopen
@@ -25,8 +27,7 @@ from prompts import (
     wiki_semantic_planner_prompt,
     wiki_source_extraction_prompt,
     wiki_json_repair_prompt,
-    wiki_merge_planner_prompt,
-    wiki_concept_merge_planner_prompt,
+    wiki_merge_cluster_prompt,
     wiki_concept_merge_writer_prompt,
     wiki_summarize_updates_prompt,
     wiki_rewrite_compacted_page_prompt,
@@ -983,11 +984,32 @@ class WikiBM25:
         return cls(doc_freq=doc_freq, N=N, avg_doc_len=avg_doc_len)
 
 
+class MaintenanceAlreadyRunningError(RuntimeError):
+    """Raised when a maintenance operation is requested while another is in progress."""
+    pass
+
+
+def _requires_maintenance_lock(method):
+    """Decorator: acquire the engine maintenance lock before running, release after."""
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        if not self._acquire_maintenance():
+            raise MaintenanceAlreadyRunningError(
+                "A maintenance operation is already in progress. Wait for it to complete and try again."
+            )
+        try:
+            return method(self, *args, **kwargs)
+        finally:
+            self._release_maintenance()
+    return wrapper
+
+
 class LLMWikiEngine:
     def __init__(self, cfg: WikiConfig, llm_fn: LLMFn):
         self.cfg = cfg
         self.llm_fn = llm_fn
         self._bm25: Optional[WikiBM25] = None
+        self._maintenance_lock = threading.RLock()
 
         self.raw_dir = self.cfg.vault_root / self.cfg.raw_dirname
         self.wiki_dir = self.cfg.vault_root / self.cfg.wiki_dirname
@@ -1017,6 +1039,21 @@ class LLMWikiEngine:
             self.index_file.write_text("# Index\n\n", encoding = "utf-8")
         if not self.log_file.exists():
             self.log_file.write_text("# Log\n\n", encoding = "utf-8")
+
+    def is_maintenance_running(self) -> bool:
+        """Check whether a maintenance operation is currently in progress."""
+        return self._maintenance_lock.locked()
+
+    def _acquire_maintenance(self) -> bool:
+        """Try to acquire the maintenance lock. Returns False if already held."""
+        return self._maintenance_lock.acquire(blocking=False)
+
+    def _release_maintenance(self) -> None:
+        """Release the maintenance lock."""
+        try:
+            self._maintenance_lock.release()
+        except RuntimeError:
+            pass  # Already released or not held
 
     def _sanitize_invalid_unicode_surrogates(
         self,
@@ -1805,6 +1842,7 @@ class LLMWikiEngine:
             "_query_probe_payload": probe_payload,
         }
 
+    @_requires_maintenance_lock
     def lint(self) -> Dict:
         pages = self._all_wiki_pages()
         graph = self._build_link_graph(pages)
@@ -1947,6 +1985,7 @@ class LLMWikiEngine:
         )
         return report
 
+    @_requires_maintenance_lock
     def merge_duplicate_knowledge_pages(
         self,
         dry_run: bool = True,
@@ -1984,18 +2023,12 @@ class LLMWikiEngine:
             concept_items: List[Dict[str, Any]] = []
 
             if semantic_concept_merge:
-                semantic_items, semantic_error = (
-                    self._semantic_merge_candidates_for_folder(
-                        self.concepts_dir,
-                        "concepts",
-                        similarity_threshold = threshold,
-                        max_pairs = max(32, merge_limit * 4),
-                    )
+                concept_items = self._merge_candidates_for_folder(
+                    self.concepts_dir,
+                    "concepts",
+                    similarity_threshold = threshold,
                 )
-                semantic_concept_candidates = len(semantic_items)
-                if semantic_error:
-                    semantic_merge_errors.append(semantic_error)
-                concept_items = list(semantic_items)
+                semantic_concept_candidates = len(concept_items)
 
             concept_candidates = len(concept_items)
             for item in concept_items:
@@ -2206,6 +2239,15 @@ class LLMWikiEngine:
         if not dry_run and (applied_merges > 0 or rewritten_pages > 0):
             with index_lock():
                 self._rebuild_index()
+            # Refresh backlinks so entity/concept pages reflect analysis pages
+            # that originally linked to the now-merged duplicates.
+            if applied_merges > 0:
+                try:
+                    self.refresh_analysis_backlinks(dry_run=False)
+                except Exception as exc:
+                    logger.warning(
+                        "Backlink refresh after merge failed: %s", exc
+                    )
             self._append_log(
                 f"## [{self._today()}] merge-maintenance | wiki\n"
                 f"- Applied merges: {applied_merges}\n"
@@ -2569,6 +2611,7 @@ class LLMWikiEngine:
         report.pop("_planned_rel_pages", None)
         return report
 
+    @_requires_maintenance_lock
     def compact_knowledge_pages(
         self,
         dry_run: bool = False,
@@ -2583,7 +2626,7 @@ class LLMWikiEngine:
             else max(1, int(max_incremental_updates))
         )
         cap = (
-            max(0, int(os.getenv("UNSLOTH_WIKI_COMPACTION_MAX_PAGES", "64")))
+            max(0, int(os.getenv("ZOPEDIA_WIKI_COMPACTION_MAX_PAGES", "64")))
             if max_compaction_pages is None
             else max(0, int(max_compaction_pages))
         )
@@ -2694,6 +2737,7 @@ class LLMWikiEngine:
             "changes": changes,
         }
 
+    @_requires_maintenance_lock
     def retry_fallback_analysis_pages(
         self,
         dry_run: bool = False,
@@ -3053,6 +3097,7 @@ class LLMWikiEngine:
             "results": retried,
         }
 
+    @_requires_maintenance_lock
     def enrich_analysis_pages(
         self,
         dry_run: bool = False,
@@ -3135,7 +3180,7 @@ class LLMWikiEngine:
         max_pages = (
             max(1, int(max_analysis_pages))
             if max_analysis_pages is not None
-            else max(1, int(os.getenv("UNSLOTH_WIKI_MAX_ANALYSIS_PAGES", "64")))
+            else max(1, int(os.getenv("ZOPEDIA_WIKI_MAX_ANALYSIS_PAGES", "64")))
         )
         analysis_pages = sorted(
             self.analysis_dir.glob("*.md"),
@@ -3423,6 +3468,7 @@ class LLMWikiEngine:
 
         return matches
 
+    @_requires_maintenance_lock
     def refresh_analysis_backlinks(
         self,
         dry_run: bool = True,
@@ -3432,7 +3478,7 @@ class LLMWikiEngine:
         max_pages = (
             max(1, int(max_analysis_pages))
             if max_analysis_pages is not None
-            else max(1, int(os.getenv("UNSLOTH_WIKI_MAX_ANALYSIS_PAGES", "64")))
+            else max(1, int(os.getenv("ZOPEDIA_WIKI_MAX_ANALYSIS_PAGES", "64")))
         )
         max_links = max(1, int(max_links_per_page))
 
@@ -3925,29 +3971,49 @@ class LLMWikiEngine:
         if max_results <= 0:
             return []
 
-        try:
-            ddgs_module = importlib.import_module("ddgs")
-            DDGS = getattr(ddgs_module, "DDGS", None)
-            if DDGS is None:
-                raise RuntimeError("ddgs.DDGS not found")
-        except Exception as exc:
-            logger.warning("Web gap fill unavailable (ddgs import failed): %s", exc)
+        brave_api_key = os.getenv("ZOPEDIA_BRAVE_API_KEY", "").strip()
+        if not brave_api_key:
+            logger.warning("Web gap fill unavailable (ZOPEDIA_BRAVE_API_KEY not set)")
             return []
 
+        import httpx
+
         try:
-            results = DDGS(timeout = 20).text(query, max_results = max_results)
+            with httpx.Client(timeout=10) as client:
+                resp = client.get(
+                    "https://api.search.brave.com/res/v1/web/search",
+                    params={
+                        "q": query,
+                        "count": min(max_results, 20),
+                        "search_lang": "en",
+                    },
+                    headers={
+                        "Accept": "application/json",
+                        "Accept-Encoding": "gzip",
+                        "X-Subscription-Token": brave_api_key,
+                    },
+                )
+                if resp.status_code != 200:
+                    logger.warning(
+                        "Brave Search API returned %d for query %r: %.300s",
+                        resp.status_code, query, resp.text,
+                    )
+                    return []
+                data = resp.json()
+                web = data.get("web", {})
+                raw_results = web.get("results", [])
         except Exception as exc:
             logger.warning("Web gap fill search failed for query %r: %s", query, exc)
             return []
 
         out: List[Dict[str, str]] = []
-        for item in results or []:
-            url = str(item.get("href", "")).strip()
+        for item in raw_results or []:
+            url = str(item.get("url", "")).strip()
             if not url:
                 continue
             title = self._normalize_web_text(str(item.get("title", "")).strip(), 120)
             snippet = self._normalize_web_text(
-                str(item.get("body", "")).strip(),
+                str(item.get("description", "")).strip(),
                 self.cfg.enrichment_web_gap_max_snippet_chars,
             )
             out.append(
@@ -4879,13 +4945,11 @@ class LLMWikiEngine:
         llm_direct_results_used = 0
         web_discovery_audit: List[Dict[str, Any]] = []
 
-        # Pre-filter: skip concepts that already have pages, and cap at a
-        # reasonable batch size since each parallel worker receives the full
-        # query budget (soft limit — total queries may exceed max_queries
-        # by up to worker_count * max_queries in the worst case).
+        # Pre-filter: skip concepts that already have pages, and cap at
+        # max_queries since each concept consumes at least 1 query.
         concept_tasks: list[str] = []
         for slug in missing_concepts:
-            if len(concept_tasks) >= max_queries * 2:
+            if len(concept_tasks) >= max_queries:
                 break
             concept_page = self.concepts_dir / f"{slug}.md"
             if concept_page.exists():
@@ -4894,6 +4958,7 @@ class LLMWikiEngine:
 
         if concept_tasks:
             max_results = self.cfg.enrichment_web_gap_max_results
+            per_concept_budget = max(1, max_queries // max(1, len(concept_tasks)))
 
             def _fill_gap_one_concept(slug: str) -> dict[str, Any] | None:
                 concept_page = self.concepts_dir / f"{slug}.md"
@@ -4902,7 +4967,7 @@ class LLMWikiEngine:
 
                 search_results, search_meta = self._llm_web_discover_results_for_concept(
                     concept_slug=slug,
-                    query_budget=max_queries,
+                    query_budget=per_concept_budget,
                     max_results=max_results,
                 )
 
@@ -5556,23 +5621,63 @@ class LLMWikiEngine:
         rel_source = f"sources/{source_slug}"
 
         if not p.exists():
-            md = (
-                "---\n"
-                f"title: {page_name}\n"
-                f"type: {page_type}\n"
-                f"updated_at: {updated_at}\n"
-                "---\n\n"
-                f"# {page_name}\n\n"
-                f"## Summary\n{summary or 'TBD'}\n\n"
-                f"## Facts\n" + "\n".join([f"- {f}" for f in facts]) + "\n\n"
-                f"## Contradictions\n"
-                + "\n".join([f"- {c}" for c in contradictions])
-                + "\n\n"
-                "## Sources\n"
-                f"- [[{rel_source}]] ({source_title})\n"
-            )
-            p.write_text(md, encoding = "utf-8")
-            return
+            # Semantic dedup: check if a similar page already exists under a
+            # different slug. Uses BM25 title overlap — no LLM call at ingest.
+            best_match = self._find_closest_existing_page(folder, page_name, page_type)
+            if best_match is not None:
+                match_slug, match_score, match_path = best_match
+                if match_score >= 0.85:
+                    # High confidence: redirect to the existing page
+                    logger.info(
+                        "Ingest auto-merge: %r (%s) -> %s (bm25=%.2f)",
+                        page_name, slug, match_slug, match_score,
+                    )
+                    p = match_path
+                    # Fall through to the upsert path below
+                elif match_score >= 0.50:
+                    # Moderate confidence: create page but flag for review
+                    potential_dup = (
+                        f"- [[{page_type}s/{match_slug}]] "
+                        f"(BM25 similarity: {round(match_score, 2)})"
+                    )
+                    md = (
+                        "---\n"
+                        f"title: {page_name}\n"
+                        f"type: {page_type}\n"
+                        f"updated_at: {updated_at}\n"
+                        "---\n\n"
+                        f"# {page_name}\n\n"
+                        f"## Summary\n{summary or 'TBD'}\n\n"
+                        f"## Facts\n" + "\n".join([f"- {f}" for f in facts]) + "\n\n"
+                        f"## Contradictions\n"
+                        + "\n".join([f"- {c}" for c in contradictions])
+                        + "\n\n"
+                        "## Sources\n"
+                        f"- [[{rel_source}]] ({source_title})\n\n"
+                        "## Potential Duplicates\n"
+                        f"{potential_dup}\n"
+                    )
+                    p.write_text(md, encoding="utf-8")
+                    return
+
+            if best_match is None or best_match[1] < 0.50:
+                md = (
+                    "---\n"
+                    f"title: {page_name}\n"
+                    f"type: {page_type}\n"
+                    f"updated_at: {updated_at}\n"
+                    "---\n\n"
+                    f"# {page_name}\n\n"
+                    f"## Summary\n{summary or 'TBD'}\n\n"
+                    f"## Facts\n" + "\n".join([f"- {f}" for f in facts]) + "\n\n"
+                    f"## Contradictions\n"
+                    + "\n".join([f"- {c}" for c in contradictions])
+                    + "\n\n"
+                    "## Sources\n"
+                    f"- [[{rel_source}]] ({source_title})\n"
+                )
+                p.write_text(md, encoding = "utf-8")
+                return
 
         old = p.read_text(encoding = "utf-8", errors = "ignore")
 
@@ -5607,8 +5712,19 @@ class LLMWikiEngine:
         updates: List[str] = []
 
         summary_clean = re.sub(r"\s+", " ", summary or "").strip()
-        if summary_clean and _norm(summary_clean) != current_summary:
-            updates.append(f"### Summary update ({self._today()})\n{summary_clean}\n")
+        summary_changed = (
+            summary_clean
+            and _norm(summary_clean) != current_summary
+        )
+        if summary_changed:
+            # Replace the main Summary section so the page always reflects
+            # the latest understanding. Archive the previous summary for audit.
+            old_summary_text = self._extract_markdown_section(old, "Summary")
+            old_summary_clean = re.sub(r"\s+", " ", old_summary_text).strip()
+            if old_summary_clean:
+                updates.append(
+                    f"### Previous summary (archived {self._today()})\n{old_summary_clean}\n"
+                )
 
         new_facts: List[str] = []
         for fact in facts:
@@ -5646,10 +5762,14 @@ class LLMWikiEngine:
         if _norm(source_update) not in existing_source_norm:
             updates.append(f"### Source update\n- {source_update}\n")
 
-        if not updates:
+        if not updates and not summary_changed:
             return
 
         merged = self._set_frontmatter_updated_at(old, updated_at)
+        if summary_changed:
+            merged = self._replace_markdown_section(
+                merged, "Summary", summary_clean,
+            )
         existing_updates = self._extract_markdown_section(merged, "Incremental Updates")
         merged_base = self._remove_markdown_section(
             merged, "Incremental Updates"
@@ -5671,6 +5791,43 @@ class LLMWikiEngine:
         final_text = f"{merged_base}\n\n## Incremental Updates\n\n{combined_updates}\n"
         p.write_text(final_text, encoding = "utf-8")
 
+    def _find_closest_existing_page(
+        self, folder: Path, page_name: str, page_type: str,
+    ) -> Optional[Tuple[str, float, Path]]:
+        """BM25-based duplicate detection for ingest-time semantic dedup.
+
+        Returns (slug, score, path) of the closest existing page, or None if
+        no pages exist in the folder or no overlap is found.
+        """
+        existing = sorted(folder.glob("*.md"))
+        if not existing:
+            return None
+
+        new_terms = self._terms(page_name)
+        if not new_terms:
+            return None
+
+        bm25 = self._get_bm25()
+        best_score = 0.0
+        best_path: Optional[Path] = None
+
+        for page_path in existing:
+            text = page_path.read_text(encoding="utf-8", errors="ignore")
+            title = self._merge_candidate_title(text, page_path.stem)
+            title_terms = self._terms(title)
+            if not title_terms:
+                continue
+
+            score = bm25.idf_weighted_overlap(new_terms, title_terms)
+            if score > best_score:
+                best_score = score
+                best_path = page_path
+
+        if best_path is not None and best_score > 0.0:
+            prefix = f"{page_type}s"
+            return (f"{prefix}/{best_path.stem}", best_score, best_path)
+        return None
+
     def _merge_candidate_title(self, text: str, fallback_slug: str) -> str:
         title_match = re.search(r"(?mi)^title:\s*(.+?)\s*$", text)
         if title_match:
@@ -5686,470 +5843,387 @@ class LLMWikiEngine:
 
         return fallback_slug.replace("-", " ").strip()
 
-    def _lexical_merge_candidates_for_folder(
-        self,
-        folder: Path,
-        prefix: str,
-        similarity_threshold: float = 0.75,
-    ) -> List[Dict[str, Any]]:
-        pages: List[Dict[str, Any]] = []
-        for page in sorted(folder.glob("*.md")):
-            text = page.read_text(encoding = "utf-8", errors = "ignore")
-            rel = f"{prefix}/{page.name}"
-            title = self._merge_candidate_title(text, page.stem)
-            terms = set(self._tokenize_terms(title))
-            if not terms:
-                continue
-
-            updated_at = self._extract_updated_at(text)
-            if updated_at is None:
-                updated_at = datetime.fromtimestamp(
-                    page.stat().st_mtime, tz = timezone.utc
-                )
-
-            pages.append(
-                {
-                    "page": rel,
-                    "title": title,
-                    "terms": terms,
-                    "updated_at": updated_at,
-                }
-            )
-
-        if len(pages) < 2:
-            return []
-
-        term_index: Dict[str, Set[int]] = {}
-        for idx, page in enumerate(pages):
-            for term in page["terms"]:
-                term_index.setdefault(term, set()).add(idx)
-
-        candidate_pairs: Set[Tuple[int, int]] = set()
-        for idxs in term_index.values():
-            ordered = sorted(idxs)
-            for left in range(len(ordered)):
-                for right in range(left + 1, len(ordered)):
-                    candidate_pairs.add((ordered[left], ordered[right]))
-
-        bm25 = self._get_bm25()
-        candidates: List[Dict[str, Any]] = []
-        for left_idx, right_idx in sorted(candidate_pairs):
-            left = pages[left_idx]
-            right = pages[right_idx]
-
-            left_terms = left["terms"]
-            right_terms = right["terms"]
-            common = left_terms.intersection(right_terms)
-            if not common:
-                continue
-
-            idf_common = sum(bm25.idf(t) for t in common)
-            idf_union = sum(bm25.idf(t) for t in left_terms.union(right_terms))
-            idf_min_side = sum(
-                bm25.idf(t)
-                for t in (
-                    left_terms if len(left_terms) <= len(right_terms) else right_terms
-                )
-            )
-            weighted_min_overlap = idf_common / max(0.001, idf_min_side)
-            weighted_jaccard = idf_common / max(0.001, idf_union)
-            similarity = max(weighted_min_overlap, weighted_jaccard)
-            if similarity < similarity_threshold:
-                continue
-
-            if left["updated_at"] > right["updated_at"]:
-                canonical, duplicate = left, right
-            elif right["updated_at"] > left["updated_at"]:
-                canonical, duplicate = right, left
-            else:
-                canonical, duplicate = (
-                    (left, right)
-                    if str(left["page"]) <= str(right["page"])
-                    else (right, left)
-                )
-
-            candidates.append(
-                {
-                    "canonical": str(canonical["page"]),
-                    "canonical_title": str(canonical["title"]),
-                    "duplicate": str(duplicate["page"]),
-                    "duplicate_title": str(duplicate["title"]),
-                    "similarity": round(float(similarity), 3),
-                    "reason": "title-term-overlap",
-                }
-            )
-
-        candidates.sort(
-            key = lambda item: (
-                -float(item.get("similarity", 0.0)),
-                str(item.get("canonical", "")),
-                str(item.get("duplicate", "")),
-            )
-        )
-        return candidates[:64]
-
     def _merge_candidates_for_folder(
         self,
         folder: Path,
         prefix: str,
         similarity_threshold: float = 0.75,
     ) -> List[Dict[str, Any]]:
+        """BM25-based merge candidate discovery with LLM cluster verification.
+
+        1. Read all pages, extract title + summary, sort by recency.
+        2. Take top N seed pages (env var, default 96).
+        3. For each seed, BM25-search against ALL pages in the folder.
+        4. Build similarity graph, find connected components.
+        5. Send each component to LLM for cluster-based merge grouping.
+        6. Decompose LLM groups into (canonical, duplicate) pairs.
+        """
         if not self.cfg.merge_llm_candidate_planner_enabled:
             return []
 
-        if prefix == "concepts":
-            semantic_candidates, _semantic_error = (
-                self._semantic_merge_candidates_for_folder(
-                    folder,
-                    prefix,
-                    similarity_threshold = similarity_threshold,
-                    max_pairs = 128,
+        max_seed_pages = max(
+            1, int(os.getenv("ZOPEDIA_WIKI_MERGE_CANDIDATE_MAX_PAGES", "96"))
+        )
+        max_pairs = 128
+        threshold = max(0.0, min(1.0, float(similarity_threshold)))
+        max_component_size = 10
+
+        # Phase 1: Read all pages
+        all_pages: List[Dict[str, Any]] = []
+        for page in sorted(folder.glob("*.md")):
+            text = page.read_text(encoding="utf-8", errors="ignore")
+            rel = f"{prefix}/{page.name}"
+            title = self._merge_candidate_title(text, page.stem)
+
+            summary_raw = self._extract_markdown_section(text, "Summary")
+            if not summary_raw:
+                heading_match = re.search(r"(?m)^#\s+(.+?)\s*$", text)
+                if heading_match:
+                    summary_raw = heading_match.group(1).strip()
+            summary = re.sub(r"\s+", " ", summary_raw or "").strip()
+            if len(summary) > 220:
+                summary = summary[:220].rstrip() + "..."
+
+            updated_at = self._extract_updated_at(text)
+            if updated_at is None:
+                updated_at = datetime.fromtimestamp(
+                    page.stat().st_mtime, tz=timezone.utc
                 )
+
+            all_pages.append({
+                "page": rel,
+                "title": title,
+                "summary": summary,
+                "updated_at": updated_at,
+                "terms": self._terms(f"{title} {summary}"),
+            })
+
+        if len(all_pages) < 2:
+            return []
+
+        # Phase 2: Select seed pages by recency
+        all_pages.sort(
+            key=lambda item: (
+                -float(item["updated_at"].timestamp()), str(item["page"])
             )
-        else:
-            semantic_candidates, _semantic_error = (
-                self._llm_merge_candidates_for_folder(
-                    folder,
-                    prefix,
-                    similarity_threshold = similarity_threshold,
-                    max_pairs = 128,
+        )
+        seeds = all_pages[:max_seed_pages]
+        page_index: Dict[str, Dict[str, Any]] = {p["page"]: p for p in all_pages}
+
+        # Phase 3: Build BM25 similarity graph.
+        # Edges where at least one endpoint is a seed page AND score >= threshold.
+        bm25 = self._get_bm25()
+        edges: List[Tuple[str, str, float]] = []
+        seen_edges: Set[Tuple[str, str]] = set()
+
+        for seed in seeds:
+            seed_terms = seed["terms"]
+            if not seed_terms:
+                continue
+            for other in all_pages:
+                if other["page"] == seed["page"]:
+                    continue
+                other_terms = other["terms"]
+                if not other_terms:
+                    continue
+
+                pair_key = tuple(sorted([seed["page"], other["page"]]))
+                if pair_key in seen_edges:
+                    continue
+                seen_edges.add(pair_key)
+
+                score = bm25.idf_weighted_overlap(seed_terms, other_terms)
+                if score >= threshold:
+                    edges.append((seed["page"], other["page"], score))
+
+        if not edges:
+            return []
+
+        # Phase 4: Find connected components in the similarity graph
+        adjacency: Dict[str, Set[str]] = {}
+        for a, b, _score in edges:
+            adjacency.setdefault(a, set()).add(b)
+            adjacency.setdefault(b, set()).add(a)
+
+        visited: Set[str] = set()
+        components: List[List[str]] = []
+        for node in adjacency:
+            if node in visited:
+                continue
+            stack = [node]
+            component: List[str] = []
+            while stack:
+                current = stack.pop()
+                if current in visited:
+                    continue
+                visited.add(current)
+                component.append(current)
+                for neighbor in adjacency.get(current, set()):
+                    if neighbor not in visited:
+                        stack.append(neighbor)
+            if len(component) >= 2:
+                components.append(component)
+
+        if not components:
+            return []
+
+        # Phase 5: Split large components by removing weakest edges
+        split_components: List[List[str]] = []
+        for component in components:
+            if len(component) <= max_component_size:
+                split_components.append(component)
+                continue
+
+            comp_set = set(component)
+            comp_edges = sorted(
+                [(a, b, s) for a, b, s in edges if a in comp_set and b in comp_set],
+                key=lambda x: x[2],  # weakest first
+            )
+            comp_adj: Dict[str, Set[str]] = {n: set() for n in component}
+            # Build adjacency with all edges first
+            for a, b, _s in comp_edges:
+                comp_adj[a].add(b)
+                comp_adj[b].add(a)
+
+            # Remove weakest edges until largest component fits
+            remaining = list(comp_edges)
+            while remaining:
+                # Measure current largest component
+                visited2: Set[str] = set()
+                largest = 0
+                for n in component:
+                    if n not in visited2:
+                        size = 0
+                        stack2 = [n]
+                        while stack2:
+                            cur = stack2.pop()
+                            if cur in visited2:
+                                continue
+                            visited2.add(cur)
+                            size += 1
+                            for nb in comp_adj.get(cur, set()):
+                                if nb not in visited2:
+                                    stack2.append(nb)
+                        largest = max(largest, size)
+                if largest <= max_component_size:
+                    break
+                if remaining:
+                    a, b, _ = remaining.pop(0)
+                    comp_adj[a].discard(b)
+                    comp_adj[b].discard(a)
+
+            # Collect resulting sub-components
+            visited3: Set[str] = set()
+            for n in component:
+                if n in visited3:
+                    continue
+                sub: List[str] = []
+                stack3 = [n]
+                while stack3:
+                    cur = stack3.pop()
+                    if cur in visited3:
+                        continue
+                    visited3.add(cur)
+                    sub.append(cur)
+                    for nb in comp_adj.get(cur, set()):
+                        if nb not in visited3:
+                            stack3.append(nb)
+                if len(sub) >= 2:
+                    split_components.append(sub)
+
+        # Phase 6: Send each component to LLM for merge grouping
+        all_candidates: List[Dict[str, Any]] = []
+        index_excerpt_cache: Dict[str, str] = {}
+        components_sent = 0
+        components_with_hits = 0
+
+        for component in split_components:
+            comp_pages = [page_index[p] for p in component if p in page_index]
+            if len(comp_pages) < 2:
+                continue
+
+            comp_pages.sort(key=lambda p: str(p["page"]))
+
+            page_by_id: Dict[str, Dict[str, Any]] = {}
+            lines: List[str] = []
+            for idx, item in enumerate(comp_pages, start=1):
+                page_id = f"C{idx:03d}"
+                page_by_id[page_id] = item
+                summary = str(item.get("summary", "")).strip() or "(no summary)"
+                lines.append(
+                    f"{page_id} | {item['page']} | title: {item['title']} | brief: {summary}"
                 )
+
+            comp_paths = [str(p["page"]) for p in comp_pages]
+            cache_key = "\n".join(sorted(comp_paths))
+            if cache_key not in index_excerpt_cache:
+                index_excerpt_cache[cache_key] = self._planner_index_text(comp_paths)
+            index_excerpt = index_excerpt_cache[cache_key]
+
+            prompt = wiki_merge_cluster_prompt(
+                prefix, len(comp_pages), threshold,
+                "\n".join(lines), index_excerpt,
             )
 
-        if semantic_candidates:
-            return semantic_candidates[:64]
+            components_sent += 1
+            candidates_before = len(all_candidates)
 
-        return []
+            raw = str(self.llm_fn(prompt) or "").strip()
+            if not raw:
+                logger.debug("Merge LLM [%s] component #%d (%d pages): empty response", prefix, components_sent, len(comp_pages))
+                continue
 
-    def _combine_merge_candidates(
-        self,
-        lexical_candidates: List[Dict[str, Any]],
-        semantic_candidates: List[Dict[str, Any]],
-    ) -> List[Dict[str, Any]]:
+            parsed = self._safe_json(raw)
+            if not isinstance(parsed, dict):
+                logger.debug("Merge LLM [%s] component #%d (%d pages): unparseable response (%d chars)", prefix, components_sent, len(comp_pages), len(raw))
+                continue
+
+            clusters_raw = parsed.get("clusters", [])
+            if not isinstance(clusters_raw, list):
+                logger.debug("Merge LLM [%s] component #%d (%d pages): clusters not a list", prefix, components_sent, len(comp_pages))
+                continue
+
+            if not clusters_raw:
+                page_preview = ", ".join(str(p["page"]) for p in comp_pages[:3])
+                if len(comp_pages) > 3:
+                    page_preview += f", ... (+{len(comp_pages) - 3})"
+                logger.info("Merge LLM [%s] component #%d (%d pages): no clusters — %s", prefix, components_sent, len(comp_pages), page_preview)
+            else:
+                logger.info("Merge LLM [%s] component #%d (%d pages): %d clusters found", prefix, components_sent, len(comp_pages), len(clusters_raw))
+
+            # Phase 7: Decompose LLM clusters into (canonical, duplicate) pairs
+            for cluster in clusters_raw:
+                logger.info("  → raw cluster: %s", str(cluster))
+                if not isinstance(cluster, dict):
+                    logger.warning("  → cluster skipped: not a dict (%s)", type(cluster).__name__)
+                    continue
+
+                canonical_raw = str(cluster.get("canonical", "")).strip()
+
+                # Resolve: could be an ID (C001), a path with .md, or a path without .md
+                canonical_info = page_index.get(canonical_raw)
+                if canonical_info is None and not canonical_raw.endswith(".md"):
+                    canonical_info = page_index.get(canonical_raw + ".md")
+                    if canonical_info is not None:
+                        canonical_raw = canonical_raw + ".md"
+                if canonical_info is None and canonical_raw.endswith(".md"):
+                    canonical_info = page_index.get(canonical_raw[:-3])
+                    if canonical_info is not None:
+                        canonical_raw = canonical_raw[:-3]
+                if canonical_info is None:
+                    resolved = page_by_id.get(canonical_raw)
+                    if resolved:
+                        canonical_raw = str(resolved["page"])
+                        canonical_info = page_index.get(canonical_raw)
+
+                if canonical_info is None or canonical_raw not in page_index:
+                    logger.warning("  → cluster skipped: canonical=%r not found in page_index (valid IDs: %s)", canonical_raw, sorted(page_by_id.keys()))
+                    continue
+
+                duplicates_raw = cluster.get("duplicates", [])
+                if not isinstance(duplicates_raw, list):
+                    logger.warning("  → cluster skipped: duplicates is not a list (%s)", type(duplicates_raw).__name__)
+                    continue
+
+                try:
+                    confidence = float(cluster.get("confidence", 0.0))
+                except Exception:
+                    confidence = 0.0
+                confidence = max(0.0, min(1.0, confidence))
+                if confidence < threshold:
+                    logger.warning("  → cluster skipped: confidence=%.2f < threshold=%.2f (canonical=%r)", confidence, threshold, canonical_raw)
+                    continue
+
+                reason = re.sub(r"\s+", " ", str(cluster.get("reason", "")).strip())
+                if len(reason) > 180:
+                    reason = reason[:180].rstrip() + "..."
+
+                logger.info(
+                    "  → cluster: canonical=%s (%s) | duplicates=%s | confidence=%.2f | %s",
+                    canonical_raw,
+                    str(canonical_info.get("title", "")).strip(),
+                    str(duplicates_raw),
+                    confidence,
+                    reason,
+                )
+
+                for dup_raw in duplicates_raw:
+                    dup_path = str(dup_raw).strip()
+
+                    # Normalize: try exact, with .md, without .md, or by ID
+                    dup_info = page_index.get(dup_path)
+                    if dup_info is None and not dup_path.endswith(".md"):
+                        dup_info = page_index.get(dup_path + ".md")
+                        if dup_info is not None:
+                            dup_path = dup_path + ".md"
+                    if dup_info is None and dup_path.endswith(".md"):
+                        dup_info = page_index.get(dup_path[:-3])
+                        if dup_info is not None:
+                            dup_path = dup_path[:-3]
+                    if dup_info is None:
+                        resolved_dup = page_by_id.get(dup_path)
+                        if resolved_dup:
+                            dup_path = str(resolved_dup["page"])
+                            dup_info = page_index.get(dup_path)
+
+                    if dup_info is None or dup_path not in page_index:
+                        continue
+                    if dup_path == canonical_raw:
+                        continue
+
+                    all_candidates.append({
+                        "canonical": canonical_raw,
+                        "canonical_title": str(canonical_info.get("title", "")).strip(),
+                        "duplicate": dup_path,
+                        "duplicate_title": str(dup_info.get("title", "")).strip(),
+                        "similarity": round(confidence, 3),
+                        "reason": (
+                            f"bm25-cluster-llm: {reason}"
+                            if reason else "bm25-cluster-llm"
+                        ),
+                    })
+
+            if len(all_candidates) > candidates_before:
+                components_with_hits += 1
+
+        # Deduplicate by pair, keep highest similarity
         best_by_pair: Dict[Tuple[str, str], Dict[str, Any]] = {}
-
-        for item in [*lexical_candidates, *semantic_candidates]:
-            canonical = str(item.get("canonical", "")).strip().replace("\\", "/")
-            duplicate = str(item.get("duplicate", "")).strip().replace("\\", "/")
-            if not canonical or not duplicate or canonical == duplicate:
-                continue
-
-            pair_key = tuple(sorted([canonical, duplicate]))
+        for item in all_candidates:
+            pair_key = tuple(sorted([item["canonical"], item["duplicate"]]))
             existing = best_by_pair.get(pair_key)
-            similarity = float(item.get("similarity", 0.0))
+            if existing is None or item["similarity"] > existing["similarity"]:
+                best_by_pair[pair_key] = item
 
-            if existing is None:
-                best_by_pair[pair_key] = dict(item)
-                continue
-
-            existing_similarity = float(existing.get("similarity", 0.0))
-            if similarity > existing_similarity:
-                best_by_pair[pair_key] = dict(item)
-
-        merged = list(best_by_pair.values())
-        merged.sort(
-            key = lambda item: (
+        candidates = list(best_by_pair.values())
+        candidates.sort(
+            key=lambda item: (
                 -float(item.get("similarity", 0.0)),
                 str(item.get("canonical", "")),
                 str(item.get("duplicate", "")),
             )
         )
-        return merged
 
-    def _llm_merge_candidates_for_folder(
-        self,
-        folder: Path,
-        prefix: str,
-        similarity_threshold: float = 0.75,
-        max_pairs: int = 128,
-    ) -> Tuple[List[Dict[str, Any]], Optional[str]]:
-        pages: List[Dict[str, Any]] = []
-        for page in sorted(folder.glob("*.md")):
-            text = page.read_text(encoding = "utf-8", errors = "ignore")
-            rel = f"{prefix}/{page.name}"
-            title = self._merge_candidate_title(text, page.stem)
-
-            summary_raw = self._extract_markdown_section(text, "Summary")
-            if not summary_raw:
-                heading_match = re.search(r"(?m)^#\s+(.+?)\s*$", text)
-                if heading_match:
-                    summary_raw = heading_match.group(1).strip()
-            summary = re.sub(r"\s+", " ", summary_raw or "").strip()
-            if len(summary) > 220:
-                summary = summary[:220].rstrip() + "..."
-
-            updated_at = self._extract_updated_at(text)
-            if updated_at is None:
-                updated_at = datetime.fromtimestamp(
-                    page.stat().st_mtime, tz = timezone.utc
-                )
-
-            pages.append(
-                {
-                    "page": rel,
-                    "title": title,
-                    "summary": summary,
-                    "updated_at": updated_at,
-                }
-            )
-
-        if len(pages) < 2:
-            return [], None
-
-        pages.sort(
-            key = lambda item: (
-                -float(item["updated_at"].timestamp()),
-                str(item["page"]),
-            )
+        # Log hit rate and preview top candidates
+        hit_rate = (
+            f"{components_with_hits}/{components_sent}"
+            if components_sent > 0 else "0/0"
         )
-        pages = pages[:96]
-
-        page_by_id: Dict[str, Dict[str, Any]] = {}
-        page_by_rel: Dict[str, Dict[str, Any]] = {}
-        lines: List[str] = []
-
-        for idx, item in enumerate(pages, start = 1):
-            page_id = f"M{idx:03d}"
-            page_by_id[page_id] = item
-            page_by_rel[str(item["page"])] = item
-            summary = str(item.get("summary", "")).strip() or "(no summary)"
-            lines.append(
-                f"{page_id} | {item['page']} | title: {item['title']} | brief: {summary}"
-            )
-
-        max_pairs = max(1, min(512, int(max_pairs)))
-        threshold = max(0.0, min(1.0, float(similarity_threshold)))
-        index_excerpt = self._planner_index_text([str(item["page"]) for item in pages])
-
-        prompt = wiki_merge_planner_prompt(
-            prefix, max_pairs, threshold, "\n".join(lines), index_excerpt,
+        logger.info(
+            "Merge candidates [%s]: %s components yielded candidates, %d unique pairs",
+            prefix, hit_rate, len(candidates),
         )
-
-        raw = str(self.llm_fn(prompt) or "").strip()
-        if not raw:
-            return [], "semantic_merge_empty_llm_output"
-
-        parsed = self._safe_json(raw)
-        if not isinstance(parsed, dict):
-            return [], "semantic_merge_invalid_json"
-
-        merges_raw = parsed.get("merges", [])
-        if not isinstance(merges_raw, list):
-            return [], "semantic_merge_missing_merges"
-
-        def _resolve(token: Any) -> Optional[Dict[str, Any]]:
-            raw_token = str(token or "").strip()
-            if not raw_token:
-                return None
-            if raw_token in page_by_id:
-                return page_by_id[raw_token]
-
-            rel_token = raw_token.replace("\\", "/")
-            if rel_token in page_by_rel:
-                return page_by_rel[rel_token]
-
-            if not rel_token.endswith(".md"):
-                rel_md = f"{rel_token}.md"
-                if rel_md in page_by_rel:
-                    return page_by_rel[rel_md]
-            return None
-
-        candidates: List[Dict[str, Any]] = []
-        for item in merges_raw:
-            if not isinstance(item, dict):
-                continue
-
-            canonical = _resolve(item.get("canonical_id")) or _resolve(
-                item.get("canonical_page")
-            )
-            duplicate = _resolve(item.get("duplicate_id")) or _resolve(
-                item.get("duplicate_page")
-            )
-            if canonical is None or duplicate is None:
-                continue
-
-            canonical_page = str(canonical.get("page", "")).strip()
-            duplicate_page = str(duplicate.get("page", "")).strip()
-            if (
-                not canonical_page
-                or not duplicate_page
-                or canonical_page == duplicate_page
-            ):
-                continue
-
-            confidence_raw = item.get("confidence", item.get("similarity", 0.0))
-            try:
-                confidence = float(confidence_raw)
-            except Exception:
-                confidence = 0.0
-            confidence = max(0.0, min(1.0, confidence))
-            if confidence < threshold:
-                continue
-
-            reason = re.sub(r"\s+", " ", str(item.get("reason", "")).strip())
-            if len(reason) > 180:
-                reason = reason[:180].rstrip() + "..."
-
-            candidates.append(
-                {
-                    "canonical": canonical_page,
-                    "canonical_title": str(canonical.get("title", "")).strip(),
-                    "duplicate": duplicate_page,
-                    "duplicate_title": str(duplicate.get("title", "")).strip(),
-                    "similarity": round(confidence, 3),
-                    "reason": (f"semantic-llm: {reason}" if reason else "semantic-llm"),
-                }
+        preview_n = min(5, len(candidates))
+        for i, item in enumerate(candidates[:preview_n]):
+            logger.info(
+                "  #%d merge: [%.2f] %s (%s) ← %s (%s) | %s",
+                i + 1,
+                float(item["similarity"]),
+                str(item["canonical"]), str(item.get("canonical_title", "")),
+                str(item["duplicate"]), str(item.get("duplicate_title", "")),
+                str(item.get("reason", ""))[:120],
             )
 
-        combined = self._combine_merge_candidates([], candidates)
-        return combined[:max_pairs], None
-
-    def _semantic_merge_candidates_for_folder(
-        self,
-        folder: Path,
-        prefix: str,
-        similarity_threshold: float = 0.75,
-        max_pairs: int = 128,
-    ) -> Tuple[List[Dict[str, Any]], Optional[str]]:
-        pages: List[Dict[str, Any]] = []
-        for page in sorted(folder.glob("*.md")):
-            text = page.read_text(encoding = "utf-8", errors = "ignore")
-            rel = f"{prefix}/{page.name}"
-            title = self._merge_candidate_title(text, page.stem)
-
-            summary_raw = self._extract_markdown_section(text, "Summary")
-            if not summary_raw:
-                heading_match = re.search(r"(?m)^#\s+(.+?)\s*$", text)
-                if heading_match:
-                    summary_raw = heading_match.group(1).strip()
-            summary = re.sub(r"\s+", " ", summary_raw or "").strip()
-            if len(summary) > 220:
-                summary = summary[:220].rstrip() + "..."
-
-            updated_at = self._extract_updated_at(text)
-            if updated_at is None:
-                updated_at = datetime.fromtimestamp(
-                    page.stat().st_mtime, tz = timezone.utc
-                )
-
-            pages.append(
-                {
-                    "page": rel,
-                    "title": title,
-                    "summary": summary,
-                    "updated_at": updated_at,
-                }
-            )
-
-        if len(pages) < 2:
-            return [], None
-
-        pages.sort(
-            key = lambda item: (
-                -float(item["updated_at"].timestamp()),
-                str(item["page"]),
-            )
-        )
-        pages = pages[:80]
-
-        page_by_id: Dict[str, Dict[str, Any]] = {}
-        page_by_rel: Dict[str, Dict[str, Any]] = {}
-        lines: List[str] = []
-
-        for idx, item in enumerate(pages, start = 1):
-            page_id = f"C{idx:03d}"
-            page_by_id[page_id] = item
-            page_by_rel[str(item["page"])] = item
-            summary = str(item.get("summary", "")).strip() or "(no summary)"
-            lines.append(
-                f"{page_id} | {item['page']} | title: {item['title']} | brief: {summary}"
-            )
-
-        max_pairs = max(1, min(512, int(max_pairs)))
-        threshold = max(0.0, min(1.0, float(similarity_threshold)))
-
-        prompt = wiki_concept_merge_planner_prompt(
-            max_pairs, threshold, "\n".join(lines),
-        )
-
-        raw = str(self.llm_fn(prompt) or "").strip()
-        if not raw:
-            return [], "semantic_concept_merge_empty_llm_output"
-
-        parsed = self._safe_json(raw)
-        if not isinstance(parsed, dict):
-            return [], "semantic_concept_merge_invalid_json"
-
-        merges_raw = parsed.get("merges", [])
-        if not isinstance(merges_raw, list):
-            return [], "semantic_concept_merge_missing_merges"
-
-        def _resolve(token: Any) -> Optional[Dict[str, Any]]:
-            raw_token = str(token or "").strip()
-            if not raw_token:
-                return None
-            if raw_token in page_by_id:
-                return page_by_id[raw_token]
-
-            rel_token = raw_token.replace("\\", "/")
-            if rel_token in page_by_rel:
-                return page_by_rel[rel_token]
-
-            if not rel_token.endswith(".md"):
-                rel_md = f"{rel_token}.md"
-                if rel_md in page_by_rel:
-                    return page_by_rel[rel_md]
-            return None
-
-        candidates: List[Dict[str, Any]] = []
-        for item in merges_raw:
-            if not isinstance(item, dict):
-                continue
-
-            canonical = _resolve(item.get("canonical_id")) or _resolve(
-                item.get("canonical_page")
-            )
-            duplicate = _resolve(item.get("duplicate_id")) or _resolve(
-                item.get("duplicate_page")
-            )
-            if canonical is None or duplicate is None:
-                continue
-
-            canonical_page = str(canonical.get("page", "")).strip()
-            duplicate_page = str(duplicate.get("page", "")).strip()
-            if (
-                not canonical_page
-                or not duplicate_page
-                or canonical_page == duplicate_page
-            ):
-                continue
-
-            confidence_raw = item.get("confidence", item.get("similarity", 0.0))
-            try:
-                confidence = float(confidence_raw)
-            except Exception:
-                confidence = 0.0
-            confidence = max(0.0, min(1.0, confidence))
-            if confidence < threshold:
-                continue
-
-            reason = re.sub(r"\s+", " ", str(item.get("reason", "")).strip())
-            if len(reason) > 180:
-                reason = reason[:180].rstrip() + "..."
-
-            candidates.append(
-                {
-                    "canonical": canonical_page,
-                    "canonical_title": str(canonical.get("title", "")).strip(),
-                    "duplicate": duplicate_page,
-                    "duplicate_title": str(duplicate.get("title", "")).strip(),
-                    "similarity": round(confidence, 3),
-                    "reason": (f"semantic-llm: {reason}" if reason else "semantic-llm"),
-                }
-            )
-
-        combined = self._combine_merge_candidates([], candidates)
-        return combined[:max_pairs], None
+        return candidates[:max_pairs]
 
     def _coerce_string_list(self, value: Any) -> List[str]:
         if not isinstance(value, list):
@@ -6457,6 +6531,21 @@ class LLMWikiEngine:
                 raw = raw[:idx] + f"\n## Sources\n{sources.strip()}\n" + raw[idx:]
             else:
                 raw = raw.rstrip() + f"\n\n## Sources\n{sources.strip()}\n"
+
+        # Validate wikilink preservation: any [[links]] dropped by the LLM
+        # are appended in a Preserved Links section to prevent graph corruption.
+        original_links = self._extract_link_targets(text)
+        rewritten_links = self._extract_link_targets(raw)
+        missing_links = original_links - rewritten_links
+        if missing_links:
+            logger.warning(
+                "Compaction dropped %d wikilinks; appending Preserved Links section",
+                len(missing_links),
+            )
+            preserved = "\n".join(
+                sorted([f"- [[{link}]]" for link in missing_links])
+            )
+            raw = raw.rstrip() + f"\n\n## Preserved Links\n{preserved}\n"
 
         return raw
 
@@ -6854,7 +6943,7 @@ class LLMWikiEngine:
 
         # Warn when too many pages are uncovered in either entities or concepts,
         # instead of auto-triggering an expensive full community rebuild.
-        threshold = max(50, int(os.getenv("UNSLOTH_WIKI_GODNODES_REBUILD_THRESHOLD", "50")))
+        threshold = max(50, int(os.getenv("ZOPEDIA_WIKI_GODNODES_REBUILD_THRESHOLD", "50")))
         if len(new_entities) > threshold or len(new_concepts) > threshold:
             logger.info(
                 "Godnodes uncovered pages (entities=%d, concepts=%d) exceeds "
@@ -6990,9 +7079,9 @@ class LLMWikiEngine:
             self._rebuild_index_concise()  # fallback: just ensure concise exists
             return
 
-        cutoff = max(1, int(os.getenv("UNSLOTH_WIKI_COMMUNITY_CUTOFF", "20")))
-        min_size = max(2, int(os.getenv("UNSLOTH_WIKI_COMMUNITY_MIN_SIZE", "4")))
-        max_size = int(os.getenv("UNSLOTH_WIKI_COMMUNITY_MAX_SIZE", "0"))
+        cutoff = max(1, int(os.getenv("ZOPEDIA_WIKI_COMMUNITY_CUTOFF", "20")))
+        min_size = max(2, int(os.getenv("ZOPEDIA_WIKI_COMMUNITY_MIN_SIZE", "4")))
+        max_size = int(os.getenv("ZOPEDIA_WIKI_COMMUNITY_MAX_SIZE", "0"))
 
         all_pages = self._all_wiki_pages()
         if not all_pages:

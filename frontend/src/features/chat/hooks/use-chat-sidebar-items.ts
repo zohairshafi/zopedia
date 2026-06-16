@@ -62,13 +62,22 @@ export function useChatSidebarItems() {
     const rows = threadCount === 0
       ? []
       : await db.threads.orderBy("createdAt").reverse().toArray();
-    return rows.filter(
+    const filtered = rows.filter(
       (t) => !t.archived && (
         (t.messageCount ?? 0) > 0 ||
         threadIdsWithMessage.has(t.id) ||
         t.syncedFromServer
       ),
     );
+    console.log("[sidebar] useChatSidebarItems poll:", {
+      threadCount,
+      rowCount: rows.length,
+      msgCount,
+      threadsWithMessages: threadIdsWithMessage.size,
+      syncedFromServer: rows.filter(t => t.syncedFromServer).length,
+      filteredCount: filtered.length,
+    });
+    return filtered;
   }, []);
 
   const items = groupThreads(allThreads ?? []);

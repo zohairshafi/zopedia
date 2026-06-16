@@ -118,6 +118,7 @@ function categoryForVariable(name: string): WikiVariableCategory {
   if (
     name.includes("AUTO_RETRY_FALLBACK") ||
     name.includes("MERGE_MAINTENANCE") ||
+    name.includes("MERGE_CANDIDATE") ||
     name.includes("KNOWLEDGE_MAX_INCREMENTAL") ||
     name.includes("COMPACTION_MAX") ||
     name.includes("MAX_ANALYSIS_PAGES")

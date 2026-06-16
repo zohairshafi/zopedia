@@ -592,6 +592,41 @@ def wiki_concept_merge_writer_prompt(
     )
 
 
+# -- Merge cluster planner (used by _bm25_merge_candidates_for_folder)
+def wiki_merge_cluster_prompt(
+    prefix: str, component_size: int, threshold: float, pages_text: str,
+    index_text: str,
+) -> str:
+    return (
+        "You are a semantic duplicate merge planner for wiki maintenance.\n"
+        f"Page kind: {prefix}\n"
+        f"These {component_size} pages were grouped together because they share "
+        "significant lexical overlap (BM25). Your job is to identify which pages "
+        "should be merged because they represent the same {kind}.\n"
+        "\n"
+        "IMPORTANT: Not all pages in this group are necessarily duplicates. "
+        "Some may be distinct but related topics that happen to share vocabulary. "
+        "Only group pages that genuinely refer to the same {kind} "
+        "(including aliases, abbreviations, name variations, or spelling differences).\n"
+        "\n"
+        "Return strict JSON only with this schema:\n"
+        '{{"clusters":[{{"canonical":"entities/x.md","duplicates":["entities/y.md","entities/z.md"],"confidence":0.0,"reason":"string"}}]}}\n'
+        "\n"
+        "Rules:\n"
+        "- canonical: the best page to keep (most complete, most canonical name).\n"
+        "- duplicates: list of pages that should merge INTO the canonical.\n"
+        "- confidence: 0.0-1.0. Only include clusters with confidence >= "
+        f"{round(threshold, 3)}.\n"
+        "- Pages that are genuinely distinct should NOT appear in any cluster.\n"
+        "- Each page should appear in at most one cluster.\n"
+        "- Prefer keeping the more complete or more recently updated page as canonical.\n"
+        "- Use INDEX_CONTEXT as supporting signal for cross-references.\n"
+        "- No markdown fences and no explanatory text outside JSON.\n"
+        "\n"
+        "PAGES:\n" + pages_text + "\n\nINDEX_CONTEXT:\n" + index_text
+    ).format(kind=prefix.rstrip("s"))  # "entity" or "concept"
+
+
 # -- Incremental update summarizer (used by _llm_summarize_updates)
 def wiki_summarize_updates_prompt(context_block: str, combined_blocks: str) -> str:
     return (

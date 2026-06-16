@@ -139,6 +139,14 @@ WIKI_ENV_SPECS: tuple[WikiEnvSpec, ...] = (
         maximum=512,
     ),
     WikiEnvSpec(
+        name="ZOPEDIA_WIKI_MERGE_CANDIDATE_MAX_PAGES",
+        kind="int",
+        default="96",
+        description="Max pages per folder considered as seed pages for merge candidate discovery (BM25 pre-filter).",
+        minimum=8,
+        maximum=2048,
+    ),
+    WikiEnvSpec(
         name="ZOPEDIA_WIKI_KNOWLEDGE_MAX_INCREMENTAL_UPDATES",
         kind="int",
         default="5",

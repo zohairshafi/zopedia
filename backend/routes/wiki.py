@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
-from core.wiki.engine import LLMWikiEngine, WikiConfig
+from core.wiki.engine import LLMWikiEngine, WikiConfig, MaintenanceAlreadyRunningError
 from core.wiki.manager import WikiManager
 from core.wiki.ingestor import WikiIngestor
 from core.wiki.watcher import WikiIngestionWatcher
@@ -628,12 +628,16 @@ async def wiki_enrich(payload: WikiEnrichRequest, current_subject: str = Depends
     run_retry = (_WIKI_AUTO_RETRY_FALLBACK_MAX_PAGES > 0) if payload.run_fallback_retry_first is None else bool(payload.run_fallback_retry_first)
     if run_retry:
         try:
-            retry_report = manager.retry_fallback_analysis_pages(dry_run=payload.dry_run, max_analysis_pages=payload.max_analysis_pages)
+            retry_report = await asyncio.to_thread(manager.retry_fallback_analysis_pages, dry_run=payload.dry_run, max_analysis_pages=payload.max_analysis_pages)
             logger.info("Fallback-retry before /wiki/enrich: scanned=%d fallback_found=%d regenerated=%d still_fallback=%d", int(retry_report.get("scanned_pages", 0)), int(retry_report.get("fallback_pages_found", 0)), int(retry_report.get("regenerated_pages", 0)), int(retry_report.get("fallback_still", 0)))
+        except MaintenanceAlreadyRunningError:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="A maintenance operation is already in progress")
         except Exception as exc:
             logger.warning("Fallback-retry before /wiki/enrich failed: %s", exc)
     try:
-        report = manager.enrich_analysis_pages(dry_run=payload.dry_run, max_analysis_pages=payload.max_analysis_pages, fill_gaps_from_web=payload.fill_gaps_from_web, max_web_gap_queries=payload.max_web_gap_queries, refresh_non_fallback_oldest_pages=payload.refresh_non_fallback_oldest_pages, repair_answer_links=payload.repair_answer_links, compact_knowledge_pages=payload.compact_knowledge_pages, max_incremental_updates=payload.max_incremental_updates)
+        report = await asyncio.to_thread(manager.enrich_analysis_pages, dry_run=payload.dry_run, max_analysis_pages=payload.max_analysis_pages, fill_gaps_from_web=payload.fill_gaps_from_web, max_web_gap_queries=payload.max_web_gap_queries, refresh_non_fallback_oldest_pages=payload.refresh_non_fallback_oldest_pages, repair_answer_links=payload.repair_answer_links, compact_knowledge_pages=payload.compact_knowledge_pages, max_incremental_updates=payload.max_incremental_updates)
+    except MaintenanceAlreadyRunningError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Wiki enrichment failed: {exc}")
     return WikiEnrichResponse(status=str(report.get("status", "ok")), dry_run=bool(report.get("dry_run", payload.dry_run)), scanned_pages=int(report.get("scanned_pages", 0)), updated_pages=int(report.get("updated_pages", 0)), changes=[dict(item) for item in report.get("changes", [])], web_gap_fill=dict(report.get("web_gap_fill", {})), non_fallback_refresh=dict(report.get("non_fallback_refresh", {})), analysis_link_repair=dict(report.get("analysis_link_repair", {})), knowledge_compaction=dict(report.get("knowledge_compaction", {})))
@@ -645,7 +649,9 @@ async def wiki_enrich(payload: WikiEnrichRequest, current_subject: str = Depends
 async def wiki_retry_fallback(payload: WikiRetryFallbackRequest, current_subject: str = Depends(_optional_subject)):
     manager, _ = get_wiki_components()
     try:
-        report = manager.retry_fallback_analysis_pages(dry_run=payload.dry_run, max_analysis_pages=payload.max_analysis_pages)
+        report = await asyncio.to_thread(manager.retry_fallback_analysis_pages, dry_run=payload.dry_run, max_analysis_pages=payload.max_analysis_pages)
+    except MaintenanceAlreadyRunningError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Wiki fallback retry failed: {exc}")
     return WikiRetryFallbackResponse(status=str(report.get("status", "ok")), dry_run=bool(report.get("dry_run", payload.dry_run)), scanned_pages=int(report.get("scanned_pages", 0)), fallback_pages_found=int(report.get("fallback_pages_found", 0)), retried_pages=int(report.get("retried_pages", 0)), regenerated_pages=int(report.get("regenerated_pages", 0)), fallback_still=int(report.get("fallback_still", 0)), skipped_no_question=int(report.get("skipped_no_question", 0)), errors=[str(i) for i in report.get("errors", [])], results=[dict(i) for i in report.get("results", [])])
@@ -657,7 +663,9 @@ async def wiki_retry_fallback(payload: WikiRetryFallbackRequest, current_subject
 async def wiki_analysis_backlinks(payload: WikiAnalysisBacklinksRequest, current_subject: str = Depends(_optional_subject)):
     manager, _ = get_wiki_components()
     try:
-        report = manager.refresh_analysis_backlinks(dry_run=payload.dry_run, max_analysis_pages=payload.max_analysis_pages, max_links_per_page=payload.max_links_per_page)
+        report = await asyncio.to_thread(manager.refresh_analysis_backlinks, dry_run=payload.dry_run, max_analysis_pages=payload.max_analysis_pages, max_links_per_page=payload.max_links_per_page)
+    except MaintenanceAlreadyRunningError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Wiki analysis backlink maintenance failed: {exc}")
     return WikiAnalysisBacklinksResponse(status=str(report.get("status", "ok")), dry_run=bool(report.get("dry_run", payload.dry_run)), scanned_analysis_pages=int(report.get("scanned_analysis_pages", 0)), target_pages=int(report.get("target_pages", 0)), linked_target_pages=int(report.get("linked_target_pages", 0)), updated_pages=int(report.get("updated_pages", 0)), removed_sections=int(report.get("removed_sections", 0)), max_links_per_page=int(report.get("max_links_per_page", payload.max_links_per_page)), changes=[dict(i) for i in report.get("changes", [])])
@@ -671,11 +679,14 @@ async def wiki_rebuild_index(payload: WikiAnalysisBacklinksRequest, current_subj
     manager, _ = get_wiki_components()
     # Step 1: refresh analysis backlinks (zero LLM calls, pure lexical)
     try:
-        backlinks_report = manager.refresh_analysis_backlinks(
+        backlinks_report = await asyncio.to_thread(
+            manager.refresh_analysis_backlinks,
             dry_run=payload.dry_run,
             max_analysis_pages=payload.max_analysis_pages,
             max_links_per_page=payload.max_links_per_page,
         )
+    except MaintenanceAlreadyRunningError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -683,7 +694,9 @@ async def wiki_rebuild_index(payload: WikiAnalysisBacklinksRequest, current_subj
         )
     # Step 2: rebuild god-nodes community index
     try:
-        manager.engine._rebuild_index_godnodes()
+        await asyncio.to_thread(manager.engine._rebuild_index_godnodes)
+    except MaintenanceAlreadyRunningError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -724,7 +737,9 @@ async def wiki_warnings():
 async def wiki_merge_maintenance(payload: WikiMergeMaintenanceRequest, current_subject: str = Depends(_optional_subject)):
     manager, _ = get_wiki_components()
     try:
-        report = manager.merge_duplicate_knowledge_pages(dry_run=payload.dry_run, include_entities=payload.include_entities, include_concepts=payload.include_concepts, similarity_threshold=payload.similarity_threshold, max_merges=payload.max_merges, semantic_concept_merge=payload.semantic_concept_merge, semantic_merge_writeback=payload.semantic_merge_writeback, compact_knowledge_pages=payload.compact_knowledge_pages, max_incremental_updates=payload.max_incremental_updates)
+        report = await asyncio.to_thread(manager.merge_duplicate_knowledge_pages, dry_run=payload.dry_run, include_entities=payload.include_entities, include_concepts=payload.include_concepts, similarity_threshold=payload.similarity_threshold, max_merges=payload.max_merges, semantic_concept_merge=payload.semantic_concept_merge, semantic_merge_writeback=payload.semantic_merge_writeback, compact_knowledge_pages=payload.compact_knowledge_pages, max_incremental_updates=payload.max_incremental_updates)
+    except MaintenanceAlreadyRunningError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Wiki merge maintenance failed: {exc}")
     return WikiMergeMaintenanceResponse(status=str(report.get("status", "ok")), dry_run=bool(report.get("dry_run", payload.dry_run)), entity_candidates=int(report.get("entity_candidates", 0)), concept_candidates=int(report.get("concept_candidates", 0)), semantic_concept_merge_enabled=bool(report.get("semantic_concept_merge_enabled", payload.semantic_concept_merge)), semantic_merge_writeback_enabled=bool(report.get("semantic_merge_writeback_enabled", payload.semantic_merge_writeback)), semantic_concept_candidates=int(report.get("semantic_concept_candidates", 0)), scanned_candidates=int(report.get("scanned_candidates", 0)), planned_merges=int(report.get("planned_merges", 0)), applied_merges=int(report.get("applied_merges", 0)), rewritten_pages=int(report.get("rewritten_pages", 0)), rewritten_links=int(report.get("rewritten_links", 0)), archived_pages=[str(i) for i in report.get("archived_pages", [])], skipped=[dict(i) for i in report.get("skipped", [])], merges=[dict(i) for i in report.get("merges", [])], errors=[str(i) for i in report.get("errors", [])], knowledge_compaction=dict(report.get("knowledge_compaction", {})))
@@ -779,12 +794,27 @@ async def wiki_lint(current_subject: str = Depends(_optional_subject)):
     manager, _ = get_wiki_components()
     if _WIKI_AUTO_RETRY_FALLBACK_MAX_PAGES > 0:
         try:
-            retry_report = manager.retry_fallback_analysis_pages(dry_run=False, max_analysis_pages=_WIKI_AUTO_RETRY_FALLBACK_MAX_PAGES)
+            retry_report = await asyncio.to_thread(manager.retry_fallback_analysis_pages, dry_run=False, max_analysis_pages=_WIKI_AUTO_RETRY_FALLBACK_MAX_PAGES)
             logger.info("Fallback-retry before /wiki/lint: scanned=%d fallback_found=%d regenerated=%d still_fallback=%d", int(retry_report.get("scanned_pages", 0)), int(retry_report.get("fallback_pages_found", 0)), int(retry_report.get("regenerated_pages", 0)), int(retry_report.get("fallback_still", 0)))
+        except MaintenanceAlreadyRunningError:
+            return WikiLintResponse(
+                status="maintenance_already_running",
+                orphans=[], stale_pages=[], broken_links=[], missing_concepts=[],
+                low_coverage_sources=[], entity_merge_candidates=[], concept_merge_candidates=[],
+                total_pages=0, graphify_insights={}, maintenance_running=True,
+            )
         except Exception as exc:
             logger.warning("Fallback-retry before /wiki/lint failed: %s", exc)
-    report = manager.engine.lint()
-    return WikiLintResponse(status=str(report.get("status", "ok")), orphans=[str(x) for x in report.get("orphans", [])], stale_pages=[dict(x) for x in report.get("stale_pages", [])], broken_links=[dict(x) for x in report.get("broken_links", [])], missing_concepts=[str(x) for x in report.get("missing_concepts", [])], low_coverage_sources=[str(x) for x in report.get("low_coverage_sources", [])], entity_merge_candidates=[dict(x) for x in report.get("entity_merge_candidates", [])], concept_merge_candidates=[dict(x) for x in report.get("concept_merge_candidates", [])], total_pages=int(report.get("total_pages", 0)), graphify_insights=dict(report.get("graphify_insights", {})))
+    try:
+        report = await asyncio.to_thread(manager.engine.lint)
+    except MaintenanceAlreadyRunningError:
+        return WikiLintResponse(
+            status="maintenance_already_running",
+            orphans=[], stale_pages=[], broken_links=[], missing_concepts=[],
+            low_coverage_sources=[], entity_merge_candidates=[], concept_merge_candidates=[],
+            total_pages=0, graphify_insights={}, maintenance_running=True,
+        )
+    return WikiLintResponse(status=str(report.get("status", "ok")), orphans=[str(x) for x in report.get("orphans", [])], stale_pages=[dict(x) for x in report.get("stale_pages", [])], broken_links=[dict(x) for x in report.get("broken_links", [])], missing_concepts=[str(x) for x in report.get("missing_concepts", [])], low_coverage_sources=[str(x) for x in report.get("low_coverage_sources", [])], entity_merge_candidates=[dict(x) for x in report.get("entity_merge_candidates", [])], concept_merge_candidates=[dict(x) for x in report.get("concept_merge_candidates", [])], total_pages=int(report.get("total_pages", 0)), graphify_insights=dict(report.get("graphify_insights", {})), maintenance_running=manager.engine.is_maintenance_running())
 
 
 # ── Wiki Env Config ────────────────────────────────────────────────
