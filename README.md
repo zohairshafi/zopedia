@@ -261,11 +261,12 @@ When `ZOPEDIA_AUTH_DISABLED=false`, Zopedia supports multiple users with isolate
 zopedia/
 ├── backend/
 │   ├── main.py              # FastAPI app, lifespan, upload, health, shutdown
+│   ├── prompts.py           # Centralized LLM prompt registry (50+ definitions)
 │   ├── requirements.txt     # Python deps
 │   ├── core/
 │   │   ├── llm.py           # Upstream API client, tool definitions, web search
 │   │   └── wiki/
-│   │       ├── engine.py    # Wiki engine (~10k lines): extraction, enrichment,
+│   │       ├── engine.py    # Wiki engine (~11k lines): extraction, enrichment,
 │   │       │                  merge, compaction, community detection, indexing
 │   │       ├── manager.py   # Thin facade over engine
 │   │       ├── ingestor.py  # File ingestion (PDF via PyMuPDF, text)

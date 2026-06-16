@@ -43,6 +43,7 @@ Files → raw/ → Watcher → Ingestor → Engine (extract entities/concepts)
 zopedia/
 ├── backend/
 │   ├── main.py              # FastAPI app, lifespan, health, shutdown
+│   ├── prompts.py           # Centralized LLM prompt registry (50+ definitions)
 │   ├── requirements.txt     # Python deps (fastapi, uvicorn, httpx, networkx, ddgs, watchdog)
 │   ├── core/
 │   │   ├── llm.py           # Upstream API client, wiki tools, web search, execute_wiki_read
@@ -275,6 +276,19 @@ User visits   → login form with username + password fields
 | `DELETE` | `/v1/api/chat/threads/{id}` | Delete thread |
 
 ## All LLM Prompt Locations
+
+All LLM prompts are centralized in [`backend/prompts.py`](backend/prompts.py) — a single registry organized by domain:
+
+| Section | Count | Used by |
+|---|---|---|
+| **Chat** | 11 | `routes/chat.py` — system prompt fragments, tool usage guides, synthesis, title generation |
+| **LLM Helpers** | 11 | `core/llm.py` — JSON mode prompt, tool descriptions, tool parameter descriptions |
+| **Research** | 13 | `core/research.py` — survey, query generation, ranking, final summary, title generation |
+| **Wiki Engine** | 19 | `core/wiki/engine.py` — extraction, JSON repair, merge planning/writing, compaction, community naming, enrichment, entity intent, chunk merging, index titles, source-first summaries |
+
+**Design**: Prompts are defined as either static constants (no dynamic parameters) or functions (when they need to interpolate variables like `topic`, `today`, `max_rows`, etc.). Each prompt file imports only what it needs. To modify any LLM behaviour, edit `prompts.py` — all call sites pick up the change automatically.
+
+The previous inline prompt locations (pre-centralization) were spread across:
 
 | File | Method | Purpose |
 |---|---|---|
