@@ -366,6 +366,16 @@ _KNOWLEDGE_DEFAULT_MAX_INCREMENTAL_UPDATES = _env_int(
     maximum = _KNOWLEDGE_MAX_INCREMENTAL_UPDATES,
 )
 
+# Bullet-list sections in entity/concept pages. Each entry maps a JSON
+# extraction key to its markdown heading and incremental-update label.
+# To add a new field (e.g. "Key People"), add it here, add the key to
+# the extraction prompt JSON schema, and pass it at the ingest call site.
+BULLET_SECTIONS: List[Dict[str, str]] = [
+    {"key": "facts",           "heading": "Facts",           "incremental_label": "New facts"},
+    {"key": "contradictions",  "heading": "Contradictions",  "incremental_label": "New contradictions"},
+    {"key": "assumptions",     "heading": "Assumptions",     "incremental_label": "New assumptions"},
+]
+
 
 _TERM_STOPWORDS: Set[str] = {
     "a",
@@ -1117,14 +1127,19 @@ class LLMWikiEngine:
         )
         source_path.write_text(source_md, encoding = "utf-8")
 
+        def _build_bullet_sections(entry: Dict) -> Dict[str, List[str]]:
+            return {
+                sec["key"]: entry.get(sec["key"], [])
+                for sec in BULLET_SECTIONS
+            }
+
         for e in entities:
             self._upsert_knowledge_page(
                 folder = self.entities_dir,
                 page_name = e.get("name", "unknown entity"),
                 page_type = "entity",
                 summary = e.get("summary", ""),
-                facts = e.get("facts", []),
-                contradictions = e.get("contradictions", []),
+                bullet_sections = _build_bullet_sections(e),
                 source_title = source_title,
                 source_slug = source_slug,
                 updated_at = now,
@@ -1136,8 +1151,7 @@ class LLMWikiEngine:
                 page_name = c.get("name", "unknown concept"),
                 page_type = "concept",
                 summary = c.get("summary", ""),
-                facts = c.get("facts", []),
-                contradictions = c.get("contradictions", []),
+                bullet_sections = _build_bullet_sections(c),
                 source_title = source_title,
                 source_slug = source_slug,
                 updated_at = now,
@@ -5610,8 +5624,7 @@ class LLMWikiEngine:
         page_name: str,
         page_type: str,
         summary: str,
-        facts: List[str],
-        contradictions: List[str],
+        bullet_sections: Dict[str, List[str]],
         source_title: str,
         source_slug: str,
         updated_at: str,
@@ -5619,6 +5632,18 @@ class LLMWikiEngine:
         slug = self._slug(page_name)
         p = folder / f"{slug}.md"
         rel_source = f"sources/{source_slug}"
+
+        def _render_bullet_sections_md(secs: Dict[str, List[str]]) -> str:
+            """Render BULLET_SECTIONS into markdown, preserving order."""
+            parts: List[str] = []
+            for sec in BULLET_SECTIONS:
+                items = secs.get(sec["key"], [])
+                heading = sec["heading"]
+                if items:
+                    parts.append(f"## {heading}\n" + "\n".join(f"- {i}" for i in items) + "\n")
+                else:
+                    parts.append(f"## {heading}\n")
+            return "\n".join(parts)
 
         if not p.exists():
             # Semantic dedup: check if a similar page already exists under a
@@ -5640,6 +5665,7 @@ class LLMWikiEngine:
                         f"- [[{page_type}s/{match_slug}]] "
                         f"(BM25 similarity: {round(match_score, 2)})"
                     )
+                    sections_md = _render_bullet_sections_md(bullet_sections)
                     md = (
                         "---\n"
                         f"title: {page_name}\n"
@@ -5648,10 +5674,7 @@ class LLMWikiEngine:
                         "---\n\n"
                         f"# {page_name}\n\n"
                         f"## Summary\n{summary or 'TBD'}\n\n"
-                        f"## Facts\n" + "\n".join([f"- {f}" for f in facts]) + "\n\n"
-                        f"## Contradictions\n"
-                        + "\n".join([f"- {c}" for c in contradictions])
-                        + "\n\n"
+                        f"{sections_md}\n"
                         "## Sources\n"
                         f"- [[{rel_source}]] ({source_title})\n\n"
                         "## Potential Duplicates\n"
@@ -5661,6 +5684,7 @@ class LLMWikiEngine:
                     return
 
             if best_match is None or best_match[1] < 0.50:
+                sections_md = _render_bullet_sections_md(bullet_sections)
                 md = (
                     "---\n"
                     f"title: {page_name}\n"
@@ -5669,10 +5693,7 @@ class LLMWikiEngine:
                     "---\n\n"
                     f"# {page_name}\n\n"
                     f"## Summary\n{summary or 'TBD'}\n\n"
-                    f"## Facts\n" + "\n".join([f"- {f}" for f in facts]) + "\n\n"
-                    f"## Contradictions\n"
-                    + "\n".join([f"- {c}" for c in contradictions])
-                    + "\n\n"
+                    f"{sections_md}\n"
                     "## Sources\n"
                     f"- [[{rel_source}]] ({source_title})\n"
                 )
@@ -5685,28 +5706,19 @@ class LLMWikiEngine:
             return re.sub(r"\s+", " ", str(value).strip()).lower()
 
         current_summary = _norm(self._extract_markdown_section(old, "Summary"))
-        existing_facts = self._extract_markdown_bullets(
-            self._extract_markdown_section(old, "Facts"),
-            limit = 256,
-        )
-        existing_contradictions = self._extract_markdown_bullets(
-            self._extract_markdown_section(old, "Contradictions"),
-            limit = 256,
-        )
-        existing_sources = self._extract_markdown_bullets(
-            self._extract_markdown_section(old, "Sources"),
-            limit = 256,
-        )
+
+        # Build normalized dedup sets for each bullet section
         existing_incremental = self._extract_markdown_bullets(
             self._extract_markdown_section(old, "Incremental Updates"),
             limit = 512,
         )
+        incremental_norm = {_norm(item) for item in existing_incremental}
 
-        existing_fact_norm = {_norm(item) for item in existing_facts}
-        existing_contra_norm = {_norm(item) for item in existing_contradictions}
+        existing_sources = self._extract_markdown_bullets(
+            self._extract_markdown_section(old, "Sources"),
+            limit = 256,
+        )
         existing_source_norm = {_norm(item) for item in existing_sources}
-        existing_fact_norm.update({_norm(item) for item in existing_incremental})
-        existing_contra_norm.update({_norm(item) for item in existing_incremental})
         existing_source_norm.update({_norm(item) for item in existing_incremental})
 
         updates: List[str] = []
@@ -5726,37 +5738,34 @@ class LLMWikiEngine:
                     f"### Previous summary (archived {self._today()})\n{old_summary_clean}\n"
                 )
 
-        new_facts: List[str] = []
-        for fact in facts:
-            fact_clean = re.sub(r"\s+", " ", str(fact).strip())
-            if not fact_clean:
-                continue
-            key = _norm(fact_clean)
-            if key in existing_fact_norm:
-                continue
-            existing_fact_norm.add(key)
-            new_facts.append(fact_clean)
-        if new_facts:
-            updates.append(
-                "### New facts\n" + "\n".join([f"- {f}" for f in new_facts]) + "\n"
-            )
+        # Generic dedup for every bullet section defined in BULLET_SECTIONS
+        for sec in BULLET_SECTIONS:
+            heading = sec["heading"]
+            label = sec["incremental_label"]
+            new_items = [
+                re.sub(r"\s+", " ", str(item).strip())
+                for item in bullet_sections.get(sec["key"], [])
+            ]
+            new_items = [item for item in new_items if item]
 
-        new_contradictions: List[str] = []
-        for contradiction in contradictions:
-            contradiction_clean = re.sub(r"\s+", " ", str(contradiction).strip())
-            if not contradiction_clean:
-                continue
-            key = _norm(contradiction_clean)
-            if key in existing_contra_norm:
-                continue
-            existing_contra_norm.add(key)
-            new_contradictions.append(contradiction_clean)
-        if new_contradictions:
-            updates.append(
-                "### New contradictions\n"
-                + "\n".join([f"- {c}" for c in new_contradictions])
-                + "\n"
+            existing_items = self._extract_markdown_bullets(
+                self._extract_markdown_section(old, heading),
+                limit = 256,
             )
+            existing_norm = {_norm(item) for item in existing_items}
+            existing_norm.update(incremental_norm)
+
+            novel: List[str] = []
+            for item in new_items:
+                key = _norm(item)
+                if key in existing_norm:
+                    continue
+                existing_norm.add(key)
+                novel.append(item)
+            if novel:
+                updates.append(
+                    f"### {label}\n" + "\n".join([f"- {item}" for item in novel]) + "\n"
+                )
 
         source_update = f"[[{rel_source}]] ({source_title})"
         if _norm(source_update) not in existing_source_norm:
@@ -6467,6 +6476,56 @@ class LLMWikiEngine:
         )
         return rebuilt, trimmed
 
+    def _llm_compact_bullet_section(
+        self, heading: str, bullets: List[str], limit: int = 192,
+    ) -> List[str]:
+        """Use the LLM to condense an overflowing bullet section.
+
+        When a section exceeds the bullet limit during merge, instead of
+        silently truncating, the LLM deduplicates, merges similar items, and
+        drops redundant ones while preserving key information.
+        """
+        if not callable(self.llm_fn) or len(bullets) <= limit:
+            return bullets
+
+        bullet_text = "\n".join(f"- {b}" for b in bullets)
+        prompt = (
+            f"You are maintaining a wiki knowledge page. The ## {heading} section "
+            f"has grown too large ({len(bullets)} items, limit is {limit}).\n\n"
+            "Your job: condense this bullet list to at most "
+            f"{limit} items. Merge similar bullets into single, comprehensive "
+            "ones. Drop redundant or superseded information. Preserve unique "
+            "facts, names, dates, numbers, and [[wikilinks]]. Keep the most "
+            "important and recent items.\n\n"
+            "Return ONLY the condensed bullet list, one bullet per line, "
+            "each starting with '- '. No markdown fences, no explanatory text.\n\n"
+            f"CURRENT ## {heading}:\n{bullet_text}"
+        )
+
+        try:
+            raw = str(self.llm_fn(prompt) or "").strip()
+        except Exception:
+            logger.warning("LLM bullet compaction failed for %s; keeping original", heading)
+            return self._dedupe_bullet_items(bullets, limit=limit)
+
+        if not raw or len(raw) < 10:
+            return self._dedupe_bullet_items(bullets, limit=limit)
+
+        condensed = [
+            line[2:].strip()
+            for line in raw.splitlines()
+            if line.strip().startswith("- ")
+        ]
+        if not condensed:
+            return self._dedupe_bullet_items(bullets, limit=limit)
+
+        result = self._dedupe_bullet_items(condensed, limit=limit)
+        logger.info(
+            "LLM bullet compaction: %s %d → %d items",
+            heading, len(bullets), len(result),
+        )
+        return result
+
     def _llm_rewrite_compacted_page(
         self,
         text: str,
@@ -6483,9 +6542,14 @@ class LLMWikiEngine:
         if not callable(self.llm_fn):
             return None
 
-        # Extract sections that should be preserved verbatim
+        # Extract sections that should be preserved verbatim (restored if LLM drops them)
         refs = self._extract_markdown_section(text, "Referenced by Analyses")
         sources = self._extract_markdown_section(text, "Sources")
+        preserved_bullets: Dict[str, str] = {}
+        for sec in BULLET_SECTIONS:
+            body = self._extract_markdown_section(text, sec["heading"])
+            if body.strip():
+                preserved_bullets[sec["heading"]] = body.strip()
 
         # Build the rewrite prompt
         updates_text = "\n\n---\n\n".join(
@@ -6513,14 +6577,30 @@ class LLMWikiEngine:
 
         # Validate: ensure critical sections exist in the output
         has_summary = "## Summary" in raw
-        has_facts = "## Facts" in raw
-        if not has_summary or not has_facts:
-            logger.warning("Compaction rewrite missing required sections; falling back")
+        if not has_summary:
+            logger.warning("Compaction rewrite missing Summary section; falling back")
             return None
+        for sec in BULLET_SECTIONS:
+            if f"## {sec['heading']}" not in raw:
+                logger.warning(
+                    "Compaction rewrite missing ## %s section; falling back",
+                    sec["heading"],
+                )
+                return None
 
         # Restore Referenced by Analyses if LLM dropped it
         if refs.strip() and "## Referenced by Analyses" not in raw:
             raw = raw.rstrip() + f"\n\n## Referenced by Analyses\n{refs.strip()}\n"
+
+        # Restore any bullet sections the LLM dropped
+        for sec in BULLET_SECTIONS:
+            heading = sec["heading"]
+            if preserved_bullets.get(heading) and f"## {heading}" not in raw:
+                logger.warning(
+                    "Compaction dropped ## %s section; restoring from original",
+                    heading,
+                )
+                raw = raw.rstrip() + f"\n\n## {heading}\n{preserved_bullets[heading]}\n"
 
         # Restore Sources if LLM dropped it and we had one
         if sources.strip() and "## Sources" not in raw:
@@ -6579,22 +6659,20 @@ class LLMWikiEngine:
             if len(summary_line) > 260:
                 summary_line = summary_line[:260].rstrip() + "..."
 
-        facts = self._extract_markdown_bullets(
-            self._extract_markdown_section(duplicate_text, "Facts"),
-            limit = 8,
-        )
-        contradictions = self._extract_markdown_bullets(
-            self._extract_markdown_section(duplicate_text, "Contradictions"),
-            limit = 8,
-        )
+        # Extract all bullet sections from the duplicate
+        duplicate_bullets: Dict[str, List[str]] = {}
+        for sec in BULLET_SECTIONS:
+            duplicate_bullets[sec["key"]] = self._extract_markdown_bullets(
+                self._extract_markdown_section(duplicate_text, sec["heading"]),
+                limit = 8,
+            )
         sources = self._extract_markdown_bullets(
             self._extract_markdown_section(duplicate_text, "Sources"),
             limit = 8,
         )
 
         semantic_summary = ""
-        semantic_facts: List[str] = []
-        semantic_contradictions: List[str] = []
+        semantic_bullets: Dict[str, List[str]] = {}
         semantic_sources: List[str] = []
         semantic_rationale = ""
         semantic_confidence = 0.0
@@ -6605,14 +6683,16 @@ class LLMWikiEngine:
                 " ",
                 str(semantic_merge.get("summary", "")).strip(),
             )
-            semantic_facts = self._dedupe_bullet_items(
-                self._coerce_string_list(semantic_merge.get("facts", [])),
-                limit = 64,
-            )
-            semantic_contradictions = self._dedupe_bullet_items(
-                self._coerce_string_list(semantic_merge.get("contradictions", [])),
-                limit = 64,
-            )
+            # LLM returns merged_facts, merged_contradictions — try both naming conventions
+            for sec in BULLET_SECTIONS:
+                raw = semantic_merge.get(
+                    f"merged_{sec['key']}", semantic_merge.get(sec["key"], [])
+                )
+                semantic_bullets[sec["key"]] = self._dedupe_bullet_items(
+                    self._coerce_string_list(raw),
+                    limit = 64,
+                )
+
             semantic_sources = self._dedupe_bullet_items(
                 self._coerce_string_list(semantic_merge.get("sources", [])),
                 limit = 64,
@@ -6639,36 +6719,28 @@ class LLMWikiEngine:
                     section_body = semantic_summary,
                 )
 
-            canonical_facts = self._extract_markdown_bullets(
-                self._extract_markdown_section(canonical_text, "Facts"),
-                limit = 256,
-            )
-            merged_facts = self._dedupe_bullet_items(
-                canonical_facts + semantic_facts + facts,
-                limit = 192,
-            )
-            if merged_facts:
-                canonical_text = self._replace_markdown_section(
-                    canonical_text,
-                    section_title = "Facts",
-                    section_body = self._render_bullet_section(merged_facts),
+            # Merge every bullet section: canonical + LLM synthesis + duplicate
+            for sec in BULLET_SECTIONS:
+                canonical_existing = self._extract_markdown_bullets(
+                    self._extract_markdown_section(canonical_text, sec["heading"]),
+                    limit = 256,
                 )
+                all_items = canonical_existing + semantic_bullets.get(sec["key"], []) + duplicate_bullets[sec["key"]]
+                merged = self._dedupe_bullet_items(all_items, limit = 192)
+                # If the limit was hit (192 exactly), condense via LLM instead of
+                # silently truncating. This keeps the section meaningful.
+                if len(merged) >= 192 and len(all_items) > 192:
+                    merged = self._llm_compact_bullet_section(
+                        sec["heading"], all_items, limit = 192,
+                    )
+                if merged:
+                    canonical_text = self._replace_markdown_section(
+                        canonical_text,
+                        section_title = sec["heading"],
+                        section_body = self._render_bullet_section(merged),
+                    )
 
-            canonical_contradictions = self._extract_markdown_bullets(
-                self._extract_markdown_section(canonical_text, "Contradictions"),
-                limit = 256,
-            )
-            merged_contradictions = self._dedupe_bullet_items(
-                canonical_contradictions + semantic_contradictions + contradictions,
-                limit = 192,
-            )
-            if merged_contradictions:
-                canonical_text = self._replace_markdown_section(
-                    canonical_text,
-                    section_title = "Contradictions",
-                    section_body = self._render_bullet_section(merged_contradictions),
-                )
-
+            # Sources: special-cased (not in BULLET_SECTIONS)
             canonical_sources = self._extract_markdown_bullets(
                 self._extract_markdown_section(canonical_text, "Sources"),
                 limit = 256,
@@ -6691,12 +6763,11 @@ class LLMWikiEngine:
         ]
         if summary_line:
             entry_lines.append(f"- summary: {summary_line}")
-        if facts:
-            entry_lines.append("- facts:")
-            entry_lines.extend([f"  - {item}" for item in facts])
-        if contradictions:
-            entry_lines.append("- contradictions:")
-            entry_lines.extend([f"  - {item}" for item in contradictions])
+        for sec in BULLET_SECTIONS:
+            items = duplicate_bullets[sec["key"]]
+            if items:
+                entry_lines.append(f"- {sec['key']}:")
+                entry_lines.extend([f"  - {item}" for item in items])
         if sources:
             entry_lines.append("- sources:")
             entry_lines.extend([f"  - {item}" for item in sources])

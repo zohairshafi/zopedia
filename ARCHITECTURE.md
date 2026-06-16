@@ -102,6 +102,145 @@ the page is rewritten:
 Compaction runs during maintenance cycles (via `enrich_analysis_pages` with
 `compact_knowledge_pages=True`) and via the API.
 
+## Wiki Page Format
+
+Entity and concept pages follow a standard markdown structure. The format is
+defined programmatically — there is no standalone template file.
+
+### Standard Sections
+
+```markdown
+---
+title: Kubernetes
+type: concept
+updated_at: 2026-06-15T12:00:00Z
+---
+
+# Kubernetes
+
+## Summary
+Open-source container orchestration platform for automating deployment,
+scaling, and management of containerized applications.
+
+## Facts
+- Developed by Google, now maintained by CNCF
+- First released in 2014
+- Uses a declarative configuration model
+
+## Contradictions
+- Some sources claim Kubernetes is too complex for small teams
+- Debate over whether vanilla K8s or managed services are better
+
+## Assumptions
+- The reader has basic familiarity with containers
+- Running on a cloud provider with managed Kubernetes available
+
+## Sources
+- [[sources/kubernetes-wiki]] (Kubernetes - Wikipedia)
+- [[sources/cncf-annual-report]] (CNCF Annual Report 2025)
+
+## Referenced by Analyses
+- [[analysis/2025-06-15-container-orchestration-landscape]]
+- [[analysis/2025-06-14-platform-engineering-trends]]
+
+## Merge History
+### 2026-06-10T08:00:00Z merged concepts/k8s.md
+- similarity: 0.92
+- archived_to: .archive/concepts/k8s.md
+- summary: K8s is the common abbreviation for Kubernetes
+- facts:
+  - K8s is shorthand for Kubernetes (8 letters between K and s)
+
+## Incremental Updates
+### New facts
+- Kubernetes 1.32 added dynamic resource allocation (DRA)
+- Podman now supports Kubernetes-style pod definitions
+
+### Source update
+- [[sources/kubernetes-1.32-release-notes]] (Kubernetes 1.32 Release Notes)
+```
+
+### Bullet Sections (`BULLET_SECTIONS`)
+
+Bullet-list sections (Facts, Contradictions, Assumptions, and any future fields)
+are handled generically via the `BULLET_SECTIONS` constant in `engine.py`:
+
+```python
+BULLET_SECTIONS = [
+    {"key": "facts",           "heading": "Facts",           "incremental_label": "New facts"},
+    {"key": "contradictions",  "heading": "Contradictions",  "incremental_label": "New contradictions"},
+    {"key": "assumptions",     "heading": "Assumptions",     "incremental_label": "New assumptions"},
+]
+```
+
+Each entry maps:
+- `key` — the JSON field name from LLM extraction (`prompts.py:wiki_source_extraction_prompt`)
+- `heading` — the markdown `## Heading`
+- `incremental_label` — the `### New ...` label used in incremental update blocks
+
+All bullet sections automatically get:
+- **Create**: Rendered into the initial page template in `BULLET_SECTIONS` order
+- **Update**: Extracted, deduplicated against existing + incremental items, and appended
+  as `### New {label}` blocks when novel items are found
+- **Merge**: Extracted from the duplicate, deduplicated into the canonical; if the
+  192-bullet limit is hit, an LLM condenses the list instead of silently truncating
+- **Compaction**: Validated to be present in the LLM-rewritten output; restored from
+  the original if dropped
+
+### Special-Cased Sections
+
+These sections have unique semantics and are NOT handled by the `BULLET_SECTIONS` loop:
+
+| Section | How Created | Update Behavior |
+|---|---|---|
+| `## Summary` | LLM extraction | Replaced when summary changes; old version archived |
+| `## Sources` | Auto-generated from ingest source refs | Appended as `### Source update` |
+| `## Referenced by Analyses` | `refresh_analysis_backlinks()` | Auto-generated from analysis pages that link here |
+| `## Merge History` | `_merge_canonical_with_duplicate()` | Appended with structured merge metadata |
+| `## Incremental Updates` | `_upsert_knowledge_page()` (update path) | Meta-section containing `### New ...` sub-blocks |
+| `## Potential Duplicates` | Ingest-time BM25 dedup | One-time flag for review |
+| `## Preserved Links` | Compaction wikilink validation | Safety net for LLM-dropped links |
+
+### Adding a New Field
+
+1. **`prompts.py`** — add `"new_field":[]` to the JSON schema in `wiki_source_extraction_prompt`
+2. **`engine.py`** — add an entry to `BULLET_SECTIONS`:
+   ```python
+   {"key": "new_field", "heading": "New Field", "incremental_label": "New new field items"}
+   ```
+3. That's it — create, update, merge, and compaction all handle it automatically.
+
+### Page Creation Pipeline
+
+```
+Source document (.pdf, .txt, URL)
+  │
+  ▼
+_extract_from_source()           [engine.py:5205]
+  LLM call → JSON {summary, entities[], concepts[]}
+  │
+  ▼
+ingest_source()                  [engine.py:1086]
+  _render_source_page()          writes sources/<slug>.md
+  for each entity/concept:
+    _upsert_knowledge_page()     [engine.py:5617]
+      ├─ New page: writes template with all sections
+      ├─ BM25 match ≥ 0.85: redirects to existing page
+      ├─ BM25 match 0.50-0.85: creates with ## Potential Duplicates
+      └─ Existing page: dedup + incremental update blocks
+  _rebuild_index()
+```
+
+### Limits
+
+| Limit | Value | Where | Mitigation |
+|---|---|---|---|
+| Bullets extracted from existing section | 256 | `_upsert_knowledge_page` update path | Older bullets not considered for dedup |
+| Bullets written after merge | 192 | `_merge_canonical_with_duplicate` | LLM condenses overflow via `_llm_compact_bullet_section` |
+| Incremental update blocks | 48 (default) | `_trim_incremental_updates_text` | Triggers full-page LLM compaction |
+| Summary length in merge history | 260 chars | `_merge_canonical_with_duplicate` | Truncated with `...` |
+| Bullets from duplicate in merge history | 8 per section | `_merge_canonical_with_duplicate` | Most recent/important preserved |
+
 ## God-Nodes Index Pagination
 
 ### Problem
