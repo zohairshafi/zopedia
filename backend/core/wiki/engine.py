@@ -5682,7 +5682,7 @@ class LLMWikiEngine:
                     p.write_text(md, encoding="utf-8")
                     return
 
-            if best_match is None or best_match[1] < 0.50:
+            if best_match is None or best_match[1] < 4.0:
                 sections_md = _render_bullet_sections_md(bullet_sections)
                 md = (
                     "---\n"
