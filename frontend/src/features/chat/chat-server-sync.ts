@@ -11,10 +11,6 @@ const debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
 // uses INSERT OR IGNORE so re-sending is harmless.
 const syncedMessageIds = new Set<string>();
 
-export function markMessagesSynced(ids: string[]): void {
-  for (const id of ids) syncedMessageIds.add(id);
-}
-
 function flushPendingSaves() {
   for (const [threadId, timer] of debounceTimers) {
     clearTimeout(timer);
@@ -25,18 +21,31 @@ function flushPendingSaves() {
 
 function chunkLargeContent(content: unknown): unknown[] {
   // If content is a string and exceeds the size threshold, split it at
-  // paragraph boundaries so each chunk stays under the limit.
-  if (typeof content !== "string") return [content];
+  // paragraph boundaries so each chunk stays under the byte limit.
+  if (typeof content !== "string") {
+    // Non-string content (arrays of content blocks) can't be chunked.
+    // Log a warning if it's unusually large.
+    const jsonSize = new TextEncoder().encode(JSON.stringify(content)).length;
+    if (jsonSize > MAX_MESSAGE_CONTENT_BYTES) {
+      console.warn("[sync] non-string content exceeds size limit, sending as-is", jsonSize);
+    }
+    return [content];
+  }
   const jsonSize = new TextEncoder().encode(JSON.stringify(content)).length;
   if (jsonSize <= MAX_MESSAGE_CONTENT_BYTES) return [content];
 
-  // Split at double-newline (paragraph) boundaries
+  // Split at double-newline (paragraph) boundaries, using byte-aware slicing
+  const encoder = new TextEncoder();
+  const maxChunkBytes = Math.floor(MAX_MESSAGE_CONTENT_BYTES / 2);
   const parts: string[] = [];
   let remaining = content;
   while (remaining.length > 0) {
-    // Take a chunk that fits within the byte limit
-    let chunk = remaining.slice(0, Math.floor(MAX_MESSAGE_CONTENT_BYTES / 2));
-    // Back up to the last paragraph boundary
+    // Start with a character-based estimate, then shrink to fit byte limit
+    let chunk = remaining.slice(0, Math.floor(maxChunkBytes * 0.75));
+    while (encoder.encode(chunk).length > maxChunkBytes && chunk.length > 1) {
+      chunk = chunk.slice(0, Math.floor(chunk.length * 0.9));
+    }
+    // Back up to the last paragraph boundary for clean splits
     const lastBreak = chunk.lastIndexOf("\n\n");
     if (lastBreak > chunk.length / 2) {
       chunk = chunk.slice(0, lastBreak);
@@ -44,7 +53,7 @@ function chunkLargeContent(content: unknown): unknown[] {
     parts.push(chunk.trim());
     remaining = remaining.slice(chunk.length).trimStart();
   }
-  console.log("[sync] chunked large message into", parts.length, "parts");
+  console.log("[sync] chunked large message into", parts.length, "parts (original bytes:", jsonSize, ")");
   return parts;
 }
 

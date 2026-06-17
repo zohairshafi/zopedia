@@ -124,7 +124,6 @@ async def _resolve_subject(request: Request) -> str:
 # ── Lifespan ───────────────────────────────────────────────────────
 
 
-@asynccontextmanager
 def _maybe_build_frontend() -> bool:
     """Rebuild the frontend if source files are newer than the dist bundle.
 
@@ -187,6 +186,7 @@ def _maybe_build_frontend() -> bool:
         return False
 
 
+@asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup: initialize wiki watcher. Shutdown: stop watcher."""
     logger.info("Starting Zopedia...")

@@ -5988,18 +5988,33 @@ class LLMWikiEngine:
             return "\n".join(parts)
 
         def _render_frontmatter() -> str:
-            """Build YAML frontmatter with optional tags and resource fields."""
+            """Build YAML frontmatter with optional tags and resource fields.
+
+            Sanitises all user-supplied values to prevent YAML injection
+            (e.g. newlines in titles injecting fake keys, or ']' in tags
+            breaking the flow-sequence syntax).
+            """
+            import yaml
+
+            def _yaml_flow_str(v: str) -> str:
+                """Return a single-line YAML representation of *v*.
+
+                Uses double-quoted scalars so special characters like
+                ``]``, ``,``, ``:``, and leading ``- `` are harmless.
+                """
+                return yaml.dump(v, default_style='"', width=10_000_000).rstrip("\n")
+
             lines = [
                 "---",
-                f"title: {page_name}",
-                f"type: {page_type}",
-                f"updated_at: {updated_at}",
+                "title: " + _yaml_flow_str(page_name),
+                "type: " + _yaml_flow_str(page_type),
+                "updated_at: " + _yaml_flow_str(updated_at),
             ]
             if tags:
-                yaml_tags = ", ".join(tags)
-                lines.append(f"tags: [{yaml_tags}]")
+                safe_tags = ", ".join(_yaml_flow_str(t) for t in tags)
+                lines.append("tags: [" + safe_tags + "]")
             if resource:
-                lines.append(f"resource: {resource}")
+                lines.append("resource: " + _yaml_flow_str(resource))
             lines.append("---")
             return "\n".join(lines)
 
