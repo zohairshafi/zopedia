@@ -214,7 +214,9 @@ async def describe_table(table_name: str, schema: str = "public") -> str:
                     c.is_nullable,
                     c.column_default,
                     c.character_maximum_length,
-                    tc.constraint_type
+                    tc.constraint_type,
+                    fk_info.foreign_table_schema,
+                    fk_info.foreign_table_name
                 FROM information_schema.columns c
                 LEFT JOIN information_schema.key_column_usage kcu
                     ON c.table_schema = kcu.table_schema
@@ -223,6 +225,18 @@ async def describe_table(table_name: str, schema: str = "public") -> str:
                 LEFT JOIN information_schema.table_constraints tc
                     ON kcu.constraint_name = tc.constraint_name
                     AND tc.constraint_type IN ('PRIMARY KEY', 'FOREIGN KEY')
+                LEFT JOIN LATERAL (
+                    SELECT
+                        rc.unique_constraint_schema AS foreign_table_schema,
+                        tcfk.table_name AS foreign_table_name
+                    FROM information_schema.referential_constraints rc
+                    JOIN information_schema.table_constraints tcfk
+                        ON rc.unique_constraint_name = tcfk.constraint_name
+                        AND rc.unique_constraint_schema = tcfk.constraint_schema
+                    WHERE rc.constraint_name = tc.constraint_name
+                      AND tc.constraint_type = 'FOREIGN KEY'
+                    LIMIT 1
+                ) AS fk_info ON true
                 WHERE c.table_schema = $1 AND c.table_name = $2
                 ORDER BY c.ordinal_position
                 """,
@@ -236,15 +250,18 @@ async def describe_table(table_name: str, schema: str = "public") -> str:
             cols = []
             for r in columns:
                 col = {
-                    "name": r["column_name"],
-                    "type": r["data_type"],
-                    "nullable": r["is_nullable"] == "YES",
+                    "column_name": r["column_name"],
+                    "data_type": r["data_type"],
+                    "is_nullable": r["is_nullable"],
                     "max_length": r["character_maximum_length"],
                 }
                 if r["column_default"]:
-                    col["default"] = r["column_default"]
+                    col["column_default"] = r["column_default"]
                 if r["constraint_type"]:
-                    col["constraint"] = r["constraint_type"]
+                    col["constraint_type"] = r["constraint_type"]
+                if r["foreign_table_schema"] and r["foreign_table_name"]:
+                    col["foreign_table_schema"] = r["foreign_table_schema"]
+                    col["foreign_table_name"] = r["foreign_table_name"]
                 cols.append(col)
 
             return json.dumps(

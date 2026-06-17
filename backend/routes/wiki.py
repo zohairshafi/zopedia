@@ -715,6 +715,40 @@ async def wiki_rebuild_index(payload: WikiAnalysisBacklinksRequest, current_subj
     )
 
 
+# ── Database Enrichment ──────────────────────────────────────────────
+
+
+@router.post("/wiki/enrich-db")
+async def wiki_enrich_database():
+    """Create/update wiki concept pages for every table in the connected database.
+
+    Requires ZOPEDIA_DATABASE_URL to be set.  Does NOT call the LLM —
+    schema documentation is purely structural (column names, types,
+    constraints, FK relationships).
+
+    Existing pages are updated when their schema changes.  Tables that
+    no longer exist in the database are marked with a stale banner
+    (the page is preserved for historical reference).
+    """
+    manager, _ = get_wiki_components()
+    try:
+        report = await asyncio.to_thread(manager.engine.enrich_from_database)
+    except MaintenanceAlreadyRunningError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+    except Exception as exc:
+        logger.exception("DB enrichment failed")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"DB enrichment failed: {exc}",
+        )
+    if report.get("status") == "error":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=report.get("detail", "Unknown error"),
+        )
+    return report
+
+
 # ── Wiki Warnings ──────────────────────────────────────────────────
 
 

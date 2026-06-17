@@ -86,7 +86,10 @@ CHAT_DATABASE_USAGE_PROMPT = (
     "- Use describe_database_schema with a table_name to see column names, types, and constraints.\n"
     "- Always explore the schema BEFORE writing any SQL query.\n"
     "- Use execute_sql_query with a single SELECT statement. Use explicit column names (no SELECT *).\n"
-    "- Results are limited to 100 rows by default.\n\n"
+    "- Results are limited to 100 rows by default.\n"
+    "- The wiki may already contain documented schemas, join paths, and business context for database tables. "
+    "Before running schema discovery queries, search the wiki (read_wiki_page / search_wiki) for pages tagged "
+    "with 'db-table' — these describe the connected database's tables and may save you queries.\n\n"
 )
 
 
@@ -489,15 +492,17 @@ def wiki_source_extraction_prompt(title: str, text: str, max_chars: int) -> str:
         "Extract structured knowledge from the source.\n"
         "Return strict JSON with keys:\n"
         "summary: string\n"
-        "entities: list of {name, summary, facts:[], contradictions:[], assumptions:[], data:[]}\n"
-        "concepts: list of {name, summary, facts:[], contradictions:[], assumptions:[], data:[]}\n\n"
+        "entities: list of {name, summary, facts:[], contradictions:[], assumptions:[], data:[], tags:[], resource:null}\n"
+        "concepts: list of {name, summary, facts:[], contradictions:[], assumptions:[], data:[], tags:[], resource:null}\n\n"
         "Definitions:\n"
         "- Entities = named people, companies, projects, products, APIs, tools, places, or specific named things mentioned in the source.\n"
         "- Concepts = key ideas, techniques, methodologies, patterns, frameworks, protocols, formats, principles, or abstract topics the source discusses or relies on. Concepts are NOT named entities — they describe what the source is about at a thematic level.\n"
         "- Facts = concrete, verifiable claims or pieces of information stated in the source.\n"
         "- Contradictions = claims in the source that conflict with each other or with well-known facts.\n"
         "- Assumptions = things the source takes for granted or presupposes without justification (e.g., assumed prior knowledge, unstated premises, implicit beliefs).\n"
-        "- Data = specific numbers, statistics, measurements, metrics, or structured data points mentioned in the source.\n\n"
+        "- Data = specific numbers, statistics, measurements, metrics, or structured data points mentioned in the source.\n"
+        "- Tags = 2-5 lowercase categorization keywords (e.g., bmw, automotive, engine). Use existing tags from KNOWN_CONCEPTS/ENTITIES where applicable.\n"
+        "- Resource = the URL or identifier of the primary source this knowledge came from, or null if unknown. Use the source URL when available.\n\n"
         "Rules:\n"
         "- Be source-grounded and thorough\n"
         "- Keep facts concise (one sentence each)\n"
@@ -519,8 +524,8 @@ def wiki_json_repair_prompt(title: str, model_output: str, source_hint: str) -> 
         "Schema:\n"
         "{\n"
         '  "summary": "string",\n'
-        '  "entities": [{"name":"string","summary":"string","facts":["string"],"contradictions":["string"],"assumptions":["string"],"data":["string"]}],\n'
-        '  "concepts": [{"name":"string","summary":"string","facts":["string"],"contradictions":["string"],"assumptions":["string"],"data":["string"]}]\n'
+        '  "entities": [{"name":"string","summary":"string","facts":["string"],"contradictions":["string"],"assumptions":["string"],"data":["string"],"tags":["string"],"resource":"string|null"}],\n'
+        '  "concepts": [{"name":"string","summary":"string","facts":["string"],"contradictions":["string"],"assumptions":["string"],"data":["string"],"tags":["string"],"resource":"string|null"}]\n'
         "}\n"
         "If a field is unknown, use empty string or empty array.\n"
         "Do not include markdown fences.\n\n"

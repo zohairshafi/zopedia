@@ -1144,6 +1144,11 @@ class LLMWikiEngine:
                 source_title = source_title,
                 source_slug = source_slug,
                 updated_at = now,
+                tags = e.get("tags") if isinstance(e.get("tags"), list) else None,
+                resource = (
+                    e.get("resource") if isinstance(e.get("resource"), str) and e.get("resource")
+                    else (source_ref if source_ref and source_ref != "local" else None)
+                ),
             )
 
         for c in concepts:
@@ -1156,6 +1161,11 @@ class LLMWikiEngine:
                 source_title = source_title,
                 source_slug = source_slug,
                 updated_at = now,
+                tags = c.get("tags") if isinstance(c.get("tags"), list) else None,
+                resource = (
+                    c.get("resource") if isinstance(c.get("resource"), str) and c.get("resource")
+                    else (source_ref if source_ref and source_ref != "local" else None)
+                ),
             )
 
         with index_lock():
@@ -3702,6 +3712,336 @@ class LLMWikiEngine:
             "changes": changes,
         }
 
+    @_requires_maintenance_lock
+    def enrich_from_database(self) -> Dict[str, Any]:
+        """Create/update wiki concept pages for every table in the connected database.
+
+        Requires ZOPEDIA_DATABASE_URL to be configured.  Does NOT require an
+        LLM call — schema documentation is purely structural (column names,
+        types, constraints, FK relationships).
+
+        Returns a summary dict suitable for the /wiki/enrich-db API response.
+        """
+        import asyncio
+        from core.database import list_tables, describe_table
+
+        db_url = os.getenv("ZOPEDIA_DATABASE_URL", "").strip()
+        if not db_url:
+            return {"status": "error", "detail": "No database configured (ZOPEDIA_DATABASE_URL is empty)."}
+
+        # Compute a fingerprint of the current connection so we can detect
+        # when the user switches to a completely different database.
+        try:
+            parsed = urlparse(db_url)
+            db_fingerprint = hashlib.sha256(
+                f"{parsed.hostname}:{parsed.port}:{parsed.path.strip('/')}".encode()
+            ).hexdigest()[:12]
+        except Exception:
+            db_fingerprint = "unknown"
+
+        # ── Fetch current DB state ──────────────────────────────────
+        logger.info("enrich_from_database: fetching table list (fingerprint=%s)", db_fingerprint)
+
+        async def _fetch_db_state():
+            tables_raw = await list_tables()
+            try:
+                tables_data = json.loads(tables_raw)
+            except json.JSONDecodeError:
+                return [], {}
+            table_list = tables_data.get("tables", [])
+            schema_cache: Dict[str, Dict] = {}
+            for t in table_list:
+                schema_key = f"{t['schema']}.{t['table']}"
+                try:
+                    desc_raw = await describe_table(t["table"], t["schema"])
+                    desc_data = json.loads(desc_raw)
+                    if "error" not in desc_data:
+                        schema_cache[schema_key] = desc_data
+                except Exception:
+                    logger.warning("enrich_from_database: describe_table failed for %s", schema_key)
+            return table_list, schema_cache
+
+        try:
+            table_list, schema_cache = asyncio.run(_fetch_db_state())
+        except Exception as exc:
+            logger.exception("enrich_from_database: failed to query database")
+            return {"status": "error", "detail": f"Failed to query database: {exc}"}
+
+        if not table_list:
+            return {"status": "ok", "detail": "No tables found in the database.", "created": 0, "updated": 0, "stale": 0}
+
+        # ── Prepare wiki state ─────────────────────────────────────
+        # Find all existing DB-enriched concept pages (pages with resource: db://...)
+        existing_db_pages: Dict[str, Path] = {}  # schema.table -> path
+        for concept_path in sorted(self.concepts_dir.glob("*.md")):
+            try:
+                text = concept_path.read_text(encoding="utf-8", errors="ignore")
+            except Exception:
+                continue
+            fm, _ = self._split_frontmatter_block(text)
+            if not fm:
+                fm, _ = self._extract_embedded_frontmatter_block(text)
+            if not fm:
+                continue
+            resource_match = re.search(r"^resource:\s*db://(.+?)\s*$", fm, flags=re.M)
+            if resource_match:
+                existing_db_pages[resource_match.group(1).strip()] = concept_path
+
+        # ── Process each table ─────────────────────────────────────
+        now_iso = datetime.now(timezone.utc).isoformat()
+        created = 0
+        updated = 0
+        errors: List[str] = []
+
+        for table_info in table_list:
+            schema_name = str(table_info.get("schema", "public"))
+            table_name = str(table_info.get("table", ""))
+            if not table_name:
+                continue
+            schema_key = f"{schema_name}.{table_name}"
+            page_slug = f"db-{schema_name}-{table_name}"
+            page_path = self.concepts_dir / f"{page_slug}.md"
+            approx_rows = table_info.get("approx_rows", 0)
+
+            schema_data = schema_cache.get(schema_key, {})
+
+            try:
+                # Build schema markdown table
+                columns = schema_data.get("columns", [])
+                schema_md = ""
+                join_paths_md = ""
+                if columns:
+                    schema_rows = [
+                        "| Column | Type | Nullable | Default | Constraints |",
+                        "|--------|------|----------|---------|-------------|",
+                    ]
+                    fk_targets: List[Tuple[str, str]] = []  # (column, target_page)
+                    for col in columns:
+                        col_name = col.get("column_name", "")
+                        col_type = col.get("data_type", "")
+                        is_nullable = col.get("is_nullable", "")
+                        col_default = str(col.get("column_default") or "").replace("|", "\\|")
+                        constraint = col.get("constraint_type", "") or ""
+
+                        # Build FK cross-reference
+                        fk_table = col.get("foreign_table_name")
+                        fk_schema = col.get("foreign_table_schema", "public")
+                        if fk_table and constraint == "FOREIGN KEY":
+                            fk_slug = f"db-{fk_schema}-{fk_table}"
+                            constraint_display = (
+                                f"FOREIGN KEY → [[concepts/{fk_slug}]]"
+                            )
+                            fk_targets.append((col_name, f"concepts/{fk_slug}"))
+                        elif constraint:
+                            constraint_display = constraint
+                        else:
+                            constraint_display = ""
+
+                        schema_rows.append(
+                            f"| `{col_name}` | {col_type} | {is_nullable} | {col_default} | {constraint_display} |"
+                        )
+                    schema_md = "\n".join(schema_rows) + "\n"
+
+                    if fk_targets:
+                        join_lines = [
+                            f"- Joined with [[{target}]] on `{col}`"
+                            for col, target in fk_targets
+                        ]
+                        join_paths_md = (
+                            "## Join Paths\n" + "\n".join(join_lines) + "\n\n"
+                        )
+
+                # Build summary
+                row_info = f"~{approx_rows:,} rows. " if approx_rows else ""
+                table_summary = (
+                    f"Database table `{schema_name}.{table_name}`. "
+                    f"{row_info}"
+                    f"{len(columns)} columns."
+                )
+
+                # Build content
+                resource_uri = f"db://{schema_key}"
+                body = (
+                    f"{schema_md}\n"
+                    f"{join_paths_md}"
+                )
+
+                # Check if page already exists (by resource URI or slug)
+                existing_path = existing_db_pages.get(schema_key)
+                if existing_path is None and page_path.exists():
+                    existing_path = page_path
+
+                if existing_path is not None:
+                    # Update existing page
+                    try:
+                        old_text = existing_path.read_text(encoding="utf-8", errors="ignore")
+                    except Exception:
+                        logger.warning(
+                            "enrich_from_database: cannot read %s, skipping",
+                            existing_path,
+                        )
+                        continue
+
+                    # Update frontmatter fingerprint and updated_at
+                    old_fm, old_body = self._split_frontmatter_block(old_text)
+                    if not old_fm:
+                        old_fm, old_body = self._extract_embedded_frontmatter_block(old_text)
+
+                    # Preserve existing tags, update fingerprint
+                    new_fm_lines: List[str] = []
+                    seen_keys: Set[str] = set()
+                    for line in old_fm.split("\n"):
+                        key_match = re.match(r"^(\w+):", line)
+                        if key_match:
+                            seen_keys.add(key_match.group(1))
+                    # Rebuild frontmatter
+                    for line in old_fm.split("\n"):
+                        key_match = re.match(r"^(\w+):", line)
+                        if key_match:
+                            key = key_match.group(1)
+                            if key == "db_status":
+                                # Remove stale marker if table is back
+                                new_fm_lines.append("db_status: connected")
+                                continue
+                            if key == "db_fingerprint":
+                                new_fm_lines.append(f"db_fingerprint: {db_fingerprint}")
+                                continue
+                            if key == "updated_at":
+                                new_fm_lines.append(f"updated_at: {now_iso}")
+                                continue
+                            if key == "resource":
+                                new_fm_lines.append(f"resource: {resource_uri}")
+                                continue
+                        new_fm_lines.append(line)
+                    if "db_fingerprint" not in seen_keys:
+                        new_fm_lines.append(f"db_fingerprint: {db_fingerprint}")
+                    if "db_status" not in seen_keys:
+                        new_fm_lines.append("db_status: connected")
+                    if "tags" not in seen_keys:
+                        new_fm_lines.append("tags: [db-table]")
+
+                    new_fm = "\n".join(new_fm_lines)
+
+                    # Update schema section
+                    updated_text = self._upsert_top_section(
+                        text=old_text,
+                        section_title="Schema",
+                        section_body=schema_md.strip(),
+                    )
+                    if join_paths_md:
+                        updated_text = self._upsert_top_section(
+                            text=updated_text,
+                            section_title="Join Paths",
+                            section_body=join_paths_md.strip().rstrip("\n"),
+                        )
+
+                    # Reassemble with updated frontmatter
+                    _, body = self._split_frontmatter_block(updated_text)
+                    if not _:
+                        _, body = self._extract_embedded_frontmatter_block(updated_text)
+                    body = self._strip_embedded_frontmatter_blocks(body).lstrip("\n")
+                    final_text = f"---\n{new_fm.rstrip()}\n---\n\n{body}"
+
+                    existing_path.write_text(final_text, encoding="utf-8")
+                    updated += 1
+                    logger.info(
+                        "enrich_from_database: updated %s (%s columns)",
+                        schema_key, len(columns),
+                    )
+                else:
+                    # Create new concept page
+                    tags_yaml = "db-table"
+                    new_fm = (
+                        "---\n"
+                        f"title: {table_name}\n"
+                        "type: concept\n"
+                        f"resource: {resource_uri}\n"
+                        f"tags: [{tags_yaml}]\n"
+                        f"db_fingerprint: {db_fingerprint}\n"
+                        "db_status: connected\n"
+                        f"updated_at: {now_iso}\n"
+                        "---"
+                    )
+                    md = (
+                        f"{new_fm}\n\n"
+                        f"# {table_name}\n\n"
+                        f"## Summary\n{table_summary}\n\n"
+                        f"{body}"
+                        "## Sources\n"
+                        "- Auto-generated database documentation\n"
+                    )
+                    page_path.write_text(md, encoding="utf-8")
+                    created += 1
+                    logger.info(
+                        "enrich_from_database: created %s (%s columns, %s rows)",
+                        schema_key, len(columns), approx_rows,
+                    )
+            except Exception as exc:
+                logger.exception(
+                    "enrich_from_database: error processing %s", schema_key,
+                )
+                errors.append(f"{schema_key}: {exc}")
+
+        # ── Mark stale pages ───────────────────────────────────────
+        stale = 0
+        current_tables = {f"{t.get('schema','public')}.{t.get('table','')}" for t in table_list}
+        for schema_key, page_path in existing_db_pages.items():
+            if schema_key in current_tables:
+                continue  # Still exists, already handled above
+            try:
+                text = page_path.read_text(encoding="utf-8", errors="ignore")
+            except Exception:
+                continue
+
+            # Mark as disconnected if not already
+            if "db_status: disconnected" not in text:
+                fm, body = self._split_frontmatter_block(text)
+                if not fm:
+                    fm, body = self._extract_embedded_frontmatter_block(text)
+                # Rebuild frontmatter with disconnected status
+                new_fm_lines: List[str] = []
+                for line in fm.split("\n"):
+                    if re.match(r"^db_status:", line):
+                        new_fm_lines.append("db_status: disconnected")
+                        continue
+                    if re.match(r"^updated_at:", line):
+                        new_fm_lines.append(f"updated_at: {now_iso}")
+                        continue
+                    new_fm_lines.append(line)
+                if "db_status:" not in fm:
+                    new_fm_lines.append("db_status: disconnected")
+                new_fm = "\n".join(new_fm_lines)
+
+                # Prepend a warning banner
+                stale_banner = (
+                    "> ⚠️ **This table no longer exists in the connected database "
+                    f"(`{db_fingerprint}`).** This page is preserved for historical reference.\n\n"
+                )
+                body = self._strip_embedded_frontmatter_blocks(body).lstrip("\n")
+                final_text = f"---\n{new_fm.rstrip()}\n---\n\n{stale_banner}{body}"
+                page_path.write_text(final_text, encoding="utf-8")
+                stale += 1
+                logger.info("enrich_from_database: marked stale %s", schema_key)
+
+        # ── Rebuild index ──────────────────────────────────────────
+        with index_lock():
+            self._rebuild_index()
+
+        summary = {
+            "status": "ok",
+            "db_fingerprint": db_fingerprint,
+            "tables_found": len(table_list),
+            "created": created,
+            "updated": updated,
+            "stale": stale,
+            "errors": errors,
+        }
+        logger.info(
+            "enrich_from_database: done (found=%d, created=%d, updated=%d, stale=%d, errors=%d)",
+            len(table_list), created, updated, stale, len(errors),
+        )
+        return summary
+
     def _repair_analysis_maintenance_links(
         self,
         text: str,
@@ -5584,6 +5924,8 @@ class LLMWikiEngine:
                 entry: Dict[str, Any] = {
                     "name": name,
                     "summary": "",
+                    "tags": [],
+                    "resource": None,
                 }
                 for sec in BULLET_SECTIONS:
                     entry[sec["key"]] = []
@@ -5626,6 +5968,8 @@ class LLMWikiEngine:
         source_title: str,
         source_slug: str,
         updated_at: str,
+        tags: Optional[List[str]] = None,
+        resource: Optional[str] = None,
     ) -> None:
         slug = self._slug(page_name)
         p = folder / f"{slug}.md"
@@ -5642,6 +5986,22 @@ class LLMWikiEngine:
                 else:
                     parts.append(f"## {heading}\n")
             return "\n".join(parts)
+
+        def _render_frontmatter() -> str:
+            """Build YAML frontmatter with optional tags and resource fields."""
+            lines = [
+                "---",
+                f"title: {page_name}",
+                f"type: {page_type}",
+                f"updated_at: {updated_at}",
+            ]
+            if tags:
+                yaml_tags = ", ".join(tags)
+                lines.append(f"tags: [{yaml_tags}]")
+            if resource:
+                lines.append(f"resource: {resource}")
+            lines.append("---")
+            return "\n".join(lines)
 
         if not p.exists():
             # Semantic dedup: check if a similar page already exists under a
@@ -5666,11 +6026,7 @@ class LLMWikiEngine:
                     )
                     sections_md = _render_bullet_sections_md(bullet_sections)
                     md = (
-                        "---\n"
-                        f"title: {page_name}\n"
-                        f"type: {page_type}\n"
-                        f"updated_at: {updated_at}\n"
-                        "---\n\n"
+                        f"{_render_frontmatter()}\n\n"
                         f"# {page_name}\n\n"
                         f"## Summary\n{summary or 'TBD'}\n\n"
                         f"{sections_md}\n"
@@ -5685,11 +6041,7 @@ class LLMWikiEngine:
             if best_match is None or best_match[1] < 4.0:
                 sections_md = _render_bullet_sections_md(bullet_sections)
                 md = (
-                    "---\n"
-                    f"title: {page_name}\n"
-                    f"type: {page_type}\n"
-                    f"updated_at: {updated_at}\n"
-                    "---\n\n"
+                    f"{_render_frontmatter()}\n\n"
                     f"# {page_name}\n\n"
                     f"## Summary\n{summary or 'TBD'}\n\n"
                     f"{sections_md}\n"

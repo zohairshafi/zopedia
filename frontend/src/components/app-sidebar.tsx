@@ -56,6 +56,7 @@ import {
   Settings05Icon,
   ZapIcon,
   Chemistry01Icon,
+  Database01Icon,
 } from "@hugeicons/core-free-icons";
 import {
   Tooltip,
@@ -451,6 +452,38 @@ export function AppSidebar() {
       toast.error("Index rebuild failed", { description: message });
     } finally {
       setIsRunningRebuildIndex(false);
+    }
+  }
+
+  const [isRunningDbEnrich, setIsRunningDbEnrich] = useState(false);
+
+  async function handleDbEnrich(): Promise<void> {
+    if (isRunningDbEnrich || isRunningWikiMaintenance || isRunningWikiLint) return;
+
+    setIsRunningDbEnrich(true);
+    try {
+      const response = await authFetch("/api/inference/wiki/enrich-db", {
+        method: "POST",
+      });
+      if (!response.ok) {
+        const detail = await parseApiErrorMessage(response);
+        // 400 means no DB configured — show as info, not error
+        if (response.status === 400) {
+          toast.info("DB enrichment skipped", { description: detail });
+          return;
+        }
+        throw new Error(detail);
+      }
+      const result = await response.json();
+      toast.success("DB schema synced to wiki", {
+        description: `Tables found: ${result.tables_found ?? 0}. Created: ${result.created ?? 0}. Updated: ${result.updated ?? 0}. Stale: ${result.stale ?? 0}.`,
+      });
+      closeMobileIfOpen();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "DB enrichment failed";
+      toast.error("DB enrichment failed", { description: message });
+    } finally {
+      setIsRunningDbEnrich(false);
     }
   }
 
@@ -865,6 +898,21 @@ export function AppSidebar() {
                       <HugeiconsIcon icon={LicenseMaintenanceIcon} strokeWidth={1.75} className="size-[18px]! shrink-0" />
                       <span className="text-[14px] leading-[18px] tracking-[0.01em]">
                         {isRunningWikiLint ? "Linting..." : "Run Lint"}
+                      </span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      onClick={() => {
+                        void handleDbEnrich();
+                      }}
+                      disabled={isRunningDbEnrich || isRunningWikiMaintenance || isRunningWikiLint}
+                      className="h-[32px] rounded-[10px] gap-[8.5px] px-2.5 font-medium text-[#383835] dark:text-[#c7c7c4] hover:bg-[#f0f0f0]! dark:hover:bg-[#2a2c2f]! hover:text-black! dark:hover:text-white! data-active:bg-[#f0f0f0]! dark:data-active:bg-[#2a2c2f]! data-active:text-black! dark:data-active:text-white!"
+                    >
+                      <HugeiconsIcon icon={Database01Icon} strokeWidth={1.75} className="size-[18px]! shrink-0" />
+                      <span className="text-[14px] leading-[18px] tracking-[0.01em]">
+                        {isRunningDbEnrich ? "Syncing..." : "Sync DB Schema"}
                       </span>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
