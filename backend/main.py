@@ -125,9 +125,74 @@ async def _resolve_subject(request: Request) -> str:
 
 
 @asynccontextmanager
+def _maybe_build_frontend() -> bool:
+    """Rebuild the frontend if source files are newer than the dist bundle.
+
+    Only runs in development (not inside a PyInstaller-frozen app).
+    Returns True if a build was triggered, False otherwise.
+    """
+    import subprocess
+
+    # Never rebuild inside a frozen PyInstaller app
+    if getattr(sys, "frozen", False):
+        return False
+
+    project_root = Path(__file__).parent.parent
+    frontend_root = project_root / "frontend"
+    dist_index = _FRONTEND_DIR / "index.html"
+
+    if not (frontend_root / "package.json").exists():
+        return False
+
+    # Check if dist exists and is newer than all source files
+    src_dir = frontend_root / "src"
+    if dist_index.exists() and src_dir.exists():
+        dist_mtime = dist_index.stat().st_mtime
+        newest_src = dist_mtime
+        for pattern in ["src/**/*.ts", "src/**/*.tsx", "src/**/*.css",
+                        "index.html", "vite.config.*", "package.json",
+                        "tsconfig.json"]:
+            for f in frontend_root.glob(pattern):
+                if f.is_file():
+                    newest_src = max(newest_src, f.stat().st_mtime)
+        if dist_mtime >= newest_src:
+            logger.info("Frontend dist is up to date (dist mtime=%s, newest src=%s)",
+                        dist_mtime, newest_src)
+            return False
+
+    logger.info("Building frontend (dist %s, reason=%s)...",
+                "missing" if not dist_index.exists() else "stale",
+                _FRONTEND_DIR)
+
+    try:
+        subprocess.run(
+            ["npm", "run", "build"],
+            cwd=str(frontend_root),
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        logger.info("Frontend build complete")
+        return True
+    except subprocess.TimeoutExpired:
+        logger.warning("Frontend build timed out after 120s — serving existing dist")
+        return False
+    except subprocess.CalledProcessError as exc:
+        logger.warning("Frontend build failed (exit %s): %s",
+                       exc.returncode, exc.stderr[:500] if exc.stderr else "no output")
+        return False
+    except FileNotFoundError:
+        logger.info("npm not found — skipping frontend build")
+        return False
+
+
 async def lifespan(app: FastAPI):
     """Startup: initialize wiki watcher. Shutdown: stop watcher."""
     logger.info("Starting Zopedia...")
+
+    # Auto-rebuild frontend if sources changed (dev only)
+    _maybe_build_frontend()
 
     # Seed default admin account when auth is enabled
     if not _AUTH_DISABLED:
