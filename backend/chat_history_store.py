@@ -191,6 +191,8 @@ def append_thread_messages(
 
     If the thread doesn't exist yet, creates it. Unlike upsert_thread,
     this does NOT delete existing messages — it only inserts new ones.
+    Uses INSERT OR IGNORE so duplicate message IDs are silently skipped
+    (safe for retries and incremental sync that may overlap).
     """
     conn = _get_connection()
     try:
@@ -208,7 +210,7 @@ def append_thread_messages(
         for msg in messages:
             conn.execute(
                 """
-                INSERT INTO chat_messages (id, thread_id, username, role, content, reasoning_content, parent_id, created_at)
+                INSERT OR IGNORE INTO chat_messages (id, thread_id, username, role, content, reasoning_content, parent_id, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (

@@ -3,35 +3,49 @@ import { db } from "./db";
 import type { MessageRecord, ThreadRecord } from "./types";
 
 const DEBOUNCE_MS = 2000;
+const MAX_MESSAGE_CONTENT_BYTES = 40_000; // chunk messages exceeding ~40KB serialized
 const debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+// In-memory set of message IDs already confirmed synced to the server.
+// Survives within a session; on page reload it resets, but the server
+// uses INSERT OR IGNORE so re-sending is harmless.
+const syncedMessageIds = new Set<string>();
+
+export function markMessagesSynced(ids: string[]): void {
+  for (const id of ids) syncedMessageIds.add(id);
+}
 
 function flushPendingSaves() {
   for (const [threadId, timer] of debounceTimers) {
     clearTimeout(timer);
     debounceTimers.delete(threadId);
-    void (async () => {
-      const thread = await db.threads.get(threadId);
-      if (!thread) return;
-      const msgCount = await db.messages.count();
-      const msgs = msgCount === 0
-        ? []
-        : await db.messages.where("threadId").equals(threadId).sortBy("createdAt");
-      if (msgs.length === 0) return;
-      await saveThreadToServer(
-        threadId,
-        thread.title,
-        msgs.map((m) => ({
-          id: m.id,
-          role: m.role,
-          content: m.content,
-          reasoning_content: (m.metadata as any)?.reasoning_content,
-          parent_id: m.parentId,
-          created_at: new Date(m.createdAt).toISOString(),
-        })),
-        thread.createdAt,
-      );
-    })();
+    void syncThreadToServer(threadId);
   }
+}
+
+function chunkLargeContent(content: unknown): unknown[] {
+  // If content is a string and exceeds the size threshold, split it at
+  // paragraph boundaries so each chunk stays under the limit.
+  if (typeof content !== "string") return [content];
+  const jsonSize = new TextEncoder().encode(JSON.stringify(content)).length;
+  if (jsonSize <= MAX_MESSAGE_CONTENT_BYTES) return [content];
+
+  // Split at double-newline (paragraph) boundaries
+  const parts: string[] = [];
+  let remaining = content;
+  while (remaining.length > 0) {
+    // Take a chunk that fits within the byte limit
+    let chunk = remaining.slice(0, Math.floor(MAX_MESSAGE_CONTENT_BYTES / 2));
+    // Back up to the last paragraph boundary
+    const lastBreak = chunk.lastIndexOf("\n\n");
+    if (lastBreak > chunk.length / 2) {
+      chunk = chunk.slice(0, lastBreak);
+    }
+    parts.push(chunk.trim());
+    remaining = remaining.slice(chunk.length).trimStart();
+  }
+  console.log("[sync] chunked large message into", parts.length, "parts");
+  return parts;
 }
 
 if (typeof document !== "undefined") {
@@ -95,6 +109,99 @@ export async function saveThreadToServer(
     console.log("[sync] saveThreadToServer:", res.status, { threadId, msgCount: messages.length });
   } catch (err) {
     console.error("[sync] saveThreadToServer failed:", err);
+  }
+}
+
+async function appendMessagesToServer(
+  threadId: string,
+  title: string | undefined,
+  messages: Array<{ id: string; role: string; content: any; reasoning_content?: string; parent_id?: string | null; created_at?: string }>,
+): Promise<string[]> {
+  // Append only these messages to the server. Returns the IDs that were confirmed synced.
+  if (messages.length === 0) return [];
+  try {
+    const res = await authFetch(`/api/chat/threads/${encodeURIComponent(threadId)}/messages`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ thread_id: threadId, title, messages }),
+      keepalive: true,
+    });
+    console.log("[sync] appendMessagesToServer:", res.status, { threadId, msgCount: messages.length });
+    return res.ok ? messages.map((m) => m.id) : [];
+  } catch (err) {
+    console.error("[sync] appendMessagesToServer failed:", err);
+    return [];
+  }
+}
+
+async function syncThreadToServer(threadId: string): Promise<void> {
+  // Incrementally sync a thread: send only unsynced messages via append.
+  const thread = await db.threads.get(threadId);
+  if (!thread) return;
+
+  const msgCount = await db.messages.count();
+  const allMsgs: MessageRecord[] = msgCount === 0
+    ? []
+    : await db.messages.where("threadId").equals(threadId).sortBy("createdAt");
+
+  if (allMsgs.length === 0) return;
+
+  // Filter to messages not yet synced
+  const unsynced = allMsgs.filter((m) => !syncedMessageIds.has(m.id));
+  if (unsynced.length === 0) {
+    console.log("[sync] all messages already synced for", threadId);
+    return;
+  }
+
+  // Prepare messages, chunking oversized content
+  type Msg = {
+    id: string;
+    role: string;
+    content: unknown;
+    reasoning_content?: string;
+    parent_id?: string | null;
+    created_at?: string;
+  };
+  const toSend: Msg[] = [];
+  for (const m of unsynced) {
+    const chunks = chunkLargeContent(m.content);
+    if (chunks.length === 1) {
+      toSend.push({
+        id: m.id,
+        role: m.role,
+        content: m.content,
+        reasoning_content: (m.metadata as any)?.reasoning_content,
+        parent_id: m.parentId,
+        created_at: new Date(m.createdAt).toISOString(),
+      });
+    } else {
+      // Split oversized message into chunked sub-messages
+      for (let i = 0; i < chunks.length; i++) {
+        toSend.push({
+          id: `${m.id}-chunk-${i}`,
+          role: m.role,
+          content: chunks[i],
+          reasoning_content: (m.metadata as any)?.reasoning_content,
+          parent_id: i === 0 ? m.parentId : `${m.id}-chunk-${i - 1}`,
+          created_at: new Date(m.createdAt + i).toISOString(),
+        });
+      }
+    }
+  }
+
+  // First sync for this thread: send all messages as full sync (ensures server
+  // state matches). After that, use append-only.
+  const isFirstSync = allMsgs.every((m) => !syncedMessageIds.has(m.id));
+
+  if (isFirstSync) {
+    await saveThreadToServer(threadId, thread.title, toSend, thread.createdAt);
+  } else {
+    await appendMessagesToServer(threadId, thread.title, toSend);
+  }
+
+  // Mark all original message IDs as synced (not the chunk IDs)
+  for (const m of unsynced) {
+    syncedMessageIds.add(m.id);
   }
 }
 
@@ -209,6 +316,8 @@ export async function syncThreadMessagesFromServer(threadId: string): Promise<vo
         createdAt: new Date(msg.created_at).getTime(),
       });
     }
+    // Mark server-fetched messages as synced so we don't re-send them
+    syncedMessageIds.add(msg.id);
   }
 }
 
@@ -220,32 +329,17 @@ export function debouncedSaveThreadToServer(threadId: string): void {
     threadId,
     setTimeout(async () => {
       debounceTimers.delete(threadId);
-      const thread = await db.threads.get(threadId);
-      if (!thread) return;
-      const msgCount = await db.messages.count();
-      const msgs = msgCount === 0
-        ? []
-        : await db.messages.where("threadId").equals(threadId).sortBy("createdAt");
-      if (msgs.length === 0) return;
-      await saveThreadToServer(
-        threadId,
-        thread.title,
-        msgs.map((m) => ({
-          id: m.id,
-          role: m.role,
-          content: m.content,
-          reasoning_content: (m.metadata as any)?.reasoning_content,
-          parent_id: m.parentId,
-          created_at: new Date(m.createdAt).toISOString(),
-        })),
-        thread.createdAt,
-      );
+      await syncThreadToServer(threadId);
     }, DEBOUNCE_MS)
   );
 }
 
 export async function deleteThreadFromBoth(threadId: string): Promise<void> {
   await deleteThreadFromServer(threadId);
+  // Clean up synced tracking for this thread
+  const msgCount = await db.messages.count();
+  const msgs = msgCount === 0 ? [] : await db.messages.where("threadId").equals(threadId).toArray();
+  for (const m of msgs) syncedMessageIds.delete(m.id);
   await db.messages.where("threadId").equals(threadId).delete();
   await db.threads.delete(threadId);
 }
@@ -280,6 +374,8 @@ export async function maybeMigrateLocalToServer(): Promise<boolean> {
       })),
       thread.createdAt,
     );
+    // Mark migrated messages as synced
+    for (const m of msgs) syncedMessageIds.add(m.id);
   }
   return true;
 }

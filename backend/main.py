@@ -465,6 +465,34 @@ async def _chat_history_patch_thread(thread_id: str, request: Request):
     return {"status": "ok", "thread_id": thread_id, "title": title}
 
 
+class _ChatHistoryAppend(_BaseModel):
+    thread_id: str
+    title: Optional[str] = None
+    messages: list[dict]
+
+
+@_chat_history_router.post("/chat/threads/{thread_id}/messages")
+async def _chat_history_append_messages(thread_id: str, body: _ChatHistoryAppend, request: Request):
+    """Append messages without deleting existing ones. For incremental sync."""
+    from datetime import datetime, timezone
+    from chat_history_store import append_thread_messages
+
+    current_subject = await _require_valid_subject(request)
+    logger.info(
+        "chat_history: append_messages for %s thread_id=%s title=%r msgs=%d",
+        current_subject, thread_id, body.title, len(body.messages),
+    )
+    now = datetime.now(timezone.utc).isoformat()
+    append_thread_messages(
+        thread_id=thread_id,
+        username=current_subject,
+        title=body.title,
+        updated_at=now,
+        messages=body.messages,
+    )
+    return {"status": "ok", "thread_id": thread_id, "appended": len(body.messages)}
+
+
 @_chat_history_router.delete("/chat/threads/{thread_id}")
 async def _chat_history_delete_thread(thread_id: str, request: Request):
     from chat_history_store import delete_thread
