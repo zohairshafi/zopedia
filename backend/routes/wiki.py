@@ -730,9 +730,46 @@ async def wiki_enrich_database():
     no longer exist in the database are marked with a stale banner
     (the page is preserved for historical reference).
     """
+    import json as _json
+    from core.database import list_tables, describe_table
+
     manager, _ = get_wiki_components()
+
+    # ── Fetch DB state on the native event loop ────────────────────
+    # asyncpg pools are bound to their creation loop; running queries
+    # inside asyncio.to_thread() or asyncio.run() will fail.
+    table_list: list = []
+    schema_cache: dict = {}
     try:
-        report = await asyncio.to_thread(manager.engine.enrich_from_database)
+        tables_raw = await list_tables()
+        try:
+            tables_data = _json.loads(tables_raw)
+        except _json.JSONDecodeError:
+            tables_data = {}
+        table_list = tables_data.get("tables", [])
+        for t in table_list:
+            schema_key = f"{t['schema']}.{t['table']}"
+            try:
+                desc_raw = await describe_table(t["table"], t["schema"])
+                desc_data = _json.loads(desc_raw)
+                if "error" not in desc_data:
+                    schema_cache[schema_key] = desc_data
+            except Exception:
+                logger.warning("DB enrichment: describe_table failed for %s", schema_key)
+    except Exception as exc:
+        logger.exception("DB enrichment: failed to query database")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to query database: {exc}",
+        )
+
+    # ── Run file-I/O work in a thread ─────────────────────────────
+    try:
+        report = await asyncio.to_thread(
+            manager.engine.enrich_from_database,
+            table_list=table_list,
+            schema_cache=schema_cache,
+        )
     except MaintenanceAlreadyRunningError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
     except Exception as exc:

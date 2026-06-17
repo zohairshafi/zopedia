@@ -3713,17 +3713,28 @@ class LLMWikiEngine:
         }
 
     @_requires_maintenance_lock
-    def enrich_from_database(self) -> Dict[str, Any]:
+    def enrich_from_database(
+        self,
+        table_list: Optional[List[Dict]] = None,
+        schema_cache: Optional[Dict[str, Dict]] = None,
+    ) -> Dict[str, Any]:
         """Create/update wiki concept pages for every table in the connected database.
 
         Requires ZOPEDIA_DATABASE_URL to be configured.  Does NOT require an
         LLM call — schema documentation is purely structural (column names,
         types, constraints, FK relationships).
 
+        *table_list* and *schema_cache* should be pre-fetched by the route
+        layer (on the native event loop, to avoid asyncpg cross-loop errors).
+        When called without arguments (e.g. from tests), an empty result is
+        returned.
+
         Returns a summary dict suitable for the /wiki/enrich-db API response.
         """
-        import asyncio
-        from core.database import list_tables, describe_table
+        if table_list is None:
+            table_list = []
+        if schema_cache is None:
+            schema_cache = {}
 
         db_url = os.getenv("ZOPEDIA_DATABASE_URL", "").strip()
         if not db_url:
@@ -3739,33 +3750,8 @@ class LLMWikiEngine:
         except Exception:
             db_fingerprint = "unknown"
 
-        # ── Fetch current DB state ──────────────────────────────────
-        logger.info("enrich_from_database: fetching table list (fingerprint=%s)", db_fingerprint)
-
-        async def _fetch_db_state():
-            tables_raw = await list_tables()
-            try:
-                tables_data = json.loads(tables_raw)
-            except json.JSONDecodeError:
-                return [], {}
-            table_list = tables_data.get("tables", [])
-            schema_cache: Dict[str, Dict] = {}
-            for t in table_list:
-                schema_key = f"{t['schema']}.{t['table']}"
-                try:
-                    desc_raw = await describe_table(t["table"], t["schema"])
-                    desc_data = json.loads(desc_raw)
-                    if "error" not in desc_data:
-                        schema_cache[schema_key] = desc_data
-                except Exception:
-                    logger.warning("enrich_from_database: describe_table failed for %s", schema_key)
-            return table_list, schema_cache
-
-        try:
-            table_list, schema_cache = asyncio.run(_fetch_db_state())
-        except Exception as exc:
-            logger.exception("enrich_from_database: failed to query database")
-            return {"status": "error", "detail": f"Failed to query database: {exc}"}
+        logger.info("enrich_from_database: processing %d tables (fingerprint=%s)",
+                     len(table_list), db_fingerprint)
 
         if not table_list:
             return {"status": "ok", "detail": "No tables found in the database.", "created": 0, "updated": 0, "stale": 0}
