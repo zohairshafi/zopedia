@@ -33,6 +33,7 @@ import {
   syncThreadListFromServer,
   syncThreadMessagesFromServer,
   debouncedSaveThreadToServer,
+  updateThreadTitleOnServer,
   deleteThreadFromBoth,
   maybeMigrateLocalToServer,
 } from "./chat-server-sync";
@@ -434,13 +435,19 @@ function createDexieAdapter(
 
       async function persistTitle(title: string): Promise<void> {
         await db.threads.update(remoteId, { title });
+        // Save directly to server so the auto-generated title survives reload
+        // and appears correctly in other browsers (same fix as rename).
+        updateThreadTitleOnServer(remoteId, title).catch(() => {});
         if (!pairId) return;
         const paired = await db.threads
           .where("pairId")
           .equals(pairId)
           .filter((t) => t.id !== remoteId)
           .first();
-        if (paired) await db.threads.update(paired.id, { title });
+        if (paired) {
+          await db.threads.update(paired.id, { title });
+          updateThreadTitleOnServer(paired.id, title).catch(() => {});
+        }
       }
 
       if (!thread) {
