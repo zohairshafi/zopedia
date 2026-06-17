@@ -227,6 +227,23 @@ def append_thread_messages(
         conn.close()
 
 
+def patch_thread_title(thread_id: str, username: str, title: str) -> bool:
+    """Update only the title of an existing thread. Does not touch messages."""
+    from datetime import datetime, timezone
+
+    conn = _get_connection()
+    try:
+        now = datetime.now(timezone.utc).isoformat()
+        cur = conn.execute(
+            "UPDATE chat_threads SET title = ?, updated_at = ? WHERE id = ? AND username = ?",
+            (title, now, thread_id, username),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
 def delete_thread(thread_id: str, username: str) -> bool:
     conn = _get_connection()
     try:

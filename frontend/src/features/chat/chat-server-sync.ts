@@ -98,6 +98,20 @@ export async function saveThreadToServer(
   }
 }
 
+export async function updateThreadTitleOnServer(threadId: string, title: string): Promise<void> {
+  try {
+    const res = await authFetch(`/api/chat/threads/${encodeURIComponent(threadId)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title }),
+    });
+    console.log("[sync] updateThreadTitleOnServer:", res.status, { threadId, title });
+  } catch (err) {
+    console.error("[sync] updateThreadTitleOnServer failed:", err);
+    throw err; // Surface errors so the UI can show a toast
+  }
+}
+
 export async function deleteThreadFromServer(threadId: string): Promise<void> {
   try {
     await authFetch(`/api/chat/threads/${encodeURIComponent(threadId)}`, { method: "DELETE" });

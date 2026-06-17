@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { db, useLiveQuery } from "../db";
 import { useChatRuntimeStore } from "../stores/chat-runtime-store";
 import type { ThreadRecord } from "../types";
-import { debouncedSaveThreadToServer, deleteThreadFromServer } from "../chat-server-sync";
+import { debouncedSaveThreadToServer, deleteThreadFromServer, updateThreadTitleOnServer } from "../chat-server-sync";
 
 const LOADING_TIMEOUT_MS = 6000;
 
@@ -146,7 +146,10 @@ export async function renameChatItem(
 
   if (item.type === "single") {
     await db.threads.update(item.id, { title });
-    debouncedSaveThreadToServer(item.id);
+    // Save title directly to server — no debounce, no message dependency.
+    // (debouncedSaveThreadToServer requires messages to exist, so a rename
+    // before any messages are synced would silently drop the title update.)
+    await updateThreadTitleOnServer(item.id, title).catch(() => {});
     return;
   }
 
@@ -159,6 +162,6 @@ export async function renameChatItem(
     }
   });
   for (const id of threadIds) {
-    debouncedSaveThreadToServer(id);
+    await updateThreadTitleOnServer(id, title).catch(() => {});
   }
 }

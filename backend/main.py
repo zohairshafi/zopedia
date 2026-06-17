@@ -385,6 +385,21 @@ async def _chat_history_save_thread(body: _ChatHistoryThread, request: Request):
     return {"status": "ok", "thread_id": body.thread_id}
 
 
+@_chat_history_router.patch("/chat/threads/{thread_id}")
+async def _chat_history_patch_thread(thread_id: str, request: Request):
+    from chat_history_store import patch_thread_title
+
+    current_subject = await _require_valid_subject(request)
+    body = await request.json()
+    title = (body.get("title") or "").strip()
+    if not title:
+        raise HTTPException(status_code=422, detail="Title is required")
+    updated = patch_thread_title(thread_id, current_subject, title)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    return {"status": "ok", "thread_id": thread_id, "title": title}
+
+
 @_chat_history_router.delete("/chat/threads/{thread_id}")
 async def _chat_history_delete_thread(thread_id: str, request: Request):
     from chat_history_store import delete_thread
