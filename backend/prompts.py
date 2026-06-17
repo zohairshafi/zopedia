@@ -492,8 +492,8 @@ def wiki_source_extraction_prompt(title: str, text: str, max_chars: int) -> str:
         "Extract structured knowledge from the source.\n"
         "Return strict JSON with keys:\n"
         "summary: string\n"
-        "entities: list of {name, summary, facts:[], contradictions:[], assumptions:[], data:[], tags:[], resource:null}\n"
-        "concepts: list of {name, summary, facts:[], contradictions:[], assumptions:[], data:[], tags:[], resource:null}\n\n"
+        "entities: list of {name, summary, facts:[], contradictions:[], assumptions:[], data:[], tags:[], resources:[]}\n"
+        "concepts: list of {name, summary, facts:[], contradictions:[], assumptions:[], data:[], tags:[], resources:[]}\n\n"
         "Definitions:\n"
         "- Entities = named people, companies, projects, products, APIs, tools, places, or specific named things mentioned in the source.\n"
         "- Concepts = key ideas, techniques, methodologies, patterns, frameworks, protocols, formats, principles, or abstract topics the source discusses or relies on. Concepts are NOT named entities — they describe what the source is about at a thematic level.\n"
@@ -502,7 +502,7 @@ def wiki_source_extraction_prompt(title: str, text: str, max_chars: int) -> str:
         "- Assumptions = things the source takes for granted or presupposes without justification (e.g., assumed prior knowledge, unstated premises, implicit beliefs).\n"
         "- Data = specific numbers, statistics, measurements, metrics, or structured data points mentioned in the source.\n"
         "- Tags = 2-5 lowercase categorization keywords (e.g., bmw, automotive, engine). Use existing tags from KNOWN_CONCEPTS/ENTITIES where applicable.\n"
-        "- Resource = the URL or identifier of the primary source this knowledge came from, or null if unknown. Use the source URL when available.\n\n"
+        "- Resources = list of URLs or identifiers of the sources this knowledge came from (use the source URL when available). Include all sources that contributed to this entity or concept.\n\n"
         "Rules:\n"
         "- Be source-grounded and thorough\n"
         "- Keep facts concise (one sentence each)\n"
@@ -524,8 +524,8 @@ def wiki_json_repair_prompt(title: str, model_output: str, source_hint: str) -> 
         "Schema:\n"
         "{\n"
         '  "summary": "string",\n'
-        '  "entities": [{"name":"string","summary":"string","facts":["string"],"contradictions":["string"],"assumptions":["string"],"data":["string"],"tags":["string"],"resource":"string|null"}],\n'
-        '  "concepts": [{"name":"string","summary":"string","facts":["string"],"contradictions":["string"],"assumptions":["string"],"data":["string"],"tags":["string"],"resource":"string|null"}]\n'
+        '  "entities": [{"name":"string","summary":"string","facts":["string"],"contradictions":["string"],"assumptions":["string"],"data":["string"],"tags":["string"],"resources":["string"]}],\n'
+        '  "concepts": [{"name":"string","summary":"string","facts":["string"],"contradictions":["string"],"assumptions":["string"],"data":["string"],"tags":["string"],"resources":["string"]}]\n'
         "}\n"
         "If a field is unknown, use empty string or empty array.\n"
         "Do not include markdown fences.\n\n"

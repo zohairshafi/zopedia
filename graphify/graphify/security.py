@@ -1,6 +1,7 @@
 # Security helpers - URL validation, safe fetch, path guards, label sanitisation
 from __future__ import annotations
 
+import gzip
 import html
 import re
 import urllib.error
@@ -122,7 +123,18 @@ def safe_fetch(url: str, max_bytes: int = _MAX_FETCH_BYTES, timeout: int = 30) -
                 )
             chunks.append(chunk)
 
-    return b"".join(chunks)
+        body = b"".join(chunks)
+
+        # urllib doesn't auto-decompress; handle Content-Encoding ourselves.
+        # Servers that see "Accept-Encoding: gzip" will send compressed responses.
+        content_encoding = resp.headers.get("Content-Encoding", "").strip().lower()
+        if content_encoding in ("gzip", "x-gzip"):
+            try:
+                body = gzip.decompress(body)
+            except Exception:
+                pass  # If decompression fails, return the raw bytes as-is
+
+    return body
 
 
 def safe_fetch_text(

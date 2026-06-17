@@ -1,4 +1,4 @@
-import { apiUrl } from "@/lib/api-base";
+import { authFetch } from "@/features/auth";
 import { useEffect, useState, useCallback } from "react";
 import {
   Tooltip,
@@ -12,7 +12,7 @@ export function WikiWarningIndicator() {
   const [rebuilding, setRebuilding] = useState(false);
 
   const fetchWarnings = useCallback(() => {
-    fetch(apiUrl("/api/inference/wiki/warnings"))
+    authFetch("/api/inference/wiki/warnings")
       .then((r) => r.json())
       .then((data: any) => {
         setWarning(data?.warning ? data : null);
@@ -27,7 +27,7 @@ export function WikiWarningIndicator() {
   const rebuild = useCallback(async () => {
     setRebuilding(true);
     try {
-      const resp = await fetch(apiUrl("/api/inference/wiki/rebuild-index"), {
+      const resp = await authFetch("/api/inference/wiki/rebuild-index", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({}),

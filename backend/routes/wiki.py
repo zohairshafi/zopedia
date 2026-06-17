@@ -190,6 +190,18 @@ async def _optional_subject(request: Request) -> str:
     return "local-user"
 
 
+async def _require_valid_subject_dep(request: Request) -> str:
+    """Require valid auth when auth is enabled; raises 401 on expired/invalid tokens.
+
+    The 401 triggers authFetch's auto-refresh on the frontend, so the user
+    doesn't silently lose their identity mid-session.
+    """
+    require_valid = getattr(request.app.state, "require_valid_subject", None)
+    if require_valid is not None:
+        return await require_valid(request)
+    return "local-user"
+
+
 # ── Helpers ────────────────────────────────────────────────────────
 
 def _live_route_rag_limits() -> tuple[int, int, int, bool]:
@@ -428,7 +440,7 @@ def _get_route_rag_context(
 # ── RAG Debug Endpoints ────────────────────────────────────────────
 
 @router.post("/rag/debug/context", response_model=RagContextDebugResponse)
-async def debug_rag_context(payload: RagContextDebugRequest, current_subject: str = Depends(_optional_subject)):
+async def debug_rag_context(payload: RagContextDebugRequest, current_subject: str = Depends(_require_valid_subject_dep)):
     if payload.include_pending_raw:
         _ingest_pending_raw_files(respect_interval_gate=False)
     _, debug_payload = _get_route_rag_context(payload.query, return_debug=True, max_pages_override=payload.max_pages, max_chars_per_page_override=payload.max_chars_per_page, max_total_chars_override=payload.max_total_chars, debug_source="live-query")
@@ -436,7 +448,7 @@ async def debug_rag_context(payload: RagContextDebugRequest, current_subject: st
 
 
 @router.get("/rag/debug/last", response_model=RagContextDebugResponse)
-async def debug_rag_last_request(current_subject: str = Depends(_optional_subject)):
+async def debug_rag_last_request(current_subject: str = Depends(_require_valid_subject_dep)):
     if not _LAST_RAG_DEBUG:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No RAG debug record available yet.")
     return _to_rag_debug_response(_LAST_RAG_DEBUG)
@@ -527,7 +539,7 @@ def _archive_stale_wiki_pages(*, dry_run: bool, keep_recent_chat: int, keep_rece
 
 
 @router.post("/wiki/archive/stale", response_model=WikiArchiveResponse)
-async def archive_stale_wiki_sources(payload: WikiArchiveRequest, current_subject: str = Depends(_optional_subject)):
+async def archive_stale_wiki_sources(payload: WikiArchiveRequest, current_subject: str = Depends(_require_valid_subject_dep)):
     report = _archive_stale_wiki_pages(dry_run=payload.dry_run, keep_recent_chat=payload.keep_recent_chat, keep_recent_per_source=payload.keep_recent_per_source, move_raw_files=payload.move_raw_files)
     if report["moved_count"] and not payload.dry_run:
         manager, _ = get_wiki_components()
@@ -558,7 +570,7 @@ def _to_wiki_data_graph_response(report: dict[str, Any]) -> WikiDataGraphRespons
 
 
 @router.get("/wiki/data/graph", response_model=WikiDataGraphResponse)
-async def wiki_data_graph(include_analysis: bool = True, current_subject: str = Depends(_optional_subject)):
+async def wiki_data_graph(include_analysis: bool = True, current_subject: str = Depends(_require_valid_subject_dep)):
     manager, _ = get_wiki_components()
     try:
         report = manager.get_wiki_data_graph(include_analysis=include_analysis)
@@ -568,7 +580,7 @@ async def wiki_data_graph(include_analysis: bool = True, current_subject: str = 
 
 
 @router.post("/wiki/delete/preview", response_model=WikiDeleteResponse)
-async def wiki_delete_preview(payload: WikiDeletePreviewRequest, current_subject: str = Depends(_optional_subject)):
+async def wiki_delete_preview(payload: WikiDeletePreviewRequest, current_subject: str = Depends(_require_valid_subject_dep)):
     manager, _ = get_wiki_components()
     try:
         report = manager.delete_wiki_entries(entry_type=payload.entry_type, entries=payload.entries, dry_run=True, cascade_orphan_knowledge=payload.cascade_orphan_knowledge, hard_delete=False)
@@ -578,7 +590,7 @@ async def wiki_delete_preview(payload: WikiDeletePreviewRequest, current_subject
 
 
 @router.post("/wiki/delete/apply", response_model=WikiDeleteResponse)
-async def wiki_delete_apply(payload: WikiDeleteApplyRequest, current_subject: str = Depends(_optional_subject)):
+async def wiki_delete_apply(payload: WikiDeleteApplyRequest, current_subject: str = Depends(_require_valid_subject_dep)):
     manager, _ = get_wiki_components()
     try:
         report = manager.delete_wiki_entries(entry_type=payload.entry_type, entries=payload.entries, dry_run=False, cascade_orphan_knowledge=payload.cascade_orphan_knowledge, hard_delete=payload.hard_delete)
@@ -590,7 +602,7 @@ async def wiki_delete_apply(payload: WikiDeleteApplyRequest, current_subject: st
 # ── Wiki Ingest ────────────────────────────────────────────────────
 
 @router.post("/wiki/ingest", response_model=WikiIngestResponse)
-async def wiki_ingest(payload: WikiIngestRequest, current_subject: str = Depends(_optional_subject)):
+async def wiki_ingest(payload: WikiIngestRequest, current_subject: str = Depends(_require_valid_subject_dep)):
     _, ingestor = get_wiki_components()
     if payload.source_path:
         source_str = payload.source_path.strip()
@@ -623,7 +635,7 @@ async def wiki_ingest(payload: WikiIngestRequest, current_subject: str = Depends
 # ── Wiki Enrich ────────────────────────────────────────────────────
 
 @router.post("/wiki/enrich", response_model=WikiEnrichResponse)
-async def wiki_enrich(payload: WikiEnrichRequest, current_subject: str = Depends(_optional_subject)):
+async def wiki_enrich(payload: WikiEnrichRequest, current_subject: str = Depends(_require_valid_subject_dep)):
     manager, _ = get_wiki_components()
     run_retry = (_WIKI_AUTO_RETRY_FALLBACK_MAX_PAGES > 0) if payload.run_fallback_retry_first is None else bool(payload.run_fallback_retry_first)
     if run_retry:
@@ -646,7 +658,7 @@ async def wiki_enrich(payload: WikiEnrichRequest, current_subject: str = Depends
 # ── Wiki Retry Fallback ────────────────────────────────────────────
 
 @router.post("/wiki/retry-fallback", response_model=WikiRetryFallbackResponse)
-async def wiki_retry_fallback(payload: WikiRetryFallbackRequest, current_subject: str = Depends(_optional_subject)):
+async def wiki_retry_fallback(payload: WikiRetryFallbackRequest, current_subject: str = Depends(_require_valid_subject_dep)):
     manager, _ = get_wiki_components()
     try:
         report = await asyncio.to_thread(manager.retry_fallback_analysis_pages, dry_run=payload.dry_run, max_analysis_pages=payload.max_analysis_pages)
@@ -660,7 +672,7 @@ async def wiki_retry_fallback(payload: WikiRetryFallbackRequest, current_subject
 # ── Wiki Analysis Backlinks ────────────────────────────────────────
 
 @router.post("/wiki/analysis-backlinks", response_model=WikiAnalysisBacklinksResponse)
-async def wiki_analysis_backlinks(payload: WikiAnalysisBacklinksRequest, current_subject: str = Depends(_optional_subject)):
+async def wiki_analysis_backlinks(payload: WikiAnalysisBacklinksRequest, current_subject: str = Depends(_require_valid_subject_dep)):
     manager, _ = get_wiki_components()
     try:
         report = await asyncio.to_thread(manager.refresh_analysis_backlinks, dry_run=payload.dry_run, max_analysis_pages=payload.max_analysis_pages, max_links_per_page=payload.max_links_per_page)
@@ -675,7 +687,7 @@ async def wiki_analysis_backlinks(payload: WikiAnalysisBacklinksRequest, current
 
 
 @router.post("/wiki/rebuild-index", response_model=WikiAnalysisBacklinksResponse)
-async def wiki_rebuild_index(payload: WikiAnalysisBacklinksRequest, current_subject: str = Depends(_optional_subject)):
+async def wiki_rebuild_index(payload: WikiAnalysisBacklinksRequest, current_subject: str = Depends(_require_valid_subject_dep)):
     manager, _ = get_wiki_components()
     # Step 1: refresh analysis backlinks (zero LLM calls, pure lexical)
     try:
@@ -805,7 +817,7 @@ async def wiki_warnings():
 # ── Wiki Merge Maintenance ─────────────────────────────────────────
 
 @router.post("/wiki/merge-maintenance", response_model=WikiMergeMaintenanceResponse)
-async def wiki_merge_maintenance(payload: WikiMergeMaintenanceRequest, current_subject: str = Depends(_optional_subject)):
+async def wiki_merge_maintenance(payload: WikiMergeMaintenanceRequest, current_subject: str = Depends(_require_valid_subject_dep)):
     manager, _ = get_wiki_components()
     try:
         report = await asyncio.to_thread(manager.merge_duplicate_knowledge_pages, dry_run=payload.dry_run, include_entities=payload.include_entities, include_concepts=payload.include_concepts, similarity_threshold=payload.similarity_threshold, max_merges=payload.max_merges, semantic_concept_merge=payload.semantic_concept_merge, semantic_merge_writeback=payload.semantic_merge_writeback, compact_knowledge_pages=payload.compact_knowledge_pages, max_incremental_updates=payload.max_incremental_updates)
@@ -819,7 +831,7 @@ async def wiki_merge_maintenance(payload: WikiMergeMaintenanceRequest, current_s
 # ── Wiki Query ─────────────────────────────────────────────────────
 
 @router.post("/wiki/query", response_model=WikiQueryResponse)
-async def wiki_query(payload: WikiQueryRequest, current_subject: str = Depends(_optional_subject)):
+async def wiki_query(payload: WikiQueryRequest, current_subject: str = Depends(_require_valid_subject_dep)):
     if not llm_available():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No upstream LLM configured. Set ZOPEDIA_LLM_BASE_URL and ZOPEDIA_LLM_API_KEY.")
     manager, _ = get_wiki_components()
@@ -861,7 +873,7 @@ async def wiki_query(payload: WikiQueryRequest, current_subject: str = Depends(_
 # ── Wiki Lint ──────────────────────────────────────────────────────
 
 @router.get("/wiki/lint", response_model=WikiLintResponse)
-async def wiki_lint(current_subject: str = Depends(_optional_subject)):
+async def wiki_lint(current_subject: str = Depends(_require_valid_subject_dep)):
     manager, _ = get_wiki_components()
     if _WIKI_AUTO_RETRY_FALLBACK_MAX_PAGES > 0:
         try:
@@ -891,13 +903,13 @@ async def wiki_lint(current_subject: str = Depends(_optional_subject)):
 # ── Wiki Env Config ────────────────────────────────────────────────
 
 @router.get("/wiki/env", response_model=WikiEnvConfigResponse)
-async def wiki_env_config(request: Request, current_subject: str = Depends(_optional_subject)):
+async def wiki_env_config(request: Request, current_subject: str = Depends(_require_valid_subject_dep)):
     restart_supported = callable(getattr(request.app.state, "trigger_restart", None))
     return WikiEnvConfigResponse(status="ok", variables=collect_wiki_env_state(), overrides_file=str(wiki_env_overrides_file()), restart_supported=restart_supported)
 
 
 @router.post("/wiki/env", response_model=WikiEnvSetResponse)
-async def wiki_env_set(payload: WikiEnvSetRequest, request: Request, current_subject: str = Depends(_optional_subject)):
+async def wiki_env_set(payload: WikiEnvSetRequest, request: Request, current_subject: str = Depends(_require_valid_subject_dep)):
     result = update_wiki_env_values(payload.values)
     changed = bool(result.get("updated") or result.get("cleared"))
     restart_supported = callable(getattr(request.app.state, "trigger_restart", None))
@@ -922,7 +934,7 @@ async def wiki_env_set(payload: WikiEnvSetRequest, request: Request, current_sub
 # ── Wiki Graphify Export ───────────────────────────────────────────
 
 @router.post("/wiki/export/graphify-wiki", response_model=WikiGraphifyExportResponse)
-async def wiki_export_graphify_wiki(payload: WikiGraphifyExportRequest, current_subject: str = Depends(_optional_subject)):
+async def wiki_export_graphify_wiki(payload: WikiGraphifyExportRequest, current_subject: str = Depends(_require_valid_subject_dep)):
     manager, _ = get_wiki_components()
     report = manager.engine.export_graphify_wiki(output_subdir=payload.output_subdir)
     return WikiGraphifyExportResponse(status=str(report.get("status", "error")), reason=report.get("reason"), output_dir=str(report.get("output_dir", "")), index_file=str(report.get("index_file", "")), articles_written=int(report.get("articles_written", 0)), communities=int(report.get("communities", 0)), god_nodes=int(report.get("god_nodes", 0)))
@@ -931,7 +943,7 @@ async def wiki_export_graphify_wiki(payload: WikiGraphifyExportRequest, current_
 # ── Chat History Save ─────────────────────────────────────────────
 
 @router.post("/wiki/chat-history/save", response_model=WikiChatHistorySaveResponse)
-async def wiki_save_chat_history(payload: WikiChatHistorySaveRequest, current_subject: str = Depends(_optional_subject)):
+async def wiki_save_chat_history(payload: WikiChatHistorySaveRequest, current_subject: str = Depends(_require_valid_subject_dep)):
     """Save chat history markdown to the wiki raw/ folder for ingestion."""
     # User-scoped path when auth is enabled
     if current_subject and current_subject != "local-user":

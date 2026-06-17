@@ -1,5 +1,5 @@
 import { usePlatformStore } from "@/config/env";
-import { apiUrl } from "@/lib/api-base";
+import { authFetch } from "@/features/auth";
 import { cn } from "@/lib/utils";
 import { useEffect, useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
@@ -31,7 +31,7 @@ export function UpstreamConfigButton({ variant = "ghost", size: _size = "sm", cl
 
   useEffect(() => {
     if (!open) return;
-    fetch(apiUrl("/api/inference/wiki/env"))
+    authFetch("/api/inference/wiki/env")
       .then((r) => r.json())
       .then((data: any) => {
         const vars: any[] = data.variables ?? [];
@@ -47,7 +47,7 @@ export function UpstreamConfigButton({ variant = "ghost", size: _size = "sm", cl
   const save = useCallback(async () => {
     setLoading(true);
     try {
-      const resp = await fetch(apiUrl("/api/inference/wiki/env"), {
+      const resp = await authFetch("/api/inference/wiki/env", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

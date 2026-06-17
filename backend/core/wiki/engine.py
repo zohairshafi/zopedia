@@ -1128,6 +1128,13 @@ class LLMWikiEngine:
         )
         source_path.write_text(source_md, encoding = "utf-8")
 
+        def _merge_resources(llm_resources: List[str], source_ref: str) -> List[str]:
+            """Merge LLM-provided resources with the current source ref."""
+            merged: List[str] = list(llm_resources) if llm_resources else []
+            if source_ref and source_ref != "local" and source_ref not in merged:
+                merged.append(source_ref)
+            return merged
+
         def _build_bullet_sections(entry: Dict) -> Dict[str, List[str]]:
             return {
                 sec["key"]: entry.get(sec["key"], [])
@@ -1145,9 +1152,10 @@ class LLMWikiEngine:
                 source_slug = source_slug,
                 updated_at = now,
                 tags = e.get("tags") if isinstance(e.get("tags"), list) else None,
-                resource = (
-                    e.get("resource") if isinstance(e.get("resource"), str) and e.get("resource")
-                    else (source_ref if source_ref and source_ref != "local" else None)
+                resources = _merge_resources(
+                    e.get("resources") if isinstance(e.get("resources"), list)
+                    else ([e.get("resource")] if isinstance(e.get("resource"), str) and e.get("resource") else []),
+                    source_ref,
                 ),
             )
 
@@ -1162,9 +1170,10 @@ class LLMWikiEngine:
                 source_slug = source_slug,
                 updated_at = now,
                 tags = c.get("tags") if isinstance(c.get("tags"), list) else None,
-                resource = (
-                    c.get("resource") if isinstance(c.get("resource"), str) and c.get("resource")
-                    else (source_ref if source_ref and source_ref != "local" else None)
+                resources = _merge_resources(
+                    c.get("resources") if isinstance(c.get("resources"), list)
+                    else ([c.get("resource")] if isinstance(c.get("resource"), str) and c.get("resource") else []),
+                    source_ref,
                 ),
             )
 
@@ -3757,7 +3766,7 @@ class LLMWikiEngine:
             return {"status": "ok", "detail": "No tables found in the database.", "created": 0, "updated": 0, "stale": 0}
 
         # ── Prepare wiki state ─────────────────────────────────────
-        # Find all existing DB-enriched concept pages (pages with resource: db://...)
+        # Find all existing DB-enriched concept pages (pages with resources: db://...)
         existing_db_pages: Dict[str, Path] = {}  # schema.table -> path
         for concept_path in sorted(self.concepts_dir.glob("*.md")):
             try:
@@ -3769,9 +3778,36 @@ class LLMWikiEngine:
                 fm, _ = self._extract_embedded_frontmatter_block(text)
             if not fm:
                 continue
-            resource_match = re.search(r"^resource:\s*db://(.+?)\s*$", fm, flags=re.M)
+            # Match both new list format and old single format: extract "db://schema.table"
+            resource_match = re.search(r"db://([^\s\"\]'#]+)", fm)
             if resource_match:
                 existing_db_pages[resource_match.group(1).strip()] = concept_path
+
+        def _merge_db_resource_uri(existing_line: str, uri: str) -> str:
+            """Parse *existing_line* (old ``resource:`` or new ``resources: [..]``),
+            ensure *uri* is in the list, and return the new ``resources: [...]`` line."""
+            import yaml
+            def _yfs(v: str) -> str:
+                return yaml.dump(v, default_style='"', width=10_000_000).rstrip("\n")
+            uris: List[str] = []
+            # Try new list format first
+            m = re.match(r"^resources?\s*:\s*\[(.+?)\]", existing_line)
+            if m:
+                for item in m.group(1).split(","):
+                    item = item.strip().strip('"').strip("'").strip()
+                    if item:
+                        uris.append(item)
+            else:
+                # Old single-value format
+                m2 = re.match(r'^resource\s*:\s*"?(.+?)"?\s*$', existing_line)
+                if m2:
+                    val = m2.group(1).strip().strip('"').strip("'").strip()
+                    if val:
+                        uris.append(val)
+            if uri not in uris:
+                uris.append(uri)
+            safe = ", ".join(_yfs(r) for r in uris)
+            return f"resources: [{safe}]"
 
         # ── Process each table ─────────────────────────────────────
         now_iso = datetime.now(timezone.utc).isoformat()
@@ -3895,8 +3931,12 @@ class LLMWikiEngine:
                             if key == "updated_at":
                                 new_fm_lines.append(f"updated_at: {now_iso}")
                                 continue
-                            if key == "resource":
-                                new_fm_lines.append(f"resource: {resource_uri}")
+                            if key in ("resource", "resources"):
+                                # Merge db:// URI into existing resources list
+                                merged_uris = _merge_db_resource_uri(
+                                    line, resource_uri,
+                                )
+                                new_fm_lines.append(merged_uris)
                                 continue
                         new_fm_lines.append(line)
                     if "db_fingerprint" not in seen_keys:
@@ -3905,6 +3945,10 @@ class LLMWikiEngine:
                         new_fm_lines.append("db_status: connected")
                     if "tags" not in seen_keys:
                         new_fm_lines.append("tags: [db-table]")
+                    if "resources" not in seen_keys and "resource" not in seen_keys:
+                        import yaml as _y2
+                        _safe = _y2.dump(resource_uri, default_style='"', width=10_000_000).rstrip("\n")
+                        new_fm_lines.append(f"resources: [{_safe}]")
 
                     new_fm = "\n".join(new_fm_lines)
 
@@ -3936,12 +3980,14 @@ class LLMWikiEngine:
                     )
                 else:
                     # Create new concept page
+                    import yaml as _yaml
+                    _safe_uri = _yaml.dump(resource_uri, default_style='"', width=10_000_000).rstrip("\n")
                     tags_yaml = "db-table"
                     new_fm = (
                         "---\n"
                         f"title: {table_name}\n"
                         "type: concept\n"
-                        f"resource: {resource_uri}\n"
+                        f"resources: [{_safe_uri}]\n"
                         f"tags: [{tags_yaml}]\n"
                         f"db_fingerprint: {db_fingerprint}\n"
                         "db_status: connected\n"
@@ -5911,7 +5957,7 @@ class LLMWikiEngine:
                     "name": name,
                     "summary": "",
                     "tags": [],
-                    "resource": None,
+                    "resources": [],
                 }
                 for sec in BULLET_SECTIONS:
                     entry[sec["key"]] = []
@@ -5955,7 +6001,7 @@ class LLMWikiEngine:
         source_slug: str,
         updated_at: str,
         tags: Optional[List[str]] = None,
-        resource: Optional[str] = None,
+        resources: Optional[List[str]] = None,
     ) -> None:
         slug = self._slug(page_name)
         p = folder / f"{slug}.md"
@@ -5974,7 +6020,7 @@ class LLMWikiEngine:
             return "\n".join(parts)
 
         def _render_frontmatter() -> str:
-            """Build YAML frontmatter with optional tags and resource fields.
+            """Build YAML frontmatter with optional tags and resources fields.
 
             Sanitises all user-supplied values to prevent YAML injection
             (e.g. newlines in titles injecting fake keys, or ']' in tags
@@ -5999,8 +6045,9 @@ class LLMWikiEngine:
             if tags:
                 safe_tags = ", ".join(_yaml_flow_str(t) for t in tags)
                 lines.append("tags: [" + safe_tags + "]")
-            if resource:
-                lines.append("resource: " + _yaml_flow_str(resource))
+            if resources:
+                safe_resources = ", ".join(_yaml_flow_str(r) for r in resources)
+                lines.append("resources: [" + safe_resources + "]")
             lines.append("---")
             return "\n".join(lines)
 
@@ -6127,6 +6174,8 @@ class LLMWikiEngine:
             return
 
         merged = self._set_frontmatter_updated_at(old, updated_at)
+        if resources:
+            merged = self._merge_frontmatter_resources(merged, resources)
         if summary_changed:
             merged = self._replace_markdown_section(
                 merged, "Summary", summary_clean,
@@ -11059,6 +11108,60 @@ class LLMWikiEngine:
             return datetime.fromisoformat(v)
         except Exception:
             return None
+
+    def _merge_frontmatter_resources(self, md: str, new_resources: List[str]) -> str:
+        """Merge *new_resources* into the frontmatter ``resources:`` list, deduplicating.
+
+        Handles both the old single-value ``resource:`` format (migrating it to
+        the list format) and the current ``resources: [...]`` YAML flow sequence.
+        """
+        import yaml
+
+        def _yaml_flow_str(v: str) -> str:
+            return yaml.dump(v, default_style='"', width=10_000_000).rstrip("\n")
+
+        front, body = self._split_frontmatter_block(md)
+        if not front:
+            front, body = self._extract_embedded_frontmatter_block(md)
+
+        body = self._strip_embedded_frontmatter_blocks(body)
+        body = body.lstrip("\n")
+
+        # Collect existing resources from both old and new formats
+        existing: List[str] = []
+
+        # New format: resources: ["a", "b"]
+        m = re.search(r"^resources:\s*\[(.+?)\]", front, flags=re.M)
+        if m:
+            # Simple comma-split for YAML flow sequences of double-quoted scalars
+            for item in m.group(1).split(","):
+                item = item.strip().strip('"').strip("'").strip()
+                if item:
+                    existing.append(item)
+
+        # Old format (migrate): resource: "single-value"
+        if not existing:
+            m_old = re.search(r'^resource:\s*"?(.+?)"?\s*$', front, flags=re.M)
+            if m_old:
+                old_val = m_old.group(1).strip().strip('"').strip("'").strip()
+                if old_val:
+                    existing.append(old_val)
+
+        # Merge and deduplicate (preserve existing order, append new)
+        for r in new_resources:
+            if r not in existing:
+                existing.append(r)
+
+        safe = ", ".join(_yaml_flow_str(r) for r in existing)
+        new_line = f"resources: [{safe}]"
+
+        # Replace existing resources:/resource: line, or append
+        if re.search(r"^resources?\s*:", front, flags=re.M):
+            front = re.sub(r"^resources?\s*:.*$", new_line, front, flags=re.M)
+        else:
+            front = front.rstrip() + f"\n{new_line}\n"
+
+        return f"---\n{front.rstrip()}\n---\n\n{body}"
 
     def _extract_h1_title(self, text: str) -> str:
         """Extract the first H1 heading from page text. Returns empty string if none found."""
