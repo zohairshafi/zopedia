@@ -1980,14 +1980,23 @@ class LLMWikiEngine:
             )
         )
 
-        entity_merge_candidates = self._merge_candidates_for_folder(
-            self.entities_dir,
-            "entities",
+        # Run entity and concept merge candidate discovery in parallel.
+        # Each folder is independent — no shared mutable state.
+        def _merge_for(entry: Tuple[str, Path]) -> List[Dict[str, Any]]:
+            try:
+                return self._merge_candidates_for_folder(entry[1], entry[0])
+            except Exception:
+                logger.error("Merge candidates [%s]: unexpected error", entry[0], exc_info=True)
+                return []
+
+        merge_results = run_parallel(
+            [("entities", self.entities_dir), ("concepts", self.concepts_dir)],
+            _merge_for,
+            max_workers=2,
+            description="merge-candidates-lint",
         )
-        concept_merge_candidates = self._merge_candidates_for_folder(
-            self.concepts_dir,
-            "concepts",
-        )
+        entity_merge_candidates = merge_results[0] if len(merge_results) > 0 else []
+        concept_merge_candidates = merge_results[1] if len(merge_results) > 1 else []
 
         graphify_insights = self._graphify_lint_insights(pages, graph)
 
@@ -2041,34 +2050,46 @@ class LLMWikiEngine:
         semantic_concept_candidates = 0
         semantic_merge_errors: List[str] = []
 
+        # Run entity and/or concept merge candidate discovery in parallel.
+        # Each folder is independent — no shared mutable state.
+        merge_tasks: List[Tuple[str, Path]] = []
         if include_entities:
-            entity_items = self._merge_candidates_for_folder(
-                self.entities_dir,
-                "entities",
-                similarity_threshold = threshold,
-            )
-            entity_candidates = len(entity_items)
-            for item in entity_items:
-                enriched = dict(item)
-                enriched["kind"] = "entity"
-                candidate_pool.append(enriched)
+            merge_tasks.append(("entities", self.entities_dir))
+        if include_concepts and semantic_concept_merge:
+            merge_tasks.append(("concepts", self.concepts_dir))
 
-        if include_concepts:
-            concept_items: List[Dict[str, Any]] = []
-
-            if semantic_concept_merge:
-                concept_items = self._merge_candidates_for_folder(
-                    self.concepts_dir,
-                    "concepts",
-                    similarity_threshold = threshold,
+        def _merge_for(item: Tuple[str, Path]) -> Tuple[str, List[Dict[str, Any]]]:
+            kind, folder = item
+            try:
+                candidates = self._merge_candidates_for_folder(
+                    folder, kind, similarity_threshold=threshold,
                 )
-                semantic_concept_candidates = len(concept_items)
+                return (kind, candidates)
+            except Exception:
+                logger.error("Merge candidates [%s]: unexpected error", kind, exc_info=True)
+                return (kind, [])
 
-            concept_candidates = len(concept_items)
-            for item in concept_items:
-                enriched = dict(item)
-                enriched["kind"] = "concept"
-                candidate_pool.append(enriched)
+        merge_results = run_parallel(
+            merge_tasks,
+            _merge_for,
+            max_workers=2,
+            description="merge-candidates",
+        ) if merge_tasks else []
+
+        for kind, items in merge_results:
+            if kind == "entities":
+                entity_candidates = len(items)
+                for item in items:
+                    enriched = dict(item)
+                    enriched["kind"] = "entity"
+                    candidate_pool.append(enriched)
+            elif kind == "concepts":
+                semantic_concept_candidates = len(items)
+                concept_candidates = len(items)
+                for item in items:
+                    enriched = dict(item)
+                    enriched["kind"] = "concept"
+                    candidate_pool.append(enriched)
 
         candidate_pool.sort(
             key = lambda item: (
@@ -6441,160 +6462,170 @@ class LLMWikiEngine:
                 if len(sub) >= 2:
                     split_components.append(sub)
 
-        # Phase 6: Send each component to LLM for merge grouping
-        all_candidates: List[Dict[str, Any]] = []
-        index_excerpt_cache: Dict[str, str] = {}
-        components_sent = 0
-        components_with_hits = 0
-
-        for component in split_components:
+        # Phase 6: Pre-build index excerpts for all components (read-only
+        # after this point, safe to share across parallel workers).
+        component_inputs: List[Tuple[int, List[str]]] = []
+        index_excerpts: Dict[int, str] = {}  # comp_idx -> index excerpt text
+        for comp_idx, component in enumerate(split_components):
             comp_pages = [page_index[p] for p in component if p in page_index]
             if len(comp_pages) < 2:
                 continue
-
-            comp_pages.sort(key=lambda p: str(p["page"]))
-
-            page_by_id: Dict[str, Dict[str, Any]] = {}
-            lines: List[str] = []
-            for idx, item in enumerate(comp_pages, start=1):
-                page_id = f"C{idx:03d}"
-                page_by_id[page_id] = item
-                summary = str(item.get("summary", "")).strip() or "(no summary)"
-                lines.append(
-                    f"{page_id} | {item['page']} | title: {item['title']} | brief: {summary}"
-                )
-
             comp_paths = [str(p["page"]) for p in comp_pages]
-            cache_key = "\n".join(sorted(comp_paths))
-            if cache_key not in index_excerpt_cache:
-                index_excerpt_cache[cache_key] = self._planner_index_text(comp_paths)
-            index_excerpt = index_excerpt_cache[cache_key]
+            index_excerpts[comp_idx] = self._planner_index_text(comp_paths)
+            component_inputs.append((comp_idx, component))
 
-            prompt = wiki_merge_cluster_prompt(
-                prefix, len(comp_pages), threshold,
-                "\n".join(lines), index_excerpt,
-            )
+        if not component_inputs:
+            return []
 
-            components_sent += 1
-            candidates_before = len(all_candidates)
+        # Phase 7: Send each component to LLM for merge grouping (parallel).
+        # Each component is independent — no shared mutable state.
+        def _process_component(item: Tuple[int, List[str]]) -> List[Dict[str, Any]]:
+            comp_idx, component = item
+            try:
+                comp_pages = [page_index[p] for p in component if p in page_index]
+                if len(comp_pages) < 2:
+                    return []
 
-            raw = str(self.llm_fn(prompt) or "").strip()
-            if not raw:
-                logger.debug("Merge LLM [%s] component #%d (%d pages): empty response", prefix, components_sent, len(comp_pages))
-                continue
+                comp_pages.sort(key=lambda p: str(p["page"]))
 
-            parsed = self._safe_json(raw)
-            if not isinstance(parsed, dict):
-                logger.debug("Merge LLM [%s] component #%d (%d pages): unparseable response (%d chars)", prefix, components_sent, len(comp_pages), len(raw))
-                continue
+                page_by_id: Dict[str, Dict[str, Any]] = {}
+                lines: List[str] = []
+                for idx, p_item in enumerate(comp_pages, start=1):
+                    page_id = f"C{idx:03d}"
+                    page_by_id[page_id] = p_item
+                    summary = str(p_item.get("summary", "")).strip() or "(no summary)"
+                    lines.append(
+                        f"{page_id} | {p_item['page']} | title: {p_item['title']} | brief: {summary}"
+                    )
 
-            clusters_raw = parsed.get("clusters", [])
-            if not isinstance(clusters_raw, list):
-                logger.debug("Merge LLM [%s] component #%d (%d pages): clusters not a list", prefix, components_sent, len(comp_pages))
-                continue
+                index_excerpt = index_excerpts.get(comp_idx, "")
 
-            if not clusters_raw:
-                page_preview = ", ".join(str(p["page"]) for p in comp_pages[:3])
-                if len(comp_pages) > 3:
-                    page_preview += f", ... (+{len(comp_pages) - 3})"
-                logger.info("Merge LLM [%s] component #%d (%d pages): no clusters — %s", prefix, components_sent, len(comp_pages), page_preview)
-            else:
-                logger.info("Merge LLM [%s] component #%d (%d pages): %d clusters found", prefix, components_sent, len(comp_pages), len(clusters_raw))
-
-            # Phase 7: Decompose LLM clusters into (canonical, duplicate) pairs
-            for cluster in clusters_raw:
-                logger.info("  → raw cluster: %s", str(cluster))
-                if not isinstance(cluster, dict):
-                    logger.warning("  → cluster skipped: not a dict (%s)", type(cluster).__name__)
-                    continue
-
-                canonical_raw = str(cluster.get("canonical", "")).strip()
-
-                # Resolve: could be an ID (C001), a path with .md, or a path without .md
-                canonical_info = page_index.get(canonical_raw)
-                if canonical_info is None and not canonical_raw.endswith(".md"):
-                    canonical_info = page_index.get(canonical_raw + ".md")
-                    if canonical_info is not None:
-                        canonical_raw = canonical_raw + ".md"
-                if canonical_info is None and canonical_raw.endswith(".md"):
-                    canonical_info = page_index.get(canonical_raw[:-3])
-                    if canonical_info is not None:
-                        canonical_raw = canonical_raw[:-3]
-                if canonical_info is None:
-                    resolved = page_by_id.get(canonical_raw)
-                    if resolved:
-                        canonical_raw = str(resolved["page"])
-                        canonical_info = page_index.get(canonical_raw)
-
-                if canonical_info is None or canonical_raw not in page_index:
-                    logger.warning("  → cluster skipped: canonical=%r not found in page_index (valid IDs: %s)", canonical_raw, sorted(page_by_id.keys()))
-                    continue
-
-                duplicates_raw = cluster.get("duplicates", [])
-                if not isinstance(duplicates_raw, list):
-                    logger.warning("  → cluster skipped: duplicates is not a list (%s)", type(duplicates_raw).__name__)
-                    continue
-
-                try:
-                    confidence = float(cluster.get("confidence", 0.0))
-                except Exception:
-                    confidence = 0.0
-                confidence = max(0.0, min(1.0, confidence))
-                if confidence < threshold:
-                    logger.warning("  → cluster skipped: confidence=%.2f < threshold=%.2f (canonical=%r)", confidence, threshold, canonical_raw)
-                    continue
-
-                reason = re.sub(r"\s+", " ", str(cluster.get("reason", "")).strip())
-                if len(reason) > 180:
-                    reason = reason[:180].rstrip() + "..."
-
-                logger.info(
-                    "  → cluster: canonical=%s (%s) | duplicates=%s | confidence=%.2f | %s",
-                    canonical_raw,
-                    str(canonical_info.get("title", "")).strip(),
-                    str(duplicates_raw),
-                    confidence,
-                    reason,
+                prompt = wiki_merge_cluster_prompt(
+                    prefix, len(comp_pages), threshold,
+                    "\n".join(lines), index_excerpt,
                 )
 
-                for dup_raw in duplicates_raw:
-                    dup_path = str(dup_raw).strip()
+                raw = str(self.llm_fn(prompt) or "").strip()
+                if not raw:
+                    logger.debug("Merge LLM [%s] component #%d (%d pages): empty response", prefix, comp_idx, len(comp_pages))
+                    return []
 
-                    # Normalize: try exact, with .md, without .md, or by ID
-                    dup_info = page_index.get(dup_path)
-                    if dup_info is None and not dup_path.endswith(".md"):
-                        dup_info = page_index.get(dup_path + ".md")
-                        if dup_info is not None:
-                            dup_path = dup_path + ".md"
-                    if dup_info is None and dup_path.endswith(".md"):
-                        dup_info = page_index.get(dup_path[:-3])
-                        if dup_info is not None:
-                            dup_path = dup_path[:-3]
-                    if dup_info is None:
-                        resolved_dup = page_by_id.get(dup_path)
-                        if resolved_dup:
-                            dup_path = str(resolved_dup["page"])
-                            dup_info = page_index.get(dup_path)
+                parsed = self._safe_json(raw)
+                if not isinstance(parsed, dict):
+                    logger.debug("Merge LLM [%s] component #%d (%d pages): unparseable response (%d chars)", prefix, comp_idx, len(comp_pages), len(raw))
+                    return []
 
-                    if dup_info is None or dup_path not in page_index:
+                clusters_raw = parsed.get("clusters", [])
+                if not isinstance(clusters_raw, list):
+                    logger.debug("Merge LLM [%s] component #%d (%d pages): clusters not a list", prefix, comp_idx, len(comp_pages))
+                    return []
+
+                if not clusters_raw:
+                    page_preview = ", ".join(str(p["page"]) for p in comp_pages[:3])
+                    if len(comp_pages) > 3:
+                        page_preview += f", ... (+{len(comp_pages) - 3})"
+                    logger.info("Merge LLM [%s] component #%d (%d pages): no clusters — %s", prefix, comp_idx, len(comp_pages), page_preview)
+                else:
+                    logger.info("Merge LLM [%s] component #%d (%d pages): %d clusters found", prefix, comp_idx, len(comp_pages), len(clusters_raw))
+
+                # Phase 8: Decompose LLM clusters into (canonical, duplicate) pairs
+                candidates: List[Dict[str, Any]] = []
+                for cluster in clusters_raw:
+                    if not isinstance(cluster, dict):
+                        logger.warning("  → cluster skipped: not a dict (%s)", type(cluster).__name__)
                         continue
-                    if dup_path == canonical_raw:
+
+                    canonical_raw = str(cluster.get("canonical", "")).strip()
+
+                    # Resolve: could be an ID (C001), a path with .md, or a path without .md
+                    canonical_info = page_index.get(canonical_raw)
+                    if canonical_info is None and not canonical_raw.endswith(".md"):
+                        canonical_info = page_index.get(canonical_raw + ".md")
+                        if canonical_info is not None:
+                            canonical_raw = canonical_raw + ".md"
+                    if canonical_info is None and canonical_raw.endswith(".md"):
+                        canonical_info = page_index.get(canonical_raw[:-3])
+                        if canonical_info is not None:
+                            canonical_raw = canonical_raw[:-3]
+                    if canonical_info is None:
+                        resolved = page_by_id.get(canonical_raw)
+                        if resolved:
+                            canonical_raw = str(resolved["page"])
+                            canonical_info = page_index.get(canonical_raw)
+
+                    if canonical_info is None or canonical_raw not in page_index:
+                        logger.warning("  → cluster skipped: canonical=%r not found in page_index (valid IDs: %s)", canonical_raw, sorted(page_by_id.keys()))
                         continue
 
-                    all_candidates.append({
-                        "canonical": canonical_raw,
-                        "canonical_title": str(canonical_info.get("title", "")).strip(),
-                        "duplicate": dup_path,
-                        "duplicate_title": str(dup_info.get("title", "")).strip(),
-                        "similarity": round(confidence, 3),
-                        "reason": (
-                            f"bm25-cluster-llm: {reason}"
-                            if reason else "bm25-cluster-llm"
-                        ),
-                    })
+                    duplicates_raw = cluster.get("duplicates", [])
+                    if not isinstance(duplicates_raw, list):
+                        logger.warning("  → cluster skipped: duplicates is not a list (%s)", type(duplicates_raw).__name__)
+                        continue
 
-            if len(all_candidates) > candidates_before:
-                components_with_hits += 1
+                    try:
+                        confidence = float(cluster.get("confidence", 0.0))
+                    except Exception:
+                        confidence = 0.0
+                    confidence = max(0.0, min(1.0, confidence))
+                    if confidence < threshold:
+                        continue
+
+                    reason = re.sub(r"\s+", " ", str(cluster.get("reason", "")).strip())
+                    if len(reason) > 180:
+                        reason = reason[:180].rstrip() + "..."
+
+                    for dup_raw in duplicates_raw:
+                        dup_path = str(dup_raw).strip()
+
+                        # Normalize: try exact, with .md, without .md, or by ID
+                        dup_info = page_index.get(dup_path)
+                        if dup_info is None and not dup_path.endswith(".md"):
+                            dup_info = page_index.get(dup_path + ".md")
+                            if dup_info is not None:
+                                dup_path = dup_path + ".md"
+                        if dup_info is None and dup_path.endswith(".md"):
+                            dup_info = page_index.get(dup_path[:-3])
+                            if dup_info is not None:
+                                dup_path = dup_path[:-3]
+                        if dup_info is None:
+                            resolved_dup = page_by_id.get(dup_path)
+                            if resolved_dup:
+                                dup_path = str(resolved_dup["page"])
+                                dup_info = page_index.get(dup_path)
+
+                        if dup_info is None or dup_path not in page_index:
+                            continue
+                        if dup_path == canonical_raw:
+                            continue
+
+                        candidates.append({
+                            "canonical": canonical_raw,
+                            "canonical_title": str(canonical_info.get("title", "")).strip(),
+                            "duplicate": dup_path,
+                            "duplicate_title": str(dup_info.get("title", "")).strip(),
+                            "similarity": round(confidence, 3),
+                            "reason": (
+                                f"bm25-cluster-llm: {reason}"
+                                if reason else "bm25-cluster-llm"
+                            ),
+                        })
+                return candidates
+            except Exception:
+                logger.error(
+                    "Merge LLM [%s] component #%d: unexpected error",
+                    prefix, comp_idx, exc_info=True,
+                )
+                return []
+
+        component_results = run_parallel(
+            component_inputs,
+            _process_component,
+            description=f"merge-llm-{prefix}",
+        )
+        all_candidates: List[Dict[str, Any]] = []
+        for result in component_results:
+            if result:
+                all_candidates.extend(result)
 
         # Deduplicate by pair, keep highest similarity
         best_by_pair: Dict[Tuple[str, str], Dict[str, Any]] = {}
@@ -6614,9 +6645,11 @@ class LLMWikiEngine:
         )
 
         # Log hit rate and preview top candidates
+        total_components = len(component_inputs)
+        components_with_hits = sum(1 for r in component_results if r)
         hit_rate = (
-            f"{components_with_hits}/{components_sent}"
-            if components_sent > 0 else "0/0"
+            f"{components_with_hits}/{total_components}"
+            if total_components > 0 else "0/0"
         )
         logger.info(
             "Merge candidates [%s]: %s components yielded candidates, %d unique pairs",
@@ -7852,21 +7885,68 @@ class LLMWikiEngine:
             return rel
 
         # ── Communities first (entities then concepts) ──────────────
+        # Collect all communities into a flat list preserving order
+        # (entities first, then concepts).  Each community's LLM naming
+        # and file write is independent — safe to parallelize.
+        community_tasks: List[Tuple[int, str, frozenset[str]]] = []
+
         for ckind, communities, covered, all_nodes_label in [
             ("entity", entity_communities, entity_covered, "entities"),
             ("concept", concept_communities, concept_covered, "concepts"),
         ]:
             if not communities:
                 continue
-            section = "## Entity Communities" if ckind == "entity" else "## Concept Communities"
-            index_lines.append(section)
             for community in communities:
-                llm_slug, desc = _describe_community(community)
-                slug = _community_slug(community, ckind, llm_slug)
-                rel = _write_community_file(community, slug, ckind)
+                community_tasks.append((len(community_tasks), ckind, community))
+
+        if community_tasks:
+            def _process_community(task: Tuple[int, str, frozenset[str]]) -> Tuple[int, str, str, str]:
+                """Process one community: name via LLM, write file, return index entry."""
+                idx, ckind, community = task
+                try:
+                    llm_slug, desc = _describe_community(community)
+                    slug = _community_slug(community, ckind, llm_slug)
+                    rel = _write_community_file(community, slug, ckind)
+                    return (idx, ckind, rel, desc)
+                except Exception:
+                    logger.error(
+                        "Godnode community #%d (%s, %d pages): unexpected error",
+                        idx, ckind, len(community), exc_info=True,
+                    )
+                    # Fallback: write without LLM naming
+                    slug = _community_slug(community, ckind, None)
+                    desc = f"A cluster of {len(community)} pages"
+                    try:
+                        rel = _write_community_file(community, slug, ckind)
+                    except Exception:
+                        logger.error(
+                            "Godnode community #%d: file write fallback failed", idx, exc_info=True,
+                        )
+                        return (idx, ckind, "", "")
+                    return (idx, ckind, rel, desc)
+
+            community_results = run_parallel(
+                community_tasks,
+                _process_community,
+                description="godnode-communities",
+            )
+
+            # Sort results by original index to preserve entity-then-concept order
+            community_results.sort(key=lambda r: r[0])
+
+            # Reconstruct index sections
+            current_section: Optional[str] = None
+            for idx, ckind, rel, desc in community_results:
+                if not rel:
+                    continue  # Skip communities that failed entirely
+                wanted_section = "## Entity Communities" if ckind == "entity" else "## Concept Communities"
+                if current_section != wanted_section:
+                    current_section = wanted_section
+                    index_lines.append(current_section)
                 index_lines.append(f"- [[{rel}]] - {desc}")
                 total_communities += 1
-            index_lines.append("")
+            if current_section is not None:
+                index_lines.append("")
 
         # ── Other pages at the bottom ───────────────────────────────
         entity_remaining = sorted(set(entity_nodes) - set(entity_covered))
