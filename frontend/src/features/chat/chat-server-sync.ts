@@ -105,19 +105,27 @@ export async function saveThreadToServer(
   title: string,
   messages: Array<{ id: string; role: string; content: any; reasoning_content?: string; parent_id?: string | null; created_at?: string }>,
   createdAt?: number,
-): Promise<void> {
+): Promise<boolean> {
   try {
     const body: Record<string, unknown> = { thread_id: threadId, title, messages };
     if (createdAt) body.created_at = new Date(createdAt).toISOString();
+    const bodyJson = JSON.stringify(body);
+    // keepalive has a ~64KB body limit in browsers.  If the payload
+    // exceeds ~60KB we must skip keepalive, otherwise Chrome throws
+    // TypeError and the save fails silently — only the first message
+    // (from an earlier, smaller sync) makes it to the server.
+    const useKeepalive = new TextEncoder().encode(bodyJson).length < 60_000;
     const res = await authFetch("/api/chat/threads", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-      keepalive: true,
+      body: bodyJson,
+      keepalive: useKeepalive,
     });
-    console.log("[sync] saveThreadToServer:", res.status, { threadId, msgCount: messages.length });
+    console.log("[sync] saveThreadToServer:", res.status, { threadId, msgCount: messages.length, keepalive: useKeepalive });
+    return res.ok;
   } catch (err) {
     console.error("[sync] saveThreadToServer failed:", err);
+    return false;
   }
 }
 
@@ -129,11 +137,13 @@ async function appendMessagesToServer(
   // Append only these messages to the server. Returns the IDs that were confirmed synced.
   if (messages.length === 0) return [];
   try {
+    const bodyJson = JSON.stringify({ thread_id: threadId, title, messages });
+    const useKeepalive = new TextEncoder().encode(bodyJson).length < 60_000;
     const res = await authFetch(`/api/chat/threads/${encodeURIComponent(threadId)}/messages`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ thread_id: threadId, title, messages }),
-      keepalive: true,
+      body: bodyJson,
+      keepalive: useKeepalive,
     });
     console.log("[sync] appendMessagesToServer:", res.status, { threadId, msgCount: messages.length });
     return res.ok ? messages.map((m) => m.id) : [];
@@ -162,7 +172,9 @@ async function syncThreadToServer(threadId: string): Promise<void> {
     return;
   }
 
-  // Prepare messages, chunking oversized content
+  // Prepare messages, chunking oversized content.
+  // Also build a map from send-ID → original message so we can correctly
+  // track which original messages were confirmed after the server responds.
   type Msg = {
     id: string;
     role: string;
@@ -172,8 +184,11 @@ async function syncThreadToServer(threadId: string): Promise<void> {
     created_at?: string;
   };
   const toSend: Msg[] = [];
+  const sendIdToOriginal = new Map<string, string>(); // send-id → original message id
+  const chunksPerOriginal = new Map<string, number>(); // original id → expected chunk count
   for (const m of unsynced) {
     const chunks = chunkLargeContent(m.content);
+    chunksPerOriginal.set(m.id, chunks.length);
     if (chunks.length === 1) {
       toSend.push({
         id: m.id,
@@ -183,34 +198,45 @@ async function syncThreadToServer(threadId: string): Promise<void> {
         parent_id: m.parentId,
         created_at: new Date(m.createdAt).toISOString(),
       });
+      sendIdToOriginal.set(m.id, m.id);
     } else {
-      // Split oversized message into chunked sub-messages
       for (let i = 0; i < chunks.length; i++) {
+        const chunkId = `${m.id}-chunk-${i}`;
         toSend.push({
-          id: `${m.id}-chunk-${i}`,
+          id: chunkId,
           role: m.role,
           content: chunks[i],
           reasoning_content: (m.metadata as any)?.reasoning_content,
           parent_id: i === 0 ? m.parentId : `${m.id}-chunk-${i - 1}`,
           created_at: new Date(m.createdAt + i).toISOString(),
         });
+        sendIdToOriginal.set(chunkId, m.id);
       }
     }
   }
 
-  // First sync for this thread: send all messages as full sync (ensures server
-  // state matches). After that, use append-only.
   const isFirstSync = allMsgs.every((m) => !syncedMessageIds.has(m.id));
 
+  let confirmedSendIds: string[] = [];
   if (isFirstSync) {
-    await saveThreadToServer(threadId, thread.title, toSend, thread.createdAt);
+    const ok = await saveThreadToServer(threadId, thread.title, toSend, thread.createdAt);
+    if (ok) confirmedSendIds = toSend.map((m) => m.id);
   } else {
-    await appendMessagesToServer(threadId, thread.title, toSend);
+    confirmedSendIds = await appendMessagesToServer(threadId, thread.title, toSend);
   }
 
-  // Mark all original message IDs as synced (not the chunk IDs)
+  // Only mark a message synced if ALL its chunks were confirmed by the server.
+  const confirmedByOriginal = new Map<string, number>(); // original id → confirmed chunk count
+  for (const sendId of confirmedSendIds) {
+    const origId = sendIdToOriginal.get(sendId);
+    if (origId) confirmedByOriginal.set(origId, (confirmedByOriginal.get(origId) ?? 0) + 1);
+  }
   for (const m of unsynced) {
-    syncedMessageIds.add(m.id);
+    const expected = chunksPerOriginal.get(m.id) ?? 1;
+    const confirmed = confirmedByOriginal.get(m.id) ?? 0;
+    if (confirmed >= expected) {
+      syncedMessageIds.add(m.id);
+    }
   }
 }
 
