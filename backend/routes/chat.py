@@ -15,6 +15,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import time
 from datetime import datetime, timezone
 from typing import Optional
@@ -677,6 +678,7 @@ async def generate_title(body: dict):
     raw = result.get("choices", [{}])[0].get("message", {}).get("content", "")
     title = (raw or "").split("\n", 1)[0].strip()
     # Strip common prefixes the model might emit
+    title = re.sub(r"^#+\s*", "", title)  # Markdown heading markers
     title = title.replace("Title:", "").replace("title:", "").strip()
     title = title.strip("\"'`")
     if not title:
