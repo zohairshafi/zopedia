@@ -3404,16 +3404,13 @@ class LLMWikiEngine:
                 max_incremental_updates = max_incremental_updates,
             )
 
-        # Rebuild god-nodes index with full community detection.
-        # Called here (not in _rebuild_index) because backlinks from analysis
-        # pages to entity/concept pages need to exist first for accurate
-        # bipartite projection and community detection.
-        if not dry_run:
-            try:
-                with index_lock():
-                    self._rebuild_index_godnodes()
-            except Exception as exc:
-                logger.warning("God-nodes index rebuild failed: %s", exc)
+        # NOTE: _rebuild_index_godnodes() is NOT called here.
+        # It is called separately by /wiki/rebuild-index (which the
+        # frontend "Run Maintenance" button invokes after /wiki/enrich)
+        # and by the auto-lint background task.  Calling it from both
+        # enrich and rebuild-index caused two full delete+recreate cycles
+        # per maintenance run, each with expensive community detection
+        # and LLM naming calls.
 
         return {
             "status": "ok",

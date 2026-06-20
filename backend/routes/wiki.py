@@ -864,6 +864,14 @@ async def wiki_query(payload: WikiQueryRequest, current_subject: str = Depends(_
                 await asyncio.to_thread(manager.enrich_analysis_pages, dry_run=False)
             except Exception as exc:
                 logger.warning("Auto enrichment after query #%d failed: %s", _WIKI_QUERY_RUN_COUNT, exc)
+            # Rebuild godnodes after enrichment (moved out of
+            # enrich_analysis_pages to avoid double-rebuild when the
+            # frontend "Run Maintenance" button calls both /wiki/enrich
+            # and /wiki/rebuild-index).
+            try:
+                await asyncio.to_thread(manager.engine._rebuild_index_godnodes)
+            except Exception as exc:
+                logger.warning("Auto godnode rebuild after query #%d failed: %s", _WIKI_QUERY_RUN_COUNT, exc)
 
         asyncio.create_task(_background_maintenance())
 
