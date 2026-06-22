@@ -215,24 +215,40 @@ async def _resolve_tool_calls_stream(
             assistant_msg["reasoning_content"] = reasoning
         messages.append(assistant_msg)
 
-        # Cap reads per turn
+        # Cap reads per turn; track cumulative budget with a flag so we
+        # can skip remaining tool calls without orphaning tool_call_ids.
         read_count = 0
+        budget_exceeded = False
         for tc in tool_calls:
             func = tc.get("function") or {}
             name = func.get("name", "")
             args_str = func.get("arguments", "{}")
+            tc_id = tc.get("id", f"call_{turn}")
+
+            if budget_exceeded:
+                # Cumulative read budget already exceeded — skip execution
+                # but must still append a tool result for every tool_call_id.
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc_id,
+                    "content": json.dumps({"error": "Read budget exceeded"}),
+                })
+                continue
 
             if name == "read_wiki_page":
                 read_count += 1
                 if read_count > _wiki_max_reads_per_turn():
-                    break
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc_id,
+                        "content": json.dumps({"error": "Read limit per turn reached"}),
+                    })
+                    continue
 
             try:
                 args = json.loads(args_str) if isinstance(args_str, str) else args_str
             except json.JSONDecodeError:
                 args = {}
-
-            tc_id = tc.get("id", f"call_{turn}")
 
             if name == "read_wiki_page":
                 page_path = str(args.get("path", ""))
@@ -261,7 +277,7 @@ async def _resolve_tool_calls_stream(
                 }
                 if cumulative_read_chars >= max_cumulative:
                     yield {"type": "tool_status", "text": f"Read budget reached ({cumulative_read_chars:,} chars). Synthesizing answer..."}
-                    break
+                    budget_exceeded = True
             elif name == "web_search":
                 query_str = str(args.get("query", ""))
                 yield {
