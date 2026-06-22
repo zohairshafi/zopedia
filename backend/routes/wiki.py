@@ -1016,14 +1016,19 @@ async def wiki_save_chat_history(payload: WikiChatHistorySaveRequest, current_su
     watcher_enabled = _WIKI_WATCHER_ENABLED
     ingested = False
 
-    # Trigger immediate ingestion if watcher is enabled
+    # Trigger immediate ingestion in the background if watcher is enabled.
+    # The watcher will pick it up on its next cycle regardless, so we
+    # return the HTTP response immediately rather than blocking the UI
+    # for 10-60s while the LLM extraction and wiki page creation runs.
     if watcher_enabled:
-        try:
-            _, ingestor = get_wiki_components()
-            result = ingestor.ingest_file(file_path, contributor="Zopedia Chat")
-            ingested = bool(result)
-        except Exception as exc:
-            logger.warning("Failed to auto-ingest chat history: %s", exc)
+        async def _ingest_in_background():
+            try:
+                _, ingestor = get_wiki_components()
+                await asyncio.to_thread(ingestor.ingest_file, file_path, contributor="Zopedia Chat")
+            except Exception as exc:
+                logger.warning("Failed to auto-ingest chat history: %s", exc)
+
+        asyncio.create_task(_ingest_in_background())
 
     return WikiChatHistorySaveResponse(
         status="ok",
@@ -1033,7 +1038,7 @@ async def wiki_save_chat_history(payload: WikiChatHistorySaveRequest, current_su
         relative_path=relative_path,
         message_count=len(payload.messages),
         watcher_enabled=watcher_enabled,
-        ingested_immediately=ingested,
+        ingested_immediately=watcher_enabled,  # optimistically true — runs in background
     )
 
 
