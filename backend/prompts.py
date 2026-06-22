@@ -73,7 +73,8 @@ CHAT_WIKI_USAGE_PROMPT = (
     "CRITICAL RULES:\n"
     "- NEVER invent or shorten page paths. Only use EXACT paths you read via read_wiki_page.\n"
     "- Analysis page paths contain timestamps. Use the full path exactly as it appears.\n"
-    "- When citing a page, use the exact path from the tool call result, not a made-up name.\n\n"
+    "- When citing a page, use the exact path from the tool call result, not a made-up name.\n"
+    "- ALWAYS read atleast TWO godnode pages. These give you a breadth of knowledge that search will not.\n"
 )
 
 CHAT_WEB_SEARCH_GUIDELINE = (
