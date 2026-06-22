@@ -10,7 +10,7 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
-from graphify.security import safe_fetch, safe_fetch_text, validate_url
+from graphify.security import safe_fetch, safe_fetch_text, validate_url, GarbledContentError
 
 logger = logging.getLogger(__name__)
 
@@ -229,6 +229,17 @@ def _fetch_webpage(
     title = re.sub(r"\s+", " ", title_match.group(1)).strip() if title_match else url
 
     markdown = _html_to_markdown(html, url)
+
+    # Reject content that doesn't contain enough natural-language prose.
+    # SPA pages (Polymarket, etc.) return JavaScript blobs that convert
+    # to nonsense markdown — not real articles.
+    words = re.findall(r"[A-Za-z]{3,}", markdown)
+    if len(words) < 50:
+        raise GarbledContentError(
+            f"Fetched content from {url!r} has only {len(words)} "
+            f"alphabetic words after HTML-to-markdown conversion — "
+            f"likely a JavaScript SPA, not a readable article."
+        )
     now = datetime.now(timezone.utc).isoformat()
     content = f"""---
 source_url: {url}
@@ -321,7 +332,7 @@ def ingest(
             content, filename = _fetch_webpage(url, author, contributor)
         else:
             content, filename = _fetch_webpage(url, author, contributor)
-    except (urllib.error.HTTPError, urllib.error.URLError, OSError) as exc:
+    except (urllib.error.HTTPError, urllib.error.URLError, OSError, GarbledContentError) as exc:
         raise RuntimeError(f"ingest: failed to fetch {url!r}: {exc}") from exc
 
     out_path = target_dir / filename

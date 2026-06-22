@@ -137,15 +137,41 @@ def safe_fetch(url: str, max_bytes: int = _MAX_FETCH_BYTES, timeout: int = 30) -
     return body
 
 
+class GarbledContentError(ValueError):
+    """Raised when fetched content appears to be binary/garbled rather than text."""
+
+
+def _looks_like_garbled(text: str, min_printable_ratio: float = 0.85) -> bool:
+    """Return True if *text* appears to be binary garbage rather than real content.
+
+    Checks the ratio of printable characters.  Gzip-compressed responses
+    that were decoded without decompression, JavaScript blobs, and other
+    binary payloads typically score well below 0.30.
+    """
+    if len(text) < 100:
+        return False  # Too short to reliably judge
+    printable = sum(1 for ch in text if ch.isprintable() or ch in "\n\r\t")
+    return (printable / len(text)) < min_printable_ratio
+
+
 def safe_fetch_text(
     url: str, max_bytes: int = _MAX_TEXT_BYTES, timeout: int = 15
 ) -> str:
     """Fetch *url* and return decoded text (UTF-8, replacing bad bytes).
 
     Wraps safe_fetch with tighter defaults for HTML / text content.
+    Raises GarbledContentError if the result looks like binary garbage
+    (e.g. a gzip response that wasn't decompressed).
     """
     raw = safe_fetch(url, max_bytes = max_bytes, timeout = timeout)
-    return raw.decode("utf-8", errors = "replace")
+    text = raw.decode("utf-8", errors = "replace")
+    if _looks_like_garbled(text):
+        raise GarbledContentError(
+            f"Fetched content from {url!r} appears to be binary/garbled "
+            f"({len(text)} chars). The server may have sent compressed or "
+            f"non-text content."
+        )
+    return text
 
 
 # ---------------------------------------------------------------------------
