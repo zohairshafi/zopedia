@@ -10616,6 +10616,13 @@ class LLMWikiEngine:
             topic = source_title
         topic_slug = self._slug(topic or "merged-analysis")
 
+        # macOS has a 255-byte filename limit.  The prefix
+        # "{base}--chunk-merged--" plus ".md" plus a collision suffix
+        # can push a long topic_slug past that.  Truncate to stay safe.
+        max_topic_bytes = 180
+        while len(topic_slug.encode("utf-8")) > max_topic_bytes:
+            topic_slug = topic_slug.rsplit("-", 1)[0]
+
         base_slug = f"{base}--chunk-merged--{topic_slug}"
         slug = base_slug
         suffix = 2
