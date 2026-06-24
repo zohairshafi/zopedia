@@ -467,15 +467,26 @@ class ResearchOrchestrator:
                         query, max_results=max_results, timelimit=config.timelimit,
                     )
                 result = json.loads(result_json)
+                raw_count = len(result.get("results", []))
                 new_count = 0
+                skipped_empty = 0
+                skipped_duplicate = 0
+                skipped_blocked = 0
+                skipped_type = 0
                 for r in result.get("results", []):
                     url = r.get("url", "").strip()
-                    if not url or url in seen_urls:
+                    if not url:
+                        skipped_empty += 1
+                        continue
+                    if url in seen_urls:
+                        skipped_duplicate += 1
                         continue
                     if _is_blocked(url, config.blocked_sources):
+                        skipped_blocked += 1
                         continue
                     st = _source_type(url)
                     if config.source_types and st not in config.source_types:
+                        skipped_type += 1
                         continue
                     seen_urls.add(url)
                     all_sources.append({
@@ -488,10 +499,24 @@ class ResearchOrchestrator:
                         "already_in_wiki": self._url_in_wiki(url),
                     })
                     new_count += 1
-                logger.info(
-                    "Research: query %d/%d returned %d new sources (total: %d)",
-                    i + 1, len(all_queries), new_count, len(all_sources),
-                )
+                if raw_count == 0:
+                    hint = result.get("hint", "") or result.get("error", "") or "unknown reason"
+                    logger.warning(
+                        "Research: query %d/%d (%s) returned 0 raw results (%s)",
+                        i + 1, len(all_queries), query[:60], hint,
+                    )
+                elif new_count == 0:
+                    logger.warning(
+                        "Research: query %d/%d had %d raw results but all filtered: "
+                        "empty=%d dup=%d blocked=%d type=%d",
+                        i + 1, len(all_queries), raw_count,
+                        skipped_empty, skipped_duplicate, skipped_blocked, skipped_type,
+                    )
+                else:
+                    logger.info(
+                        "Research: query %d/%d returned %d new sources (total: %d)",
+                        i + 1, len(all_queries), new_count, len(all_sources),
+                    )
             except Exception as exc:
                 logger.warning("Research: search failed for '%s': %s", query, exc)
 
