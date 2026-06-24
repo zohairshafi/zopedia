@@ -25,6 +25,7 @@ from periodic_store import (
     list_enabled_configs,
     mark_run,
     mark_url_ingested,
+    mark_url_globally_ingested,
     set_thread_id,
 )
 
@@ -310,6 +311,7 @@ class PeriodicScheduler:
         # Track ingested URLs for dedup
         for url in result.get("ingested_urls", []):
             mark_url_ingested(config_id, url)
+            mark_url_globally_ingested(url)  # also record in global dedup
 
         # Save as chat thread — persist thread_id so subsequent runs append
         now = datetime.now(timezone.utc).isoformat()

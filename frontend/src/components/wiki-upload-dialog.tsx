@@ -131,6 +131,11 @@ export function WikiUploadDialog({ open, onOpenChange }: WikiUploadDialogProps) 
         throw new Error(detail || `Request failed (${res.status})`);
       }
       const data = await res.json();
+      if (data.status === "already_ingested") {
+        const msg = data.results?.[0]?.message || "This URL was already ingested.";
+        toast.info("Already ingested", { description: msg });
+        return;
+      }
       if (data.results?.length > 0) {
         toast.success("URL ingested", {
           description: trimmed,

@@ -608,11 +608,29 @@ async def wiki_ingest(payload: WikiIngestRequest, current_subject: str = Depends
         source_str = payload.source_path.strip()
         # URLs are passed through directly — the ingestor downloads them via graphify
         if source_str.startswith("http://") or source_str.startswith("https://"):
+            # Check global URL dedup before ingesting
+            from periodic_store import is_url_globally_ingested, mark_url_globally_ingested
+            existing_page = is_url_globally_ingested(source_str)
+            if existing_page:
+                return WikiIngestResponse(
+                    status="already_ingested",
+                    processed_files=0,
+                    results=[{
+                        "source_path": source_str,
+                        "source_page": existing_page,
+                        "message": f"This URL was already ingested as [[{existing_page}]]",
+                    }],
+                )
             result = await asyncio.to_thread(
                 ingestor.ingest_file, Path(source_str), contributor="Zopedia"
             )
             if not result:
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to ingest URL: {source_str}")
+            # Record for future dedup
+            metadata = ingestor.pop_recent_ingest_metadata(Path(source_str)) or {}
+            source_page = str(metadata.get("source_page", "") or "")
+            if source_page:
+                mark_url_globally_ingested(source_str, source_page)
             return WikiIngestResponse(status="ok", processed_files=1, results=[{"source_path": source_str, "result": result}])
 
         source_path = Path(source_str).expanduser()

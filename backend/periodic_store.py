@@ -70,6 +70,13 @@ def _ensure_tables() -> None:
                 FOREIGN KEY (config_id) REFERENCES periodic_configs(id) ON DELETE CASCADE
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS ingested_urls_global (
+                url TEXT PRIMARY KEY,
+                source_page TEXT NOT NULL DEFAULT '',
+                ingested_at TEXT NOT NULL
+            )
+        """)
         conn.commit()
     finally:
         conn.close()
@@ -283,3 +290,37 @@ def mark_urls_ingested(config_id: str, urls: list[str]) -> None:
     """Record multiple URLs as ingested."""
     for url in urls:
         mark_url_ingested(config_id, url)
+
+
+# -- Global URL dedup (across all ingest methods) ---------------------------
+
+
+def is_url_globally_ingested(url: str) -> str | None:
+    """Return the source_page if this URL was already ingested, or None."""
+    _ensure_tables()
+    normalized = _normalize_url(url)
+    conn = _get_conn()
+    try:
+        row = conn.execute(
+            "SELECT source_page FROM ingested_urls_global WHERE url = ?",
+            (normalized,),
+        ).fetchone()
+        return row["source_page"] if row else None
+    finally:
+        conn.close()
+
+
+def mark_url_globally_ingested(url: str, source_page: str = "") -> None:
+    """Record a URL as ingested globally (across all ingest methods)."""
+    _ensure_tables()
+    normalized = _normalize_url(url)
+    now = datetime.now(timezone.utc).isoformat()
+    conn = _get_conn()
+    try:
+        conn.execute(
+            "INSERT OR IGNORE INTO ingested_urls_global (url, source_page, ingested_at) VALUES (?, ?, ?)",
+            (normalized, source_page, now),
+        )
+        conn.commit()
+    finally:
+        conn.close()
