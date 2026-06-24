@@ -475,18 +475,22 @@ class ResearchOrchestrator:
                 skipped_type = 0
                 for r in result.get("results", []):
                     url = r.get("url", "").strip()
+                    title = (r.get("title", "") or "")[:80]
                     if not url:
                         skipped_empty += 1
                         continue
                     if url in seen_urls:
                         skipped_duplicate += 1
+                        logger.debug("Research: skip dup  [q%d] %s", i + 1, url)
                         continue
                     if _is_blocked(url, config.blocked_sources):
                         skipped_blocked += 1
+                        logger.info("Research: skip blocked [q%d] %s — %s", i + 1, title, url)
                         continue
                     st = _source_type(url)
                     if config.source_types and st not in config.source_types:
                         skipped_type += 1
+                        logger.info("Research: skip type [q%d] type=%s %s — %s", i + 1, st, title, url)
                         continue
                     seen_urls.add(url)
                     all_sources.append({
@@ -499,6 +503,7 @@ class ResearchOrchestrator:
                         "already_in_wiki": self._url_in_wiki(url),
                     })
                     new_count += 1
+                    logger.info("Research: keep [q%d] type=%s %s — %s", i + 1, st, title, url)
                 if raw_count == 0:
                     hint = result.get("hint", "") or result.get("error", "") or "unknown reason"
                     logger.warning(
