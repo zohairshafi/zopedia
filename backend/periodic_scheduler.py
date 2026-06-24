@@ -15,7 +15,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from chat_history_store import append_thread_messages, get_thread_messages, upsert_thread
+from chat_history_store import append_thread_messages, get_thread_messages
 from core.llm import wiki_llm_fn
 from core.research import ResearchConfig, ResearchOrchestrator
 from periodic_store import (
@@ -166,8 +166,17 @@ class PeriodicScheduler:
         from periodic_store import update_config
         update_config(config_id, username, last_run_at=now)
 
+        # Ensure a lock exists (normally created by _schedule_one, but
+        # run_now may be called before the first scheduled run).
+        if config_id not in self._locks:
+            self._locks[config_id] = asyncio.Lock()
+
+        async def _locked_run():
+            async with self._locks[config_id]:
+                await self._execute_research(cfg)
+
         asyncio.create_task(
-            self._execute_research(cfg), name=f"periodic-{config_id}-manual"
+            _locked_run(), name=f"periodic-{config_id}-manual"
         )
 
     # -- internals ---------------------------------------------------------
@@ -399,11 +408,16 @@ class PeriodicScheduler:
                 })
 
             try:
-                upsert_thread(
+                # Use append_thread_messages (not upsert_thread) so we
+                # never DELETE existing messages.  If get_thread_id
+                # returned None due to a DB glitch but the thread
+                # already exists, upsert_thread would wipe all prior
+                # runs.  append_thread_messages uses INSERT OR IGNORE
+                # and creates the thread if needed via ON CONFLICT.
+                append_thread_messages(
                     thread_id=thread_id,
                     username=username,
                     title=result.get("title", topic),
-                    created_at=now,
                     updated_at=now,
                     messages=messages,
                 )
