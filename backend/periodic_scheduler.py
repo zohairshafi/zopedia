@@ -330,15 +330,16 @@ class PeriodicScheduler:
                 f"{warnings_text}"
             )
 
-            messages = []
+            content_text = context_msg
             if result["final_report"]:
-                messages.append({
-                    "id": f"{existing_thread_id}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}",
-                    "role": "assistant",
-                    "content": [{"type": "text", "text": f"{context_msg}\n\n{result['final_report']}"}],
-                    "parent_id": None,
-                    "created_at": now,
-                })
+                content_text += f"\n\n{result['final_report']}"
+            messages = [{
+                "id": f"{existing_thread_id}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}",
+                "role": "assistant",
+                "content": [{"type": "text", "text": content_text}],
+                "parent_id": None,
+                "created_at": now,
+            }]
 
             try:
                 append_thread_messages(
