@@ -309,18 +309,25 @@ class PeriodicScheduler:
         if existing_thread_id:
             # Append new run to the same thread
             run_label = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+            error_text = ""
+            if result.get("error"):
+                error_text = f"\n**Error:** {result['error']}\n"
+            warnings_text = ""
+            if result.get("warnings"):
+                warnings_text = (
+                    f"\nWarnings:\n" + "\n".join(
+                        f"- {w.get('url','')}: {w.get('error','')}"
+                        for w in result["warnings"]
+                    )
+                )
+            if result['total_ingested'] == 0 and not result.get("error") and not result.get("warnings"):
+                warnings_text = "\nNo new sources were discovered. This may indicate that all search results were already ingested, filtered by trusted sources, or that the web search returned no results for this topic."
             context_msg = (
                 f"---\n"
                 f"### Run at {run_label}\n"
                 f"Sources ingested: {result['total_ingested']}\n"
-                + (
-                    f"\nWarnings:\n" + "\n".join(
-                        f"- {w.get('url','')}: {w.get('error','')}"
-                        for w in result.get("warnings", [])
-                    )
-                    if result.get("warnings")
-                    else ""
-                )
+                f"{error_text}"
+                f"{warnings_text}"
             )
 
             messages = []
@@ -349,20 +356,27 @@ class PeriodicScheduler:
             thread_id = f"periodic-{config_id}"
             set_thread_id(config_id, thread_id)
 
+            error_text = ""
+            if result.get("error"):
+                error_text = f"\n**Error:** {result['error']}\n"
+            warnings_text = ""
+            if result.get("warnings"):
+                warnings_text = (
+                    f"\nWarnings:\n" + "\n".join(
+                        f"- {w.get('url','')}: {w.get('error','')}"
+                        for w in result["warnings"]
+                    )
+                )
+            if result['total_ingested'] == 0 and not result.get("error") and not result.get("warnings"):
+                warnings_text = "\nNo new sources were discovered. This may indicate that all search results were already ingested, filtered by trusted sources, or that the web search returned no results for this topic."
             context_msg = (
                 f"Periodic research on: {topic}\n"
                 f"Interval: {cfg['interval_type']}\n"
                 f"Sources ingested: {result['total_ingested']}\n"
                 f"Started: {result['started_at']}\n"
                 f"Completed: {result['completed_at']}\n"
-                + (
-                    f"\nWarnings:\n" + "\n".join(
-                        f"- {w.get('url','')}: {w.get('error','')}"
-                        for w in result.get("warnings", [])
-                    )
-                    if result.get("warnings")
-                    else ""
-                )
+                f"{error_text}"
+                f"{warnings_text}"
             )
 
             messages = [
