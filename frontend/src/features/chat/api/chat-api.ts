@@ -442,7 +442,8 @@ export async function generateAudio(
 
 export interface CompactThreadRequest {
   messages: Array<{ role: string; content: unknown; subtype?: string }>;
-  keep_recent?: number;
+  /** Token budget for recent messages to keep verbatim (default 128000). */
+  max_context_tokens?: number;
 }
 
 export interface CompactThreadResponse {

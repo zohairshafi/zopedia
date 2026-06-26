@@ -626,11 +626,11 @@ async def wiki_ingest(payload: WikiIngestRequest, current_subject: str = Depends
             )
             if not result:
                 raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to ingest URL: {source_str}")
-            # Record for future dedup
+            # Record for future dedup (updates the row first written by
+            # _ingest_remote_source with the actual wiki source_page).
             metadata = ingestor.pop_recent_ingest_metadata(Path(source_str)) or {}
             source_page = str(metadata.get("source_page", "") or "")
-            if source_page:
-                mark_url_globally_ingested(source_str, source_page)
+            mark_url_globally_ingested(source_str, source_page)
             return WikiIngestResponse(status="ok", processed_files=1, results=[{"source_path": source_str, "result": result}])
 
         source_path = Path(source_str).expanduser()

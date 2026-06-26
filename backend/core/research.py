@@ -670,14 +670,21 @@ class ResearchOrchestrator:
                     from graphify.ingest import ingest as graphify_ingest
                     from core.wiki.manager import WikiManager
                     from core.wiki.ingestor import WikiIngestor
+                    from periodic_store import mark_url_globally_ingested
 
                     wiki_manager = WikiManager.create(self._wiki_dir, self._llm_fn)
                     wiki_ingestor = WikiIngestor(wiki_manager, self._raw_dir)
 
                     raw_file = graphify_ingest(url, self._raw_dir)
+                    # Record globally before wiki processing so the URL is
+                    # deduplicated even if a later step fails.
+                    mark_url_globally_ingested(url)
                     title = wiki_ingestor.ingest_file(raw_file)
                     meta = wiki_ingestor.pop_recent_ingest_metadata(raw_file) or {}
                     source_page = meta.get("source_page", "")
+                    if source_page:
+                        # Update with the actual wiki page name
+                        mark_url_globally_ingested(url, source_page)
                     return {
                         "url": url,
                         "title": title or raw_file.name,

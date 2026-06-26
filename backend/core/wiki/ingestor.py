@@ -317,6 +317,11 @@ class WikiIngestor:
         ingested_path = ingest(source, self.raw_dir, contributor = contributor)
         if not ingested_path.exists():
             raise FileNotFoundError(f"Ingestion failed: {ingested_path} does not exist")
+        # Record globally so all ingest paths share the same dedup table.
+        # source_page may be empty here — the wiki_ingest endpoint updates it
+        # later once the wiki page is created.
+        from periodic_store import mark_url_globally_ingested
+        mark_url_globally_ingested(source)
         title, content = self._read_local_content(ingested_path)
         return title, content
 

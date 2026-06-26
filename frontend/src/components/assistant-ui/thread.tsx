@@ -908,7 +908,6 @@ const CompactChatButton: FC = () => {
           subtype: (m.metadata as Record<string, unknown> | undefined)
             ?.subtype as string | undefined,
         })),
-        keep_recent: 4,
       });
 
       // Insert compact boundary system message into local DB.
@@ -920,7 +919,7 @@ const CompactChatButton: FC = () => {
         id: boundaryId,
         threadId,
         role: "system",
-        content: result.summary,
+        content: [{ type: "text" as const, text: result.summary }],
         attachments: undefined,
         metadata: {
           subtype: "compact",
@@ -941,7 +940,7 @@ const CompactChatButton: FC = () => {
           id: boundaryId,
           threadId,
           role: "system",
-          content: result.summary,
+          content: [{ type: "text" as const, text: result.summary }],
           attachments: undefined,
           metadata: {
             subtype: "compact",

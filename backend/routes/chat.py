@@ -740,17 +740,38 @@ async def generate_title(body: dict):
 # ── Chat compaction ──────────────────────────────────────────────────
 
 
+def _estimate_tokens(content: object) -> float:
+    """Rough token count using ~4 chars per token heuristic.
+
+    Matches the content-extraction logic used in transcript building so
+    token estimates align with what the LLM actually sees.
+    """
+    if isinstance(content, list):
+        text = ""
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                text += str(block.get("text", ""))
+        return len(text) / 4.0
+    if isinstance(content, dict):
+        return len(str(content)) / 4.0
+    if content is None:
+        return 0
+    return len(str(content)) / 4.0
+
+
 @router.post("/api/chat/threads/{thread_id}/compact")
 async def compact_thread(thread_id: str, body: dict):
     """Summarize earlier messages so the LLM sees a compact context.
 
     Body:
         messages: list of message dicts (role, content, ...)
-        keep_recent: int (default 4) — keep last N user+assistant pairs verbatim
+        max_context_tokens: int (default 128000) — keep this many tokens
+            of recent messages verbatim; everything older is summarized
 
     Returns:
         summary: str — the LLM-generated summary text
         compacted_message_count: int — how many messages were summarized
+        kept_message_count: int — how many messages remain verbatim
     """
     if not llm_available():
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -761,20 +782,27 @@ async def compact_thread(thread_id: str, body: dict):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                             detail="messages is required")
 
-    keep_recent = max(2, int(body.get("keep_recent", 4)))
+    max_context_tokens = max(4096, int(body.get("max_context_tokens", 128000)))
 
-    # Find the split point: keep the last `keep_recent` user messages
-    # and everything after them (assistant responses, tool results).
-    # Everything BEFORE that gets summarized.
-    user_indices = [i for i, m in enumerate(messages)
-                    if m.get("role") == "user" and not m.get("_ephemeral")]
-    if len(user_indices) <= keep_recent:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
-                            detail=f"Not enough messages to compact. "
-                                    f"Found {len(user_indices)} user messages, "
-                                    f"need more than {keep_recent}.")
+    # Walk from most recent message backward, accumulating token estimates.
+    # Split where cumulative tokens exceed the budget — keep the recent
+    # messages verbatim, summarize everything older.
+    cumulative = 0.0
+    split_at = len(messages)
+    for i in range(len(messages) - 1, -1, -1):
+        cumulative += _estimate_tokens(messages[i].get("content", ""))
+        if cumulative > max_context_tokens:
+            split_at = i + 1
+            break
 
-    split_at = user_indices[-(keep_recent)]
+    # split_at == len(messages) means the whole conversation fits in budget
+    if split_at >= len(messages) - 1:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Conversation fits within {max_context_tokens:,}-token "
+                    f"budget — nothing to compact."
+        )
+
     to_summarize = messages[:split_at]
     to_keep = messages[split_at:]
 
@@ -796,6 +824,28 @@ async def compact_thread(thread_id: str, body: dict):
         elif content is None:
             content = "(empty)"
         transcript_lines.append(f"[{role}]: {str(content)[:2000]}")
+
+    # Cap transcript at ~32k tokens so the compaction LLM call itself
+    # doesn't exceed context.  Drop oldest messages first, add a note.
+    _MAX_TRANSCRIPT_CHARS = 128_000  # ~32k tokens at 4 chars/token
+    _total_chars = sum(len(line) + 2 for line in transcript_lines)
+    if _total_chars > _MAX_TRANSCRIPT_CHARS:
+        _kept_lines: list[str] = []
+        _running = 0
+        for line in reversed(transcript_lines):
+            _line_len = len(line) + 2
+            if _running + _line_len > _MAX_TRANSCRIPT_CHARS:
+                break
+            _kept_lines.append(line)
+            _running += _line_len
+        _dropped = len(transcript_lines) - len(_kept_lines)
+        transcript_lines = list(reversed(_kept_lines))
+        _note = (
+            f"[system]: (Transcript truncated: {_dropped} oldest messages "
+            f"dropped to stay within context limit. The summary below covers "
+            f"the full conversation including these dropped messages.)"
+        )
+        transcript_lines.insert(0, _note)
 
     transcript = "\n\n".join(transcript_lines)
 

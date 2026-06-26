@@ -57,6 +57,8 @@ _hiddenimports = [
     "graphify.analyze",
     "graphify.wiki",
     "graphify.security",
+    # Brotli decompression (optional import in security.py)
+    "brotli",
     # FastAPI / Starlette internals
     "fastapi",
     "starlette.routing",

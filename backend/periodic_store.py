@@ -311,14 +311,24 @@ def is_url_globally_ingested(url: str) -> str | None:
 
 
 def mark_url_globally_ingested(url: str, source_page: str = "") -> None:
-    """Record a URL as ingested globally (across all ingest methods)."""
+    """Record a URL as ingested globally (across all ingest methods).
+
+    Uses UPSERT so later calls with a non-empty *source_page* can
+    enrich a row that was first written without one.
+    """
     _ensure_tables()
     normalized = _normalize_url(url)
     now = datetime.now(timezone.utc).isoformat()
     conn = _get_conn()
     try:
         conn.execute(
-            "INSERT OR IGNORE INTO ingested_urls_global (url, source_page, ingested_at) VALUES (?, ?, ?)",
+            """INSERT INTO ingested_urls_global (url, source_page, ingested_at)
+               VALUES (?, ?, ?)
+               ON CONFLICT(url) DO UPDATE SET
+                   source_page = CASE
+                       WHEN excluded.source_page != '' THEN excluded.source_page
+                       ELSE source_page
+                   END""",
             (normalized, source_page, now),
         )
         conn.commit()

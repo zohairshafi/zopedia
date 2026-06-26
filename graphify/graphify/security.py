@@ -9,6 +9,11 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+try:
+    import brotli
+except ImportError:  # pragma: no cover
+    brotli = None  # type: ignore[assignment]
+
 _ALLOWED_SCHEMES = {"http", "https"}
 _MAX_FETCH_BYTES = 52_428_800  # 50 MB hard cap for binary downloads
 _MAX_TEXT_BYTES = 10_485_760  # 10 MB hard cap for HTML / text
@@ -126,13 +131,28 @@ def safe_fetch(url: str, max_bytes: int = _MAX_FETCH_BYTES, timeout: int = 30) -
         body = b"".join(chunks)
 
         # urllib doesn't auto-decompress; handle Content-Encoding ourselves.
-        # Servers that see "Accept-Encoding: gzip" will send compressed responses.
+        # Servers that see "Accept-Encoding: gzip, deflate, br" will send
+        # compressed responses.  Brotli needs the optional `brotli` package.
         content_encoding = resp.headers.get("Content-Encoding", "").strip().lower()
         if content_encoding in ("gzip", "x-gzip"):
             try:
                 body = gzip.decompress(body)
-            except Exception:
-                pass  # If decompression fails, return the raw bytes as-is
+            except Exception as exc:
+                raise OSError(
+                    f"Failed to decompress gzip-encoded response from {url!r}: {exc}"
+                ) from exc
+        elif content_encoding == "br":
+            if brotli is None:
+                raise OSError(
+                    f"Server sent Brotli-compressed response from {url!r} but the "
+                    f"'brotli' package is not installed. Install with: pip install brotli"
+                )
+            try:
+                body = brotli.decompress(body)
+            except Exception as exc:
+                raise OSError(
+                    f"Failed to decompress Brotli-encoded response from {url!r}: {exc}"
+                ) from exc
 
     return body
 
@@ -141,17 +161,27 @@ class GarbledContentError(ValueError):
     """Raised when fetched content appears to be binary/garbled rather than text."""
 
 
-def _looks_like_garbled(text: str, min_printable_ratio: float = 0.85) -> bool:
+def _looks_like_garbled(text: str, min_printable_ratio: float = 0.85,
+                        max_replacement_ratio: float = 0.05) -> bool:
     """Return True if *text* appears to be binary garbage rather than real content.
 
-    Checks the ratio of printable characters.  Gzip-compressed responses
-    that were decoded without decompression, JavaScript blobs, and other
-    binary payloads typically score well below 0.30.
+    Checks the ratio of printable characters AND the density of Unicode
+    replacement characters (U+FFFD).  Gzip/Brotli-compressed responses
+    decoded without decompression produce dense � characters, and
+    JavaScript blobs / binary payloads typically score well below 0.30
+    on the printable check.
     """
     if len(text) < 100:
         return False  # Too short to reliably judge
     printable = sum(1 for ch in text if ch.isprintable() or ch in "\n\r\t")
-    return (printable / len(text)) < min_printable_ratio
+    if (printable / len(text)) < min_printable_ratio:
+        return True
+    # U+FFFD replacement characters mean the bytes couldn't be decoded as
+    # UTF-8 — a strong signal of binary/compressed content passed as text.
+    replacement_count = text.count("�")
+    if (replacement_count / len(text)) > max_replacement_ratio:
+        return True
+    return False
 
 
 def safe_fetch_text(
