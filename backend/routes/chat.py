@@ -44,6 +44,7 @@ from prompts import (
     CHAT_DATABASE_USAGE_PROMPT,
     CHAT_SYNTHESIS_PROMPT,
     CHAT_TITLE_GENERATION_PROMPT,
+    CHAT_COMPACT_PROMPT,
     chat_date_injection,
     chat_intro_prompt,
     chat_budget_prompt,
@@ -573,6 +574,33 @@ async def openai_chat_completions(request: Request):
                     messages[i]["content"] = chat_date_injection(_today, content)
                 break
 
+        # If the conversation was compacted, replace pre-boundary messages
+        # with the summary so the LLM sees a short context instead of the
+        # full history.  The UI still shows all messages — only the API
+        # context is reduced.
+        _boundary_idx = None
+        for _i in range(len(messages) - 1, -1, -1):
+            if (messages[_i].get("role") == "system" and
+                    messages[_i].get("subtype") == "compact"):
+                _boundary_idx = _i
+                break
+        if _boundary_idx is not None:
+            _boundary = messages[_boundary_idx]
+            _post = messages[_boundary_idx + 1:]
+            _summary_text = _boundary.get("content", "")
+            _summary_msg = {
+                "role": "system",
+                "content": (
+                    "This session is being continued from a previous "
+                    "conversation that ran out of context. The summary "
+                    "below covers the earlier portion of the conversation.\n\n"
+                    + str(_summary_text)
+                    + "\n\nContinue the conversation from where it left off "
+                    "without asking the user any further questions."
+                ),
+            }
+            messages = [_summary_msg] + _post
+
         if stream:
             # ── Streaming with tool visibility ──────────────────────
             async def event_generator():
@@ -707,6 +735,108 @@ async def generate_title(body: dict):
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Model returned empty title")
 
     return {"title": title}
+
+
+# ── Chat compaction ──────────────────────────────────────────────────
+
+
+@router.post("/api/chat/threads/{thread_id}/compact")
+async def compact_thread(thread_id: str, body: dict):
+    """Summarize earlier messages so the LLM sees a compact context.
+
+    Body:
+        messages: list of message dicts (role, content, ...)
+        keep_recent: int (default 4) — keep last N user+assistant pairs verbatim
+
+    Returns:
+        summary: str — the LLM-generated summary text
+        compacted_message_count: int — how many messages were summarized
+    """
+    if not llm_available():
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                            detail="No upstream LLM configured.")
+
+    messages: list[dict] = body.get("messages", [])
+    if not messages:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="messages is required")
+
+    keep_recent = max(2, int(body.get("keep_recent", 4)))
+
+    # Find the split point: keep the last `keep_recent` user messages
+    # and everything after them (assistant responses, tool results).
+    # Everything BEFORE that gets summarized.
+    user_indices = [i for i, m in enumerate(messages)
+                    if m.get("role") == "user" and not m.get("_ephemeral")]
+    if len(user_indices) <= keep_recent:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"Not enough messages to compact. "
+                                    f"Found {len(user_indices)} user messages, "
+                                    f"need more than {keep_recent}.")
+
+    split_at = user_indices[-(keep_recent)]
+    to_summarize = messages[:split_at]
+    to_keep = messages[split_at:]
+
+    # Build the compaction prompt with the messages to summarize as context.
+    # We format them as a conversation transcript.
+    transcript_lines: list[str] = []
+    for m in to_summarize:
+        role = m.get("role", "unknown")
+        content = m.get("content", "")
+        if isinstance(content, list):
+            # Content blocks: extract text parts
+            parts = []
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    parts.append(str(block.get("text", "")))
+            content = "\n".join(parts) if parts else "(non-text content)"
+        elif isinstance(content, dict):
+            content = json.dumps(content)
+        elif content is None:
+            content = "(empty)"
+        transcript_lines.append(f"[{role}]: {str(content)[:2000]}")
+
+    transcript = "\n\n".join(transcript_lines)
+
+    compact_messages = [
+        {"role": "system", "content": CHAT_COMPACT_PROMPT},
+        {"role": "user", "content": f"Conversation to summarize:\n\n{transcript}"},
+    ]
+
+    result = await chat_completions_non_streaming(
+        compact_messages,
+        temperature=0.2,
+        max_tokens=4096,
+        tools=None,
+        tool_choice=None,
+    )
+
+    if "error" in result:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY,
+                            detail=f"LLM call failed: {result['error']}")
+
+    raw = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+    if not raw:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY,
+                            detail="LLM returned empty compaction summary")
+
+    # Strip <analysis> scratchpad, keep <summary> content
+    import re as _re
+    summary = _re.sub(r"<analysis>[\s\S]*?</analysis>", "", raw).strip()
+    summary_match = _re.search(r"<summary>([\s\S]*?)</summary>", summary)
+    if summary_match:
+        summary = summary_match.group(1).strip()
+    # If no XML tags found, use the raw output as-is
+
+    logger.info("Compact: thread=%s summarized=%d keep=%d chars=%d",
+                thread_id, len(to_summarize), len(to_keep), len(summary))
+
+    return {
+        "summary": summary,
+        "compacted_message_count": len(to_summarize),
+        "kept_message_count": len(to_keep),
+    }
 
 
 # ── OpenAI-compatible /v1 passthrough ──────────────────────────────

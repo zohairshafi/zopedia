@@ -437,3 +437,37 @@ export async function generateAudio(
 
   return (await response.json()) as AudioGenerationResponse;
 }
+
+// ── Chat compaction ─────────────────────────────────────────────────
+
+export interface CompactThreadRequest {
+  messages: Array<{ role: string; content: unknown; subtype?: string }>;
+  keep_recent?: number;
+}
+
+export interface CompactThreadResponse {
+  summary: string;
+  compacted_message_count: number;
+  kept_message_count: number;
+}
+
+export async function compactThread(
+  threadId: string,
+  payload: CompactThreadRequest,
+): Promise<CompactThreadResponse> {
+  const response = await authFetch(
+    `/v1/api/chat/threads/${encodeURIComponent(threadId)}/compact`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+  );
+
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw new Error(parseErrorText(response.status, body));
+  }
+
+  return (await response.json()) as CompactThreadResponse;
+}

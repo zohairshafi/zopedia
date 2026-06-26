@@ -32,7 +32,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { saveWikiChatHistory } from "@/features/chat/api/chat-api";
+import { compactThread, saveWikiChatHistory } from "@/features/chat/api/chat-api";
 import { sentAudioNames } from "@/features/chat/api/chat-adapter";
 import { db } from "@/features/chat/db";
 import { useChatRuntimeStore } from "@/features/chat/stores/chat-runtime-store";
@@ -70,6 +70,7 @@ import {
   LightbulbOffIcon,
   LoaderIcon,
   MicIcon,
+  Minimize2Icon,
   MoreHorizontalIcon,
   PencilIcon,
   RefreshCwIcon,
@@ -870,6 +871,124 @@ const WikiChatHistoryToggle: FC = () => {
   );
 };
 
+const CompactChatButton: FC = () => {
+  const aui = useAui();
+  const threadId = useAuiState(({ threads }) => threads.mainThreadId);
+  const isThreadRunning = useAuiState(({ thread }) => thread.isRunning);
+  const [isCompacting, setIsCompacting] = useState(false);
+
+  const handleCompact = useCallback(async () => {
+    if (!threadId) return;
+
+    const threadState = aui.thread().getState() as {
+      messages?: readonly unknown[];
+    };
+    const messages = (threadState.messages ?? []) as Array<{
+      id?: string;
+      role?: string;
+      content?: unknown;
+      createdAt?: number;
+      parentId?: string | null;
+      metadata?: Record<string, unknown>;
+    }>;
+
+    if (messages.length < 6) {
+      toast.error("Not enough messages to compact", {
+        description: "Need at least 6 messages in the conversation.",
+      });
+      return;
+    }
+
+    setIsCompacting(true);
+    try {
+      const result = await compactThread(threadId, {
+        messages: messages.map((m) => ({
+          role: m.role ?? "unknown",
+          content: m.content,
+          subtype: (m.metadata as Record<string, unknown> | undefined)
+            ?.subtype as string | undefined,
+        })),
+        keep_recent: 4,
+      });
+
+      // Insert compact boundary system message into local DB.
+      // The UI shows this as a divider; the backend context filter
+      // replaces everything before it with the summary for the LLM.
+      const boundaryId = `compact-${crypto.randomUUID()}`;
+      const boundaryTimestamp = Date.now();
+      await db.messages.put({
+        id: boundaryId,
+        threadId,
+        role: "system",
+        content: result.summary,
+        attachments: undefined,
+        metadata: {
+          subtype: "compact",
+          compacted_message_count: result.compacted_message_count,
+          compacted_at: new Date().toISOString(),
+        },
+        parentId: null,
+        createdAt: boundaryTimestamp,
+      });
+
+      // Move the boundary before the kept recent messages by setting
+      // its createdAt to just before the first kept message.
+      const firstKeptIdx = messages.length - result.kept_message_count;
+      if (firstKeptIdx > 0 && firstKeptIdx < messages.length) {
+        const firstKeptCreatedAt =
+          messages[firstKeptIdx]?.createdAt ?? boundaryTimestamp;
+        await db.messages.put({
+          id: boundaryId,
+          threadId,
+          role: "system",
+          content: result.summary,
+          attachments: undefined,
+          metadata: {
+            subtype: "compact",
+            compacted_message_count: result.compacted_message_count,
+            compacted_at: new Date().toISOString(),
+          },
+          parentId: null,
+          createdAt: firstKeptCreatedAt - 1,
+        });
+      }
+
+      toast.success("Conversation compacted", {
+        description: `${result.compacted_message_count} messages summarized, `
+          + `${result.kept_message_count} kept verbatim.`,
+      });
+    } catch (error) {
+      toast.error("Compaction failed", {
+        description: error instanceof Error ? error.message : "Unknown error",
+      });
+    } finally {
+      setIsCompacting(false);
+    }
+  }, [aui, threadId]);
+
+  const disabled = !threadId || isThreadRunning || isCompacting;
+
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={() => {
+        void handleCompact();
+      }}
+      className={cn(
+        "flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-colors",
+        disabled
+          ? "cursor-not-allowed opacity-40"
+          : "bg-muted text-muted-foreground hover:bg-muted-foreground/15",
+      )}
+      aria-label="Compact conversation"
+    >
+      <Minimize2Icon className="size-3.5" />
+      <span>{isCompacting ? "Compacting..." : "Compact"}</span>
+    </button>
+  );
+};
+
 const ToolStatusDisplay: FC = () => {
   const toolStatus = useChatRuntimeStore((s) => s.toolStatus);
   const isThreadRunning = useAuiState(({ thread }) => thread.isRunning);
@@ -939,6 +1058,7 @@ const ComposerAction: FC<{ disabled?: boolean }> = ({ disabled }) => {
         <PreserveThinkingToggle />
         <WebSearchToggle />
         <DatabaseQueryToggle />
+        <CompactChatButton />
         <WikiChatHistoryToggle />
         <ExportHTMLButton />
       </div>
