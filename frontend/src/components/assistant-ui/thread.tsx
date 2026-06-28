@@ -1187,7 +1187,6 @@ const DeleteMessageButton: FC = () => {
   const handleDelete = async () => {
     const threadListItem = aui.threadListItem().getState();
     const remoteId = threadListItem.remoteId;
-    const title = threadListItem.title;
     const thread = aui.thread();
     try {
       await deleteThreadMessage({
@@ -1197,7 +1196,6 @@ const DeleteMessageButton: FC = () => {
         },
         messageId,
         remoteId,
-        title,
       });
     } catch (error) {
       console.error("Failed to delete message", error);

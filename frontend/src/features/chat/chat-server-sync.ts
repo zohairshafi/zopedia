@@ -1,4 +1,4 @@
-import { authFetch } from "@/features/auth";
+import { authFetch, getAuthToken } from "@/features/auth";
 import { db } from "./db";
 import type { MessageRecord, ThreadRecord } from "./types";
 
@@ -18,6 +18,54 @@ function flushPendingSaves() {
     void syncThreadToServer(threadId);
   }
 }
+
+// ── Page-unload safety ─────────────────────────────────────────────────
+// Large payloads (≥60KB) skip keepalive because browsers cap keepalive
+// bodies at ~64KB.  Without keepalive, a normal fetch is aborted on unload
+// and the save is dropped.  We track the most recent keepalive-skipped sync
+// request and re-fire it as a blocking synchronous XHR on pagehide so it
+// survives tab close / navigation.
+
+let _lastKeepaliveSkipped: { url: string; bodyJson: string } | null = null;
+
+function _noteKeepaliveSkipped(url: string, bodyJson: string): void {
+  _lastKeepaliveSkipped = { url, bodyJson };
+}
+
+function _installUnloadHandlers(): void {
+  if (typeof window === "undefined") return;
+
+  window.addEventListener("beforeunload", () => {
+    // Cancel pending debounce timers so they don't fire mid-unload.
+    for (const [, timer] of debounceTimers) {
+      clearTimeout(timer);
+    }
+  });
+
+  window.addEventListener("pagehide", () => {
+    // pagehide fires reliably on tab close / navigation.  A fetch with
+    // keepalive=false is aborted here, so retry the last large payload as
+    // a blocking synchronous XHR (the only transport that survives unload).
+    const req = _lastKeepaliveSkipped;
+    if (!req) return;
+    _lastKeepaliveSkipped = null;
+    try {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", req.url, false); // synchronous
+      xhr.setRequestHeader("Content-Type", "application/json");
+      // authFetch adds this automatically; the sync XHR bypasses it, so
+      // add the bearer token manually (getAuthToken reads localStorage).
+      const token = getAuthToken();
+      if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+      xhr.send(req.bodyJson);
+    } catch {
+      // Best-effort — if the browser kills the XHR, we can't do more.
+    }
+  });
+}
+
+// Install once at module load
+_installUnloadHandlers();
 
 function chunkLargeContent(content: unknown): unknown[] {
   // If content is a string and exceeds the size threshold, split it at
@@ -121,6 +169,11 @@ export async function saveThreadToServer(
       body: bodyJson,
       keepalive: useKeepalive,
     });
+    // Track this request so the pagehide handler can retry it as a
+    // blocking XHR if keepalive was skipped (large payloads).
+    if (!useKeepalive) {
+      _noteKeepaliveSkipped("/api/chat/threads", bodyJson);
+    }
     console.log("[sync] saveThreadToServer:", res.status, { threadId, msgCount: messages.length, keepalive: useKeepalive });
     return res.ok;
   } catch (err) {
@@ -134,19 +187,27 @@ async function appendMessagesToServer(
   title: string | undefined,
   messages: Array<{ id: string; role: string; content: any; reasoning_content?: string; parent_id?: string | null; created_at?: string }>,
 ): Promise<string[]> {
-  // Append only these messages to the server. Returns the IDs that were confirmed synced.
+  // Append only these messages to the server. Returns the IDs that were
+  // actually confirmed inserted by the server (not just sent).
   if (messages.length === 0) return [];
   try {
     const bodyJson = JSON.stringify({ thread_id: threadId, title, messages });
     const useKeepalive = new TextEncoder().encode(bodyJson).length < 60_000;
-    const res = await authFetch(`/api/chat/threads/${encodeURIComponent(threadId)}/messages`, {
+    const url = `/api/chat/threads/${encodeURIComponent(threadId)}/messages`;
+    if (!useKeepalive) {
+      _noteKeepaliveSkipped(url, bodyJson);
+    }
+    const res = await authFetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: bodyJson,
       keepalive: useKeepalive,
     });
     console.log("[sync] appendMessagesToServer:", res.status, { threadId, msgCount: messages.length });
-    return res.ok ? messages.map((m) => m.id) : [];
+    if (!res.ok) return [];
+    const data = await res.json().catch(() => null);
+    // Server now returns the actual inserted_ids — trust that, not our send list.
+    return Array.isArray(data?.inserted_ids) ? data.inserted_ids : [];
   } catch (err) {
     console.error("[sync] appendMessagesToServer failed:", err);
     return [];
@@ -219,8 +280,23 @@ async function syncThreadToServer(threadId: string): Promise<void> {
 
   let confirmedSendIds: string[] = [];
   if (isFirstSync) {
-    const ok = await saveThreadToServer(threadId, thread.title, toSend, thread.createdAt);
-    if (ok) confirmedSendIds = toSend.map((m) => m.id);
+    // On a fresh session (e.g. another browser) we don't know which messages
+    // are already on the server.  Fetch the server's existing message IDs and
+    // append ONLY what's missing — never DELETE.  Using the full-upsert path
+    // here would wipe messages appended by another browser since this one last
+    // synced (real data loss).  saveThreadToServer/upsert_thread is now
+    // reserved for the one-time local→server migration (maybeMigrateLocalToServer).
+    const serverResult = await fetchServerThread(threadId);
+    const serverIds = new Set<string>(
+      (serverResult?.messages ?? []).map((m: { id?: string }) => m.id ?? ""),
+    );
+    for (const id of serverIds) syncedMessageIds.add(id);
+    const missing = toSend.filter((m) => !serverIds.has(m.id));
+    if (missing.length > 0) {
+      confirmedSendIds = await appendMessagesToServer(threadId, thread.title, missing);
+    } else {
+      confirmedSendIds = [];
+    }
   } else {
     confirmedSendIds = await appendMessagesToServer(threadId, thread.title, toSend);
   }
@@ -259,6 +335,23 @@ export async function deleteThreadFromServer(threadId: string): Promise<void> {
     await authFetch(`/api/chat/threads/${encodeURIComponent(threadId)}`, { method: "DELETE" });
   } catch {
     // Silently fail
+  }
+}
+
+export async function deleteMessageFromServer(threadId: string, messageId: string): Promise<boolean> {
+  // Delete a single message from the server. Returns success so the caller
+  // can surface failures. Uses the dedicated per-message endpoint (not the
+  // full upsert) to avoid the DELETE-all-then-INSERT race that would wipe
+  // messages appended concurrently by another browser.
+  try {
+    const res = await authFetch(
+      `/api/chat/threads/${encodeURIComponent(threadId)}/messages/${encodeURIComponent(messageId)}`,
+      { method: "DELETE" },
+    );
+    return res.ok;
+  } catch (err) {
+    console.error("[sync] deleteMessageFromServer failed:", err);
+    return false;
   }
 }
 

@@ -483,14 +483,14 @@ async def _chat_history_append_messages(thread_id: str, body: _ChatHistoryAppend
         current_subject, thread_id, body.title, len(body.messages),
     )
     now = datetime.now(timezone.utc).isoformat()
-    append_thread_messages(
+    inserted_ids = append_thread_messages(
         thread_id=thread_id,
         username=current_subject,
         title=body.title,
         updated_at=now,
         messages=body.messages,
     )
-    return {"status": "ok", "thread_id": thread_id, "appended": len(body.messages)}
+    return {"status": "ok", "thread_id": thread_id, "appended": len(inserted_ids), "inserted_ids": inserted_ids}
 
 
 @_chat_history_router.delete("/chat/threads/{thread_id}")
@@ -501,6 +501,20 @@ async def _chat_history_delete_thread(thread_id: str, request: Request):
     deleted = delete_thread(thread_id, current_subject)
     if not deleted:
         raise HTTPException(status_code=404, detail="Thread not found")
+    return {"status": "ok"}
+
+
+@_chat_history_router.delete("/chat/threads/{thread_id}/messages/{message_id}")
+async def _chat_history_delete_message(thread_id: str, message_id: str, request: Request):
+    """Delete a single message from a thread (propagates a local deletion).
+
+    Avoids the DELETE-all-then-INSERT race of upsert_thread: only the named
+    message is removed, so concurrent appends from other clients survive.
+    """
+    from chat_history_store import delete_message
+
+    current_subject = await _require_valid_subject(request)
+    delete_message(message_id, thread_id, current_subject)
     return {"status": "ok"}
 
 

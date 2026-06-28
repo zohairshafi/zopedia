@@ -204,6 +204,7 @@ function toOpenAIMessage(
   role: "system" | "user" | "assistant";
   content: string;
   reasoning_content?: string;
+  subtype?: string;
 } | null {
   if (
     message.role !== "system" &&
@@ -247,7 +248,16 @@ function toOpenAIMessage(
     role: "system" | "user" | "assistant";
     content: string;
     reasoning_content?: string;
+    subtype?: string;
   } = { role: message.role, content };
+
+  // Pass through the compact-boundary subtype from message metadata so the
+  // backend context filter can detect it.  Without this, compaction is a
+  // no-op — the backend never sees subtype:"compact" and sends full history.
+  const meta = message.metadata as Record<string, unknown> | undefined;
+  if (meta && typeof meta.subtype === "string") {
+    out.subtype = meta.subtype;
+  }
 
   // DeepSeek-style upstream APIs can consume assistant reasoning traces
   // from prior turns when needed (notably tool-call continuity).

@@ -28,6 +28,8 @@ def _get_connection() -> sqlite3.Connection:
     _ensure_dir(DB_PATH.parent)
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=5000")
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute(
         """
@@ -142,6 +144,10 @@ def upsert_thread(
 ) -> None:
     conn = _get_connection()
     try:
+        # Wrap the DELETE + re-INSERT batch in an explicit transaction so
+        # concurrent readers never see an empty thread between DELETE and
+        # the first INSERT.  BEGIN IMMEDIATE acquires a write lock up front.
+        conn.execute("BEGIN IMMEDIATE")
         conn.execute(
             """
             INSERT INTO chat_threads (id, username, title, created_at, updated_at)
@@ -176,6 +182,9 @@ def upsert_thread(
                 ),
             )
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
 
@@ -186,15 +195,18 @@ def append_thread_messages(
     title: str | None,
     updated_at: str,
     messages: list[dict],
-) -> None:
+) -> list[str]:
     """Append messages to an existing thread without clearing previous ones.
 
     If the thread doesn't exist yet, creates it. Unlike upsert_thread,
     this does NOT delete existing messages — it only inserts new ones.
     Uses INSERT OR IGNORE so duplicate message IDs are silently skipped
     (safe for retries and incremental sync that may overlap).
+
+    Returns the IDs of messages that were actually INSERTed (not skipped).
     """
     conn = _get_connection()
+    inserted_ids: list[str] = []
     try:
         # Upsert the thread record (create if new, update timestamp if existing)
         conn.execute(
@@ -208,7 +220,7 @@ def append_thread_messages(
             (thread_id, username, title, updated_at, updated_at),
         )
         for msg in messages:
-            conn.execute(
+            cur = conn.execute(
                 """
                 INSERT OR IGNORE INTO chat_messages (id, thread_id, username, role, content, reasoning_content, parent_id, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -224,7 +236,10 @@ def append_thread_messages(
                     msg.get("created_at", ""),
                 ),
             )
+            if cur.rowcount > 0:
+                inserted_ids.append(msg.get("id", ""))
         conn.commit()
+        return inserted_ids
     finally:
         conn.close()
 
@@ -252,6 +267,25 @@ def delete_thread(thread_id: str, username: str) -> bool:
         cur = conn.execute(
             "DELETE FROM chat_threads WHERE id = ? AND username = ?",
             (thread_id, username),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
+def delete_message(message_id: str, thread_id: str, username: str) -> bool:
+    """Delete a single message by id (scoped to thread + user).
+
+    Used to propagate a local message deletion to the server without the
+    DELETE-all-then-INSERT race that upsert_thread would introduce.
+    Returns True if a row was removed.
+    """
+    conn = _get_connection()
+    try:
+        cur = conn.execute(
+            "DELETE FROM chat_messages WHERE id = ? AND thread_id = ? AND username = ?",
+            (message_id, thread_id, username),
         )
         conn.commit()
         return cur.rowcount > 0

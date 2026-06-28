@@ -494,14 +494,25 @@ class WikiIngestor:
                     if previous_hash == current_hash:
                         continue
 
-                    # Backfill missing hash state for already-ingested sources, but
-                    # do not skip when we have evidence of changed raw content.
+                    # Backfill missing hash state.  If the source page is
+                    # up-to-date and we have no prior hash, backfill the hash
+                    # but still re-process once — a missing hash could mean a
+                    # previous ingest failed partway (e.g. graphify fetched OK
+                    # but wiki processing threw).  One re-process is safe and
+                    # ensures the ingest is actually complete.
                     if previous_hash is None and source_is_up_to_date:
                         if state.get(key) != current_hash:
                             state[key] = current_hash
                             state_changed = True
-                        continue
+                        # Fall through — still process this once
 
+                # Mark as in-progress immediately under the lock so a concurrent
+                # caller sees the updated hash and skips this file.  If processing
+                # fails, the hash is reverted in post-process so the file can be
+                # retried next time.
+                if current_hash is not None:
+                    state[key] = current_hash
+                    state_changed = True
                 tasks.append((resolved, key, current_hash))
 
             if state_changed:
@@ -532,14 +543,29 @@ class WikiIngestor:
             # -- post-process: update state and collect results (sequential, locked) --
             with self._state_lock:
                 fresh_state = self._load_ingest_state()
+                # Keys whose hash we wrote optimistically in the snapshot
+                # phase (current_hash is not None).  Only these are eligible
+                # for revert on failure — a None hash means we never wrote one,
+                # so there's nothing to revert and we must not clobber a prior
+                # valid hash from an earlier successful run.
+                pending_keys = {key for _, key, h in tasks if h is not None}
+                succeeded_keys: set[str] = set()
                 for entry in ingest_results:
                     if entry is None:
                         continue
                     source_path, title, current_hash = entry
                     results.append({"source_path": source_path, "result": title})
                     ingested += 1
-                    if current_hash is not None and fresh_state.get(source_path) != current_hash:
+                    if current_hash is not None:
                         fresh_state[source_path] = current_hash
+                        succeeded_keys.add(source_path)
+                        state_changed = True
+                # Revert the optimistic hash for any task that failed so it is
+                # retried on the next ingest cycle instead of being locked in
+                # as "already processed".
+                for key in pending_keys - succeeded_keys:
+                    if key in fresh_state:
+                        del fresh_state[key]
                         state_changed = True
                 if state_changed:
                     self._save_ingest_state(fresh_state)
