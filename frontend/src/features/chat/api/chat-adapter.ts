@@ -254,9 +254,13 @@ function toOpenAIMessage(
   // Pass through the compact-boundary subtype from message metadata so the
   // backend context filter can detect it.  Without this, compaction is a
   // no-op — the backend never sees subtype:"compact" and sends full history.
-  const meta = message.metadata as Record<string, unknown> | undefined;
-  if (meta && typeof meta.subtype === "string") {
-    out.subtype = meta.subtype;
+  // toThreadMessage nests the IndexedDB metadata under a `custom` key inside
+  // the assistant-ui ThreadMessage.metadata, so we read from custom.subtype.
+  const meta = message.metadata as
+    | { custom?: Record<string, unknown> }
+    | undefined;
+  if (meta?.custom && typeof meta.custom.subtype === "string") {
+    out.subtype = meta.custom.subtype;
   }
 
   // DeepSeek-style upstream APIs can consume assistant reasoning traces

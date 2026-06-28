@@ -1,4 +1,4 @@
-import { authFetch, getAuthToken } from "@/features/auth";
+import { authFetch, getAuthToken as getAuthTokenSync } from "@/features/auth";
 import { db } from "./db";
 import type { MessageRecord, ThreadRecord } from "./types";
 
@@ -36,10 +36,9 @@ function _installUnloadHandlers(): void {
   if (typeof window === "undefined") return;
 
   window.addEventListener("beforeunload", () => {
-    // Cancel pending debounce timers so they don't fire mid-unload.
-    for (const [, timer] of debounceTimers) {
-      clearTimeout(timer);
-    }
+    // Fire pending debounced syncs immediately (they use keepalive=true for
+    // payloads under 60KB, so they survive unload) then cancel the timers.
+    flushPendingSaves();
   });
 
   window.addEventListener("pagehide", () => {
@@ -54,8 +53,8 @@ function _installUnloadHandlers(): void {
       xhr.open("POST", req.url, false); // synchronous
       xhr.setRequestHeader("Content-Type", "application/json");
       // authFetch adds this automatically; the sync XHR bypasses it, so
-      // add the bearer token manually (getAuthToken reads localStorage).
-      const token = getAuthToken();
+      // add the bearer token manually (reads localStorage synchronously).
+      const token = getAuthTokenSync();
       if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
       xhr.send(req.bodyJson);
     } catch {

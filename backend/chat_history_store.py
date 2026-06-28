@@ -147,6 +147,7 @@ def upsert_thread(
         # Wrap the DELETE + re-INSERT batch in an explicit transaction so
         # concurrent readers never see an empty thread between DELETE and
         # the first INSERT.  BEGIN IMMEDIATE acquires a write lock up front.
+        # (On any failure, conn.close() in the finally block auto-rollbacks.)
         conn.execute("BEGIN IMMEDIATE")
         conn.execute(
             """
@@ -182,9 +183,6 @@ def upsert_thread(
                 ),
             )
         conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
     finally:
         conn.close()
 

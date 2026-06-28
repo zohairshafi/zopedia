@@ -580,8 +580,7 @@ async def openai_chat_completions(request: Request):
         # context is reduced.
         _boundary_idx = None
         for _i in range(len(messages) - 1, -1, -1):
-            if (messages[_i].get("role") == "system" and
-                    messages[_i].get("subtype") == "compact"):
+            if messages[_i].get("subtype") == "compact":
                 _boundary_idx = _i
                 break
         if _boundary_idx is not None:
