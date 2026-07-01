@@ -970,6 +970,7 @@ class ResearchOrchestrator:
 
         async for event in chat_completions_stream(
             messages, temperature=0.3, max_tokens=32000,
+            thinking={"type": "disabled"},
         ):
             if event.get("type") == "text":
                 yield {"type": "research_final_summary", "content": event.get("content", "")}
