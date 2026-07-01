@@ -740,22 +740,29 @@ async def generate_title(body: dict):
 
 
 def _estimate_tokens(content: object) -> float:
-    """Rough token count using ~4 chars per token heuristic.
+    """Rough token count using ~3 chars per token heuristic.
 
-    Matches the content-extraction logic used in transcript building so
-    token estimates align with what the LLM actually sees.
+    Conservative estimate that accounts for code blocks, structured data,
+    and markdown formatting which are denser than plain English (~4 chars/tok).
+    A ratio of 3 avoids the backend believing a 224k-token conversation
+    fits in a 128k budget just because the content is dense.
     """
     if isinstance(content, list):
         text = ""
         for block in content:
-            if isinstance(block, dict) and block.get("type") == "text":
-                text += str(block.get("text", ""))
-        return len(text) / 4.0
+            if isinstance(block, dict):
+                block_type = block.get("type", "")
+                if block_type == "text":
+                    text += str(block.get("text", ""))
+                # reasoning / thinking blocks also consume tokens
+                elif block_type in ("reasoning", "thinking"):
+                    text += str(block.get("text", ""))
+        return len(text) / 3.0
     if isinstance(content, dict):
-        return len(str(content)) / 4.0
+        return len(str(content)) / 3.0
     if content is None:
         return 0
-    return len(str(content)) / 4.0
+    return len(str(content)) / 3.0
 
 
 @router.post("/api/chat/threads/{thread_id}/compact")
