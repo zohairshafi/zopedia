@@ -892,13 +892,6 @@ const CompactChatButton: FC = () => {
       metadata?: Record<string, unknown>;
     }>;
 
-    if (messages.length < 6) {
-      toast.error("Not enough messages to compact", {
-        description: "Need at least 6 messages in the conversation.",
-      });
-      return;
-    }
-
     setIsCompacting(true);
     try {
       const result = await compactThread(threadId, {

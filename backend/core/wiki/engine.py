@@ -7842,147 +7842,148 @@ class LLMWikiEngine:
             return f"{prefix}community-{h}"
 
         # ── Write community files and index ──────────────────────────
-        # Clean stale community files from previous run
-        for old in sorted(self.godnodes_dir.glob("*.md")):
-            try:
-                old.unlink()
-            except OSError:
-                pass
-
-        index_lines = ["# Wiki Index (Community View)", ""]
-        total_communities = 0
-
-        def _write_community_file(
-            cmembers: frozenset[str],
-            slug: str,
-            ckind: str,
-        ) -> str:
-            """Write a community page, return the relative path."""
-            rel = f"godnodes/{slug}"
-            file_path = self.godnodes_dir / f"{slug}.md"
-
-            lines = [
-                "---",
-                f"slug: {slug}",
-                f"type: godnode-community",
-                f"kind: {ckind}",
-                f"updated_at: {self._now_iso()}",
-                f"member_count: {len(cmembers)}",
-                "---",
-                "",
-                f"# {ckind.title()} Community ({len(cmembers)} pages)",
-                "",
-            ]
-            for node in sorted(cmembers):
-                page_rel = node[:-3] if node.endswith(".md") else node
-                title = _page_title(node)
-                lines.append(f"- [[{page_rel}]] - {title[:120]}")
-
-            file_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
-            return rel
-
-        # ── Communities first (entities then concepts) ──────────────
-        # Collect all communities into a flat list preserving order
-        # (entities first, then concepts).  Each community's LLM naming
-        # and file write is independent — safe to parallelize.
-        community_tasks: List[Tuple[int, str, frozenset[str]]] = []
-
-        for ckind, communities, covered, all_nodes_label in [
-            ("entity", entity_communities, entity_covered, "entities"),
-            ("concept", concept_communities, concept_covered, "concepts"),
-        ]:
-            if not communities:
-                continue
-            for community in communities:
-                community_tasks.append((len(community_tasks), ckind, community))
-
-        if community_tasks:
-            def _process_community(task: Tuple[int, str, frozenset[str]]) -> Tuple[int, str, str, str]:
-                """Process one community: name via LLM, write file, return index entry."""
-                idx, ckind, community = task
+        with index_lock():
+            # Clean stale community files from previous run
+            for old in sorted(self.godnodes_dir.glob("*.md")):
                 try:
-                    llm_slug, desc = _describe_community(community)
-                    slug = _community_slug(community, ckind, llm_slug)
-                    rel = _write_community_file(community, slug, ckind)
-                    return (idx, ckind, rel, desc)
-                except Exception:
-                    logger.error(
-                        "Godnode community #%d (%s, %d pages): unexpected error",
-                        idx, ckind, len(community), exc_info=True,
-                    )
-                    # Fallback: write without LLM naming
-                    slug = _community_slug(community, ckind, None)
-                    desc = f"A cluster of {len(community)} pages"
+                    old.unlink()
+                except OSError:
+                    pass
+    
+            index_lines = ["# Wiki Index (Community View)", ""]
+            total_communities = 0
+    
+            def _write_community_file(
+                cmembers: frozenset[str],
+                slug: str,
+                ckind: str,
+            ) -> str:
+                """Write a community page, return the relative path."""
+                rel = f"godnodes/{slug}"
+                file_path = self.godnodes_dir / f"{slug}.md"
+    
+                lines = [
+                    "---",
+                    f"slug: {slug}",
+                    f"type: godnode-community",
+                    f"kind: {ckind}",
+                    f"updated_at: {self._now_iso()}",
+                    f"member_count: {len(cmembers)}",
+                    "---",
+                    "",
+                    f"# {ckind.title()} Community ({len(cmembers)} pages)",
+                    "",
+                ]
+                for node in sorted(cmembers):
+                    page_rel = node[:-3] if node.endswith(".md") else node
+                    title = _page_title(node)
+                    lines.append(f"- [[{page_rel}]] - {title[:120]}")
+    
+                file_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+                return rel
+    
+            # ── Communities first (entities then concepts) ──────────────
+            # Collect all communities into a flat list preserving order
+            # (entities first, then concepts).  Each community's LLM naming
+            # and file write is independent — safe to parallelize.
+            community_tasks: List[Tuple[int, str, frozenset[str]]] = []
+    
+            for ckind, communities, covered, all_nodes_label in [
+                ("entity", entity_communities, entity_covered, "entities"),
+                ("concept", concept_communities, concept_covered, "concepts"),
+            ]:
+                if not communities:
+                    continue
+                for community in communities:
+                    community_tasks.append((len(community_tasks), ckind, community))
+    
+            if community_tasks:
+                def _process_community(task: Tuple[int, str, frozenset[str]]) -> Tuple[int, str, str, str]:
+                    """Process one community: name via LLM, write file, return index entry."""
+                    idx, ckind, community = task
                     try:
+                        llm_slug, desc = _describe_community(community)
+                        slug = _community_slug(community, ckind, llm_slug)
                         rel = _write_community_file(community, slug, ckind)
+                        return (idx, ckind, rel, desc)
                     except Exception:
                         logger.error(
-                            "Godnode community #%d: file write fallback failed", idx, exc_info=True,
+                            "Godnode community #%d (%s, %d pages): unexpected error",
+                            idx, ckind, len(community), exc_info=True,
                         )
-                        return (idx, ckind, "", "")
-                    return (idx, ckind, rel, desc)
-
-            community_results = run_parallel(
-                community_tasks,
-                _process_community,
-                description="godnode-communities",
-            )
-
-            # Sort results by original index to preserve entity-then-concept order
-            community_results.sort(key=lambda r: r[0])
-
-            # Reconstruct index sections
-            current_section: Optional[str] = None
-            for idx, ckind, rel, desc in community_results:
-                if not rel:
-                    continue  # Skip communities that failed entirely
-                wanted_section = "## Entity Communities" if ckind == "entity" else "## Concept Communities"
-                if current_section != wanted_section:
-                    current_section = wanted_section
-                    index_lines.append(current_section)
-                index_lines.append(f"- [[{rel}]] - {desc}")
-                total_communities += 1
-            if current_section is not None:
+                        # Fallback: write without LLM naming
+                        slug = _community_slug(community, ckind, None)
+                        desc = f"A cluster of {len(community)} pages"
+                        try:
+                            rel = _write_community_file(community, slug, ckind)
+                        except Exception:
+                            logger.error(
+                                "Godnode community #%d: file write fallback failed", idx, exc_info=True,
+                            )
+                            return (idx, ckind, "", "")
+                        return (idx, ckind, rel, desc)
+    
+                community_results = run_parallel(
+                    community_tasks,
+                    _process_community,
+                    description="godnode-communities",
+                )
+    
+                # Sort results by original index to preserve entity-then-concept order
+                community_results.sort(key=lambda r: r[0])
+    
+                # Reconstruct index sections
+                current_section: Optional[str] = None
+                for idx, ckind, rel, desc in community_results:
+                    if not rel:
+                        continue  # Skip communities that failed entirely
+                    wanted_section = "## Entity Communities" if ckind == "entity" else "## Concept Communities"
+                    if current_section != wanted_section:
+                        current_section = wanted_section
+                        index_lines.append(current_section)
+                    index_lines.append(f"- [[{rel}]] - {desc}")
+                    total_communities += 1
+                if current_section is not None:
+                    index_lines.append("")
+    
+            # ── Other pages at the bottom ───────────────────────────────
+            entity_remaining = sorted(set(entity_nodes) - set(entity_covered))
+            concept_remaining = sorted(set(concept_nodes) - set(concept_covered))
+    
+            if entity_remaining:
+                index_lines.append("## Other Entities")
+                for node in entity_remaining:
+                    rel = node[:-3] if node.endswith(".md") else node
+                    title = _page_title(node)
+                    index_lines.append(f"- [[{rel}]] - {title[:120]}")
                 index_lines.append("")
-
-        # ── Other pages at the bottom ───────────────────────────────
-        entity_remaining = sorted(set(entity_nodes) - set(entity_covered))
-        concept_remaining = sorted(set(concept_nodes) - set(concept_covered))
-
-        if entity_remaining:
-            index_lines.append("## Other Entities")
-            for node in entity_remaining:
-                rel = node[:-3] if node.endswith(".md") else node
-                title = _page_title(node)
-                index_lines.append(f"- [[{rel}]] - {title[:120]}")
-            index_lines.append("")
-
-        if concept_remaining:
-            index_lines.append("## Other Concepts")
-            for node in concept_remaining:
-                rel = node[:-3] if node.endswith(".md") else node
-                title = _page_title(node)
-                index_lines.append(f"- [[{rel}]] - {title[:120]}")
-            index_lines.append("")
-
-        if total_communities == 0 and not entity_remaining and not concept_remaining:
-            return
-
-        total_pages = (
-            sum(len(c) for c in entity_communities)
-            + sum(len(c) for c in concept_communities)
-            + len(entity_remaining)
-            + len(concept_remaining)
-        )
-        index_lines.append("---")
-        index_lines.append(
-            f"Total: {total_pages} pages in {total_communities} communities. "
-            "Use search_wiki to find pages by keyword, or read_wiki_page to expand "
-            "community pages and see their members. "
-            "\"Other\" pages are listed inline — no need to expand. "
-            "Start with the community description that best matches the user's question."
-        )
-        self.index_godnodes_file.write_text("\n".join(index_lines).rstrip() + "\n", encoding="utf-8")
+    
+            if concept_remaining:
+                index_lines.append("## Other Concepts")
+                for node in concept_remaining:
+                    rel = node[:-3] if node.endswith(".md") else node
+                    title = _page_title(node)
+                    index_lines.append(f"- [[{rel}]] - {title[:120]}")
+                index_lines.append("")
+    
+            if total_communities == 0 and not entity_remaining and not concept_remaining:
+                return
+    
+            total_pages = (
+                sum(len(c) for c in entity_communities)
+                + sum(len(c) for c in concept_communities)
+                + len(entity_remaining)
+                + len(concept_remaining)
+            )
+            index_lines.append("---")
+            index_lines.append(
+                f"Total: {total_pages} pages in {total_communities} communities. "
+                "Use search_wiki to find pages by keyword, or read_wiki_page to expand "
+                "community pages and see their members. "
+                "\"Other\" pages are listed inline — no need to expand. "
+                "Start with the community description that best matches the user's question."
+            )
+            self.index_godnodes_file.write_text("\n".join(index_lines).rstrip() + "\n", encoding="utf-8")
 
     def _append_log(self, entry: str) -> None:
         with self.log_file.open("a", encoding = "utf-8") as f:

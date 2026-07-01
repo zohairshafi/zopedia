@@ -52,6 +52,15 @@ from core.wiki.bridge import apply_defaults  # noqa: E402
 
 apply_defaults()
 
+# Re-read flags now that stored overrides and bridge defaults are applied.
+# _AUTH_DISABLED was set at module-load time (line 37) before stored overrides
+# were loaded, so it defaulted to True.  Without this re-read, auth stays
+# disabled even when ZOPEDIA_AUTH_DISABLED=false is in the override file,
+# causing all chat endpoints to use the "local-user" subject.  That scopes
+# list_threads() to the wrong user and triggers the syncThreadListFromServer
+# cleanup to delete server-owned threads (e.g. periodic research) from the
+# client's local IndexedDB — the thread vanishes from the sidebar.
+_AUTH_DISABLED = _env_bool("ZOPEDIA_AUTH_DISABLED", True)
 
 # ── Auth helpers ──────────────────────────────────────────────────
 
@@ -412,7 +421,7 @@ async def _chat_history_list_threads(request: Request):
     current_subject = await _require_valid_subject(request)
     threads = list_threads(current_subject)
     logger.info("chat_history: list_threads for %s → %d threads", current_subject, len(threads))
-    return {"threads": threads}
+    return {"threads": threads, "subject": current_subject}
 
 
 @_chat_history_router.get("/chat/threads/{thread_id}")

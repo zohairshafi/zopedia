@@ -121,19 +121,19 @@ async function getAuthToken(): Promise<string | null> {
 
 // ── Server API calls ─────────────────────────────────────────────────
 
-async function fetchServerThreads(): Promise<Array<{ id: string; title: string; created_at: string; updated_at: string; message_count: number }>> {
+async function fetchServerThreads(): Promise<{ threads: Array<{ id: string; title: string; created_at: string; updated_at: string; message_count: number }>; subject: string }> {
   try {
     const res = await authFetch("/api/chat/threads", { cache: "no-store" });
     if (!res.ok) {
       console.log("[sync] fetchServerThreads: not ok", { status: res.status });
-      return [];
+      return { threads: [], subject: "" };
     }
     const data = await res.json();
-    console.log("[sync] fetchServerThreads: got threads", { count: data.threads?.length ?? 0 });
-    return data.threads ?? [];
+    console.log("[sync] fetchServerThreads: got threads", { count: data.threads?.length ?? 0, subject: data.subject ?? "" });
+    return { threads: data.threads ?? [], subject: data.subject ?? "" };
   } catch (err) {
     console.log("[sync] fetchServerThreads: error", err);
-    return [];
+    return { threads: [], subject: "" };
   }
 }
 
@@ -369,13 +369,13 @@ export async function syncThreadListFromServer(): Promise<void> {
 
   try {
     console.log("[sync] syncThreadListFromServer: start");
-    const serverThreads = await fetchServerThreads();
+    const { threads: serverThreads, subject } = await fetchServerThreads();
     if (serverThreads.length === 0) {
       console.log("[sync] syncThreadListFromServer: no threads from server, returning");
       return;
     }
 
-    console.log("[sync] syncThreadListFromServer: writing threads to DB", { count: serverThreads.length });
+    console.log("[sync] syncThreadListFromServer: writing threads to DB", { count: serverThreads.length, subject });
     for (const st of serverThreads) {
       // Skip server threads with no messages — they're empty shells
       if (!st.message_count) continue;
@@ -392,15 +392,24 @@ export async function syncThreadListFromServer(): Promise<void> {
         createdAt: local?.createdAt ?? (st.updated_at ? new Date(st.updated_at).getTime() : (st.created_at ? new Date(st.created_at).getTime() : Date.now())),
         messageCount: st.message_count ?? local?.messageCount ?? 0,
         syncedFromServer: true,
+        syncSubject: subject,
     });
   }
 
-  // Remove local threads that no longer exist on the server
+  // Remove local threads that no longer exist on the server, but ONLY
+  // threads that were synced under the *same* auth subject.  Threads
+  // synced under a different subject (e.g. "zopedia" threads seen
+  // during a "local-user" sync) are left untouched — deleting them
+  // would be wrongful data loss (they belong to a different identity).
   const serverIds = new Set(serverThreads.map((st) => st.id));
   const threadCount = await db.threads.count();
   const allLocalThreads = threadCount === 0 ? [] : await db.threads.toArray();
   for (const t of allLocalThreads) {
-    if (t.syncedFromServer && !serverIds.has(t.id)) {
+    if (
+      t.syncedFromServer &&
+      t.syncSubject === subject &&
+      !serverIds.has(t.id)
+    ) {
       await db.messages.where("threadId").equals(t.id).delete();
       await db.threads.delete(t.id);
     }
@@ -474,7 +483,7 @@ export async function deleteThreadFromBoth(threadId: string): Promise<void> {
 // ── Migration ────────────────────────────────────────────────────────
 
 export async function maybeMigrateLocalToServer(): Promise<boolean> {
-  const serverThreads = await fetchServerThreads();
+  const { threads: serverThreads } = await fetchServerThreads();
   if (serverThreads.length > 0) return false;
 
   const threadCount = await db.threads.count();

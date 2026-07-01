@@ -17,6 +17,12 @@ export interface ThreadRecord {
   createdAt: number;
   messageCount?: number;
   syncedFromServer?: boolean;
+  /** The auth subject under which this thread was last synced from the server.
+   *  Used by syncThreadListFromServer to scope its cleanup — threads synced
+   *  under a different subject are left untouched to avoid wrongful deletion
+   *  when the auth subject resolves to a different user (e.g. "local-user"
+   *  when ZOPEDIA_AUTH_DISABLED is true). */
+  syncSubject?: string;
 }
 
 export interface MessageRecord {
