@@ -864,8 +864,6 @@ async def compact_thread(thread_id: str, body: dict):
         compact_messages,
         temperature=0.2,
         max_tokens=4096,
-        tools=None,
-        tool_choice=None,
     )
 
     if "error" in result:
