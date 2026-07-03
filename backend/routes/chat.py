@@ -740,12 +740,13 @@ async def generate_title(body: dict):
 
 
 def _estimate_tokens(content: object, reasoning: str | None = None) -> float:
-    """Rough token count using ~3 chars per token heuristic.
+    """Rough token count using ~2.5 chars per token heuristic.
 
-    Conservative estimate that accounts for code blocks, structured data,
-    and markdown formatting which are denser than plain English (~4 chars/tok).
-    A ratio of 3 avoids the backend believing a 224k-token conversation
-    fits in a 128k budget just because the content is dense.
+    Real-world content density varies widely: plain English ~4 chars/tok,
+    code ~2-3, JSON ~1.5-2, CJK text <1.  A ratio of 2.5 is conservative
+    enough to avoid false negatives (backend reporting 'nothing to compact'
+    when the UI counter shows 196k tokens) while not over-estimating clean
+    English prose by too much.
     """
     text = ""
     if isinstance(content, list):
@@ -754,7 +755,7 @@ def _estimate_tokens(content: object, reasoning: str | None = None) -> float:
                 block_type = block.get("type", "")
                 if block_type == "text":
                     text += str(block.get("text", ""))
-                # reasoning / thinking blocks also consume tokens
+                # reasoning / thinking blocks also consume API tokens
                 elif block_type in ("reasoning", "thinking"):
                     text += str(block.get("text", ""))
     elif isinstance(content, dict):
@@ -764,7 +765,7 @@ def _estimate_tokens(content: object, reasoning: str | None = None) -> float:
     # Include reasoning_content (stored outside content blocks on DeepSeek/Claude)
     if reasoning:
         text += str(reasoning)
-    return len(text) / 3.0
+    return len(text) / 2.5
 
 
 @router.post("/api/chat/threads/{thread_id}/compact")
