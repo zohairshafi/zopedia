@@ -7,9 +7,10 @@ import { UpdateScreen } from "@/components/tauri/update-screen";
 import { Toaster } from "@/components/ui/sonner";
 import { useTauriBackend } from "@/hooks/use-tauri-backend";
 import { useTauriUpdate } from "@/hooks/use-tauri-update";
-import { isTauri } from "@/lib/api-base";
+import { useDesktopUpdate } from "@/hooks/use-desktop-update";
+import { isTauri, getIsDesktop } from "@/lib/api-base";
 import { ThemeProvider } from "next-themes";
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 interface AppProviderProps {
   children: ReactNode;
@@ -170,11 +171,79 @@ function TauriWrapper({ children }: { children: ReactNode }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Desktop (pywebview) update layer
+// ---------------------------------------------------------------------------
+
+function DesktopUpdateLayer() {
+  const update = useDesktopUpdate();
+  const isUpdating =
+    update.status === "downloading" ||
+    update.status === "installing" ||
+    (update.status === "error" && !update.dismissed);
+
+  if (isUpdating) {
+    return (
+      <UpdateScreen
+        status={update.status}
+        logs={update.logs}
+        progress={update.progress}
+        error={update.error}
+        onRetry={update.retryUpdate}
+        onSkipRestart={update.skipAndRestart}
+      />
+    );
+  }
+
+  return (
+    <UpdateBanner
+      status={update.status}
+      info={update.info}
+      dismissed={update.dismissed}
+      isExternalServer={false}
+      onInstall={update.installUpdate}
+      onDismiss={update.dismiss}
+    />
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Desktop wrapper — shown when running inside pywebview (not Tauri)
+// ---------------------------------------------------------------------------
+
+function DesktopWrapper({ children }: { children: ReactNode }) {
+  // __ZOPEDIA_DESKTOP__ is injected by pywebview after the page loads,
+  // so we re-check on a short delay to pick it up.
+  const [isDesktop, setIsDesktop] = useState(false);
+
+  useEffect(() => {
+    if (getIsDesktop()) {
+      setIsDesktop(true);
+      return;
+    }
+    const t = setTimeout(() => {
+      if (getIsDesktop()) setIsDesktop(true);
+    }, 500);
+    return () => clearTimeout(t);
+  }, []);
+
+  if (!isDesktop) return <>{children}</>;
+
+  return (
+    <>
+      <DesktopUpdateLayer />
+      {children}
+    </>
+  );
+}
+
 export function AppProvider({ children }: AppProviderProps) {
   return (
     <ThemeProvider attribute="class" defaultTheme="light">
       <TauriWrapper>
-        {children}
+        <DesktopWrapper>
+          {children}
+        </DesktopWrapper>
       </TauriWrapper>
       <Toaster position="top-right" visibleToasts={2} expand={true} />
     </ThemeProvider>

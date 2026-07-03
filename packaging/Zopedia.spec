@@ -31,7 +31,6 @@ _hiddenimports = [
     "auth.authentication",
     "auth.hashing",
     "auth.router",
-    "utils.auth_root",
     "chat_history_store",
     # Wiki core (many lazy imports)
     "core.wiki.manager",
@@ -49,6 +48,12 @@ _hiddenimports = [
     # Packaging modules (imported dynamically or via uvicorn string)
     "config",
     "setup_page",
+    # Auto-updater (GitHub release poller)
+    "updater",
+    "__version__",
+    # pywebview native macOS window
+    "webview",
+    "webview.platforms.cocoa",
     # Graphify (lazy imports via importlib)
     "graphify",
     "graphify.ingest",
@@ -100,9 +105,11 @@ _datas: list[tuple[str, str]] = [
     (str(_PROJECT / "frontend" / "dist"), "frontend/dist"),
     # Graphify package (needs to be importable as graphify/)
     (str(_PROJECT / "graphify" / "graphify"), "graphify"),
-    # Packaging modules (config, setup_page, tray — imported at runtime)
+    # Packaging modules (config, setup_page, updater — imported at runtime)
     (str(_PROJECT / "packaging" / "config.py"), "."),
     (str(_PROJECT / "packaging" / "setup_page.py"), "."),
+    (str(_PROJECT / "packaging" / "updater.py"), "."),
+    (str(_PROJECT / "packaging" / "__version__.py"), "."),
     # tray.py removed — menu bar icon was unreliable via PyObjC in PyInstaller
     (str(_PROJECT / "packaging" / "icon.png"), "."),
     # Magika model & config files (used by markitdown for MIME detection)
@@ -184,5 +191,6 @@ if sys.platform == "darwin":
             "CFBundleShortVersionString": "1.0.0",
             "NSHighResolutionCapable": True,
             "LSBackgroundOnly": False,
+            "NSRequiresAquaSystemAppearance": False,
         },
     )

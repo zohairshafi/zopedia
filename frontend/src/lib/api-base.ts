@@ -22,3 +22,11 @@ export function apiUrl(path: string): string {
 }
 
 export { isTauri }
+
+// Desktop pywebview mode: launcher.py injects window.__ZOPEDIA_DESKTOP__
+// Use a getter so it's evaluated after page load (pywebview injects it on 'loaded' event)
+function getIsDesktop(): boolean {
+  return typeof window !== 'undefined' && (window as unknown as Record<string, unknown>).__ZOPEDIA_DESKTOP__ === true
+}
+
+export { getIsDesktop }

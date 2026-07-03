@@ -1,9 +1,8 @@
-"""Zopedia desktop launcher.
+"""Zopedia desktop launcher — native window via pywebview.
 
-Single uvicorn process.  On first run a temporary HTTP server handles
-setup (avoiding FastAPI route-ordering issues with the catch-all SPA
-route).  The browser is opened only after the server is confirmed
-listening.
+Starts the FastAPI backend on a random port, then opens a native
+WKWebView window (no browser required). On first run shows the
+setup page inside the same window. Includes GitHub auto-updater.
 """
 
 from __future__ import annotations
@@ -15,8 +14,6 @@ import socket
 import sys
 import threading
 import time
-import webbrowser
-from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 
 _LAUNCHER_DIR = str(Path(__file__).resolve().parent)
@@ -36,7 +33,7 @@ def _find_free_port() -> int:
         return s.getsockname()[1]
 
 
-def _wait_for_server(host: str, port: int, timeout: float = 15.0) -> bool:
+def _wait_for_server(host: str, port: int, timeout: float = 20.0) -> bool:
     """Poll until a TCP connection to *host:port* succeeds."""
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -48,97 +45,8 @@ def _wait_for_server(host: str, port: int, timeout: float = 15.0) -> bool:
     return False
 
 
-def _run_setup_server(port: int, config_path: str) -> None:
-    """Serve the first-run setup page on a temporary HTTP server.
-
-    Blocks until the user submits the form, then returns.  The real
-    Zopedia server will bind the same port afterwards.
-    """
-    from setup_page import SETUP_HTML
-
-    _done = [False]
-
-    class _Handler(BaseHTTPRequestHandler):
-        def do_GET(self):
-            path = self.path.split("?")[0].rstrip("/")
-            if path == "/__zopedia_setup_generate_password__":
-                try:
-                    import diceware
-                    pw = diceware.get_passphrase(
-                        options=diceware.handle_options(args=["-n", "4", "-d", "-", "-c"])
-                    )
-                except Exception:
-                    import secrets
-                    pw = secrets.token_urlsafe(16)
-                self.send_response(200)
-                self.send_header("Content-Type", "text/plain")
-                self.end_headers()
-                self.wfile.write(pw.encode())
-                return
-
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.end_headers()
-            self.wfile.write(SETUP_HTML.encode())
-
-        def do_POST(self):
-            if self.path.rstrip("/") != "/__zopedia_setup_save__":
-                self.send_error(404)
-                return
-
-            content_length = int(self.headers.get("Content-Length", 0))
-            body = self.rfile.read(content_length) if content_length else b"{}"
-            try:
-                data = json.loads(body)
-            except json.JSONDecodeError:
-                self.send_error(400)
-                return
-
-            cfg_path = Path(config_path)
-            cfg: dict = {}
-            if cfg_path.is_file():
-                try:
-                    cfg = json.loads(cfg_path.read_text())
-                except (json.JSONDecodeError, OSError):
-                    pass
-
-            cfg.update({
-                "llm_base_url": str(data.get("llm_base_url", "")).strip(),
-                "llm_api_key": str(data.get("llm_api_key", "")).strip(),
-                "llm_model": str(data.get("llm_model", "")).strip(),
-                "wiki_vault": str(data.get("wiki_vault", "")).strip(),
-                "auth_enabled": bool(data.get("auth_enabled", False)),
-                "admin_password": str(data.get("admin_password", "")).strip() if data.get("auth_enabled") else "",
-                "first_run": False,
-            })
-
-            cfg_path.parent.mkdir(parents=True, exist_ok=True)
-            tmp = cfg_path.with_suffix(".tmp")
-            tmp.write_text(json.dumps(cfg, indent=2, ensure_ascii=False) + "\n")
-            os.replace(tmp, cfg_path)
-
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(b'{"status": "ok"}')
-            _done[0] = True
-
-        def log_message(self, format, *args):
-            pass  # suppress access logs
-
-    server = HTTPServer(("127.0.0.1", port), _Handler)
-    server.allow_reuse_address = True
-
-    webbrowser.open(f"http://127.0.0.1:{port}/__zopedia_setup__?next=/chat")
-
-    while not _done[0]:
-        server.handle_request()
-
-    server.server_close()
-
-
 def _check_existing_instance(port_file: Path) -> int | None:
-    """If a running instance exists, open its browser and return its port.
+    """If a running instance exists, open a native window and return its port.
     Returns None if no existing instance is found."""
     if not port_file.is_file():
         return None
@@ -147,9 +55,6 @@ def _check_existing_instance(port_file: Path) -> int | None:
     except (ValueError, OSError):
         return None
     if _wait_for_server("127.0.0.1", port, timeout=1.0):
-        import uuid
-        new_id = uuid.uuid4().hex[:12]
-        webbrowser.open(f"http://127.0.0.1:{port}/chat?new={new_id}")
         return port
     # Stale file — port not listening
     try:
@@ -157,6 +62,47 @@ def _check_existing_instance(port_file: Path) -> int | None:
     except OSError:
         pass
     return None
+
+
+def _open_webview_window(
+    port: int,
+    start_url: str | None = None,
+    shutdown_cb=None,
+) -> None:
+    """Open a native WKWebView window. Blocks until the window is closed."""
+    import webview
+
+    if start_url is None:
+        start_url = f"http://127.0.0.1:{port}/chat"
+
+    window = webview.create_window(
+        title="Zopedia",
+        url=start_url,
+        width=1280,
+        height=800,
+        min_size=(800, 600),
+        background_color="#0d0d0d",
+    )
+
+    def _on_loaded():
+        # Inject desktop flag so the frontend knows it's running inside pywebview
+        try:
+            window.evaluate_js("window.__ZOPEDIA_DESKTOP__ = true;")
+        except Exception:
+            pass
+
+    def _on_closed():
+        if shutdown_cb:
+            shutdown_cb()
+
+    window.events.loaded += _on_loaded
+    window.events.closed += _on_closed
+
+    # Use the native macOS WebKit renderer
+    webview.start(
+        gui="cocoa",
+        debug=False,
+    )
 
 
 def main() -> None:
@@ -170,15 +116,13 @@ def main() -> None:
 
     # ── Single-instance: check for already-running process ─────────────
     _port_file = CONFIG_PATH.parent / ".port"
-    if _check_existing_instance(_port_file):
-        return  # another instance already running, browser opened
+    existing_port = _check_existing_instance(_port_file)
+    if existing_port:
+        # Another instance is running — open a new window pointing to it
+        _open_webview_window(existing_port)
+        return
 
     port = _find_free_port()
-
-    # ── First-run: serve setup page via temp HTTP server ──────────────
-    if cfg.get("first_run"):
-        _run_setup_server(port, str(CONFIG_PATH))
-        cfg = load_cfg()  # re-read saved config
 
     # ── Apply env vars from config ────────────────────────────────────
     for k, v in env_from_config(cfg).items():
@@ -199,21 +143,47 @@ def main() -> None:
     if backend not in sys.path:
         sys.path.insert(0, backend)
 
-    import main as _main_module
+    # Graphify monorepo path (for importlib fallback in ingestor.py)
+    graphify_root = _resource_path(".")
+    if graphify_root not in sys.path:
+        sys.path.insert(0, graphify_root)
 
-    # ── Shutdown endpoint ─────────────────────────────────────────────
+    import main as _main_module
     import uvicorn
+    import updater as _updater
+
+    # Register setup routes on the FastAPI app (first-run setup page)
+    from setup_page import make_setup_routes
+    make_setup_routes(_main_module.app)
+
     _server_ref: list[uvicorn.Server | None] = [None]
+
+    def _do_shutdown():
+        if _server_ref[0]:
+            _server_ref[0].should_exit = True
 
     @_main_module.app.get("/api/shutdown")
     async def _shutdown():
-        if _server_ref[0]:
-            _server_ref[0].should_exit = True
+        _do_shutdown()
         return {"status": "shutting_down"}
 
+    @_main_module.app.get("/api/update-status")
+    async def _update_status():
+        return _updater.get_status()
+
+    @_main_module.app.post("/api/update-download")
+    async def _update_download():
+        import asyncio
+        status = _updater.get_status()
+        url = status.get("download_url")
+        if not url:
+            return {"ok": False, "error": "No download URL available"}
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, _updater.open_dmg_download, url)
+        return result
+
     def _handle_quit(signum, frame):
-        if _server_ref[0]:
-            _server_ref[0].should_exit = True
+        _do_shutdown()
     signal.signal(signal.SIGTERM, _handle_quit)
     signal.signal(signal.SIGINT, _handle_quit)
 
@@ -222,35 +192,32 @@ def main() -> None:
         _main_module.app,
         host="127.0.0.1",
         port=port,
-        log_level="info",
+        log_level="warning",
         reload=False,
     )
     _server_ref[0] = uvicorn.Server(config)
     server_thread = threading.Thread(target=_server_ref[0].run, daemon=True)
     server_thread.start()
 
-    # ── Write port file for single-instance detection ──────────────────
     _port_file.write_text(str(port))
 
-    # ── Open browser once server is listening ─────────────────────────
-    url = f"http://127.0.0.1:{port}"
-    if _wait_for_server("127.0.0.1", port):
-        import uuid
-        new_id = uuid.uuid4().hex[:12]
-        webbrowser.open(f"{url}/chat?new={new_id}")
+    # ── Start background update checker ───────────────────────────────
+    _updater.start_background_check()
 
-    # ── Keep alive until shutdown ─────────────────────────────────────
-    try:
-        while not _server_ref[0].should_exit:
-            time.sleep(0.5)
-    except KeyboardInterrupt:
-        pass
+    # ── Wait for server, then open the native window ──────────────────
+    if not _wait_for_server("127.0.0.1", port):
+        print("ERROR: server did not start in time", file=sys.stderr)
+        sys.exit(1)
 
-    # Server thread will exit because should_exit was set
-    _server_ref[0].should_exit = True
-    server_thread.join()
+    start_url = f"http://127.0.0.1:{port}/chat"
+    if cfg.get("first_run"):
+        start_url = f"http://127.0.0.1:{port}/__zopedia_setup__?next=/chat"
 
-    # Clean up port file
+    _open_webview_window(port, start_url=start_url, shutdown_cb=_do_shutdown)
+
+    # ── Cleanup ───────────────────────────────────────────────────────
+    _do_shutdown()
+    server_thread.join(timeout=5)
     try:
         _port_file.unlink()
     except OSError:

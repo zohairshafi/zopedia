@@ -14,7 +14,7 @@ APP_VERSION="${APP_VERSION:-1.0.0}"
 cd "$PROJECT_DIR"
 
 echo "==> Installing packaging dependencies..."
-pip install -q pyinstaller pystray pillow platformdirs
+pip install -q pyinstaller pystray pillow platformdirs "pywebview>=4.4.1"
 
 if [[ "$(uname)" == "Darwin" ]]; then
     pip install -q pyobjc-framework-Cocoa 2>/dev/null || true

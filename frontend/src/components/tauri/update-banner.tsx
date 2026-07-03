@@ -2,6 +2,14 @@
 // Copyright 2026-present the Zopedia team. All rights reserved. See /studio/LICENSE.AGPL-3.0
 
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { MarkdownPreview } from "@/components/markdown/markdown-preview";
 import type { UpdateInfo, UpdateStatus } from "@/hooks/use-tauri-update";
 import { AnimatePresence, motion } from "motion/react";
 
@@ -26,6 +34,7 @@ export function UpdateBanner({
 }: UpdateBannerProps) {
   const visible = status === "available";
   const show = visible && !dismissed;
+  const hasNotes = Boolean(info?.body?.trim());
 
   return (
     <AnimatePresence>
@@ -69,9 +78,21 @@ export function UpdateBanner({
               <Button size="sm" className="corner-squircle" onClick={onInstall} disabled={isExternalServer}>
                 Update Now
               </Button>
-              <Button size="sm" variant="outline" className="corner-squircle" disabled>
-                Release Notes
-              </Button>
+              <Dialog>
+                <DialogTrigger asChild>
+                  <Button size="sm" variant="outline" className="corner-squircle" disabled={!hasNotes}>
+                    Release Notes
+                  </Button>
+                </DialogTrigger>
+                {hasNotes && (
+                  <DialogContent className="max-h-[70vh] max-w-xl overflow-y-auto">
+                    <DialogHeader>
+                      <DialogTitle>Release Notes — v{info.version}</DialogTitle>
+                    </DialogHeader>
+                    <MarkdownPreview markdown={info.body!} />
+                  </DialogContent>
+                )}
+              </Dialog>
               <Button size="sm" variant="ghost" className="corner-squircle" onClick={onDismiss}>
                 Later
               </Button>
