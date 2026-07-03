@@ -787,6 +787,18 @@ async def _load_progress():
 
 _frontend_available = _FRONTEND_DIR.exists() and (_FRONTEND_DIR / "index.html").exists()
 
+# Register first-run setup routes BEFORE the catch-all so literal paths
+# like /__zopedia_setup__ take precedence over /{full_path:path}.
+# Wrapped in a try/except because the packaging modules may not be
+# importable in all contexts (e.g. dev without packaging/ on sys.path).
+if _frontend_available:
+    try:
+        from setup_page import make_setup_routes
+        from config import CONFIG_PATH
+        make_setup_routes(app, str(CONFIG_PATH))
+    except Exception:
+        pass
+
 if _frontend_available:
     app.mount("/assets", StaticFiles(directory=str(_FRONTEND_DIR / "assets")), name="assets")
 
