@@ -739,7 +739,7 @@ async def generate_title(body: dict):
 # ── Chat compaction ──────────────────────────────────────────────────
 
 
-def _estimate_tokens(content: object) -> float:
+def _estimate_tokens(content: object, reasoning: str | None = None) -> float:
     """Rough token count using ~3 chars per token heuristic.
 
     Conservative estimate that accounts for code blocks, structured data,
@@ -747,8 +747,8 @@ def _estimate_tokens(content: object) -> float:
     A ratio of 3 avoids the backend believing a 224k-token conversation
     fits in a 128k budget just because the content is dense.
     """
+    text = ""
     if isinstance(content, list):
-        text = ""
         for block in content:
             if isinstance(block, dict):
                 block_type = block.get("type", "")
@@ -757,12 +757,14 @@ def _estimate_tokens(content: object) -> float:
                 # reasoning / thinking blocks also consume tokens
                 elif block_type in ("reasoning", "thinking"):
                     text += str(block.get("text", ""))
-        return len(text) / 3.0
-    if isinstance(content, dict):
-        return len(str(content)) / 3.0
-    if content is None:
-        return 0
-    return len(str(content)) / 3.0
+    elif isinstance(content, dict):
+        text = str(content)
+    elif content is not None:
+        text = str(content)
+    # Include reasoning_content (stored outside content blocks on DeepSeek/Claude)
+    if reasoning:
+        text += str(reasoning)
+    return len(text) / 3.0
 
 
 @router.post("/api/chat/threads/{thread_id}/compact")
@@ -796,7 +798,10 @@ async def compact_thread(thread_id: str, body: dict):
     cumulative = 0.0
     split_at = len(messages)
     for i in range(len(messages) - 1, -1, -1):
-        cumulative += _estimate_tokens(messages[i].get("content", ""))
+        cumulative += _estimate_tokens(
+            messages[i].get("content", ""),
+            reasoning=messages[i].get("reasoning_content"),
+        )
         if cumulative > max_context_tokens:
             split_at = i + 1
             break

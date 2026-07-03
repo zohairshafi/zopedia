@@ -895,12 +895,17 @@ const CompactChatButton: FC = () => {
     setIsCompacting(true);
     try {
       const result = await compactThread(threadId, {
-        messages: messages.map((m) => ({
-          role: m.role ?? "unknown",
-          content: m.content,
-          subtype: (m.metadata as Record<string, unknown> | undefined)
-            ?.subtype as string | undefined,
-        })),
+        messages: messages.map((m) => {
+          const meta = (m.metadata as Record<string, unknown> | undefined)?.custom as
+            | Record<string, unknown>
+            | undefined;
+          return {
+            role: m.role ?? "unknown",
+            content: m.content,
+            subtype: meta?.subtype as string | undefined,
+            reasoning_content: meta?.reasoning_content as string | undefined,
+          };
+        }),
       });
 
       // Insert compact boundary message via the assistant-ui runtime so it:
@@ -922,7 +927,7 @@ const CompactChatButton: FC = () => {
 
       aui.thread().append({
         id: boundaryId,
-        role: "system",
+        role: "assistant",
         content: [{ type: "text" as const, text: result.summary }],
         createdAt: new Date(
           firstKeptIdx > 0 ? firstKeptCreatedAt - 1 : boundaryTimestamp

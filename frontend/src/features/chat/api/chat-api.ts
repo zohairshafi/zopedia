@@ -441,7 +441,7 @@ export async function generateAudio(
 // ── Chat compaction ─────────────────────────────────────────────────
 
 export interface CompactThreadRequest {
-  messages: Array<{ role: string; content: unknown; subtype?: string }>;
+  messages: Array<{ role: string; content: unknown; subtype?: string; reasoning_content?: string }>;
   /** Token budget for recent messages to keep verbatim (default 128000). */
   max_context_tokens?: number;
 }
