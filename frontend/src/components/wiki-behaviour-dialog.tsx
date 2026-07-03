@@ -77,6 +77,7 @@ const CATEGORY_ORDER = [
   "Quality & Maintenance",
   "Index & Communities",
   "Web Enrichment",
+  "Auth",
   "Other",
 ] as const;
 
@@ -124,6 +125,12 @@ function categoryForVariable(name: string): WikiVariableCategory {
     name.includes("MAX_ANALYSIS_PAGES")
   ) {
     return "Quality & Maintenance";
+  }
+  if (
+    name.startsWith("ZOPEDIA_AUTH_") ||
+    name.includes("ADMIN_PASSWORD")
+  ) {
+    return "Auth";
   }
   if (
     name.includes("RAG_PREFETCH") ||

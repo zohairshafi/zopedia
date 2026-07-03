@@ -7455,6 +7455,10 @@ class LLMWikiEngine:
             self._write_godnodes_warning(len(new_entities), len(new_concepts), threshold)
             return
 
+        # Uncovered count is below threshold — clear any stale warning from
+        # a previous run with a tighter threshold.
+        self._clear_godnodes_warning()
+
         if not new_entities and not new_concepts:
             return
 

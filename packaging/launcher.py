@@ -90,6 +90,55 @@ def _open_webview_window(
             window.evaluate_js("window.__ZOPEDIA_DESKTOP__ = true;")
         except Exception:
             pass
+        # Make links openable — pywebview blocks target="_blank" and window.open()
+        # by default.  Intercept clicks on external links and open them in the
+        # system browser.  Internal (same-origin) links navigate in-webview.
+        try:
+            window.evaluate_js("""
+                (function() {
+                    document.addEventListener('click', function(e) {
+                        var a = e.target.closest('a');
+                        if (!a || !a.href) return;
+                        var url = a.href;
+                        // Same-origin: let the webview navigate normally
+                        if (url.startsWith(window.location.origin)) {
+                            if (a.getAttribute('target') !== '_blank') return;
+                            // target=_blank on same origin: navigate in this window
+                            e.preventDefault();
+                            window.location.href = url;
+                            return;
+                        }
+                        // External URL: open in system browser
+                        e.preventDefault();
+                        window.open(url, '_system');
+                    });
+                    // Also intercept window.open calls so JS-triggered opens work
+                    var _origOpen = window.open;
+                    window.open = function(url, target) {
+                        if (!url) return _origOpen.apply(this, arguments);
+                        if (target === '_system' || target === '_blank' || !target) {
+                            try { window.external.open(url); } catch(_) {}
+                            // Fallback: use fetch to trigger a native open
+                        }
+                        return _origOpen.call(this, url, '_self');
+                    };
+                })();
+            """)
+        except Exception:
+            pass
+        # Ensure the root document is scrollable when the window is small.
+        # The SPA's overflow-hidden on chat routes prevents body-level scroll,
+        # but we want at least horizontal scroll prevention + vertical auto.
+        try:
+            window.evaluate_js("""
+                (function() {
+                    var style = document.createElement('style');
+                    style.textContent = 'html { overflow-x: hidden; overflow-y: auto !important; }';
+                    document.head.appendChild(style);
+                })();
+            """)
+        except Exception:
+            pass
 
     def _on_closed():
         if shutdown_cb:
