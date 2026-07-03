@@ -903,47 +903,39 @@ const CompactChatButton: FC = () => {
         })),
       });
 
-      // Insert compact boundary system message into local DB.
-      // The UI shows this as a divider; the backend context filter
-      // replaces everything before it with the summary for the LLM.
+      // Insert compact boundary message via the assistant-ui runtime so it:
+      // 1. Appears in the UI immediately (no page reload needed)
+      // 2. Persists to IndexedDB through the ThreadHistoryProvider.append adapter
+      // 3. Gets synced to the server via debouncedSaveThreadToServer
+      // The backend context filter uses subtype=compact to replace everything
+      // before this boundary with the summary for the LLM.
       const boundaryId = `compact-${crypto.randomUUID()}`;
       const boundaryTimestamp = Date.now();
-      await db.messages.put({
+
+      // Place the boundary just before the first kept message so it renders
+      // between the summarized portion and the recent verbatim messages.
+      const firstKeptIdx = messages.length - result.kept_message_count;
+      const firstKeptCreatedAt =
+        firstKeptIdx > 0 && firstKeptIdx < messages.length
+          ? messages[firstKeptIdx]?.createdAt ?? boundaryTimestamp
+          : boundaryTimestamp;
+
+      aui.thread().append({
         id: boundaryId,
-        threadId,
         role: "system",
         content: [{ type: "text" as const, text: result.summary }],
-        attachments: undefined,
+        createdAt: new Date(
+          firstKeptIdx > 0 ? firstKeptCreatedAt - 1 : boundaryTimestamp
+        ),
         metadata: {
-          subtype: "compact",
-          compacted_message_count: result.compacted_message_count,
-          compacted_at: new Date().toISOString(),
-        },
-        parentId: null,
-        createdAt: boundaryTimestamp,
-      });
-
-      // Move the boundary before the kept recent messages by setting
-      // its createdAt to just before the first kept message.
-      const firstKeptIdx = messages.length - result.kept_message_count;
-      if (firstKeptIdx > 0 && firstKeptIdx < messages.length) {
-        const firstKeptCreatedAt =
-          messages[firstKeptIdx]?.createdAt ?? boundaryTimestamp;
-        await db.messages.put({
-          id: boundaryId,
-          threadId,
-          role: "system",
-          content: [{ type: "text" as const, text: result.summary }],
-          attachments: undefined,
-          metadata: {
+          custom: {
             subtype: "compact",
             compacted_message_count: result.compacted_message_count,
             compacted_at: new Date().toISOString(),
           },
-          parentId: null,
-          createdAt: firstKeptCreatedAt - 1,
-        });
-      }
+        },
+        startRun: false,
+      } as never);
 
       toast.success("Conversation compacted", {
         description: `${result.compacted_message_count} messages summarized, `
