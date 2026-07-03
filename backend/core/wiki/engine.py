@@ -7440,6 +7440,58 @@ class LLMWikiEngine:
                     target = target[:-3]
                 covered.add(f"{target}.md")
 
+        # Read the existing index-godnodes.md to (a) avoid re-adding entries
+        # already listed under ## Other Entities / ## Other Concepts, and
+        # (b) self-heal any duplicate entries from prior buggy runs.
+        existing = ""
+        try:
+            existing = self.index_godnodes_file.read_text(encoding="utf-8", errors="ignore")
+        except Exception:
+            pass
+        existing = re.sub(r"\n---\n.*", "", existing, flags=re.DOTALL).rstrip()
+
+        # Parse existing "Other" entries so they are treated as "covered"
+        # and won't be re-added on every ingest. Also deduplicate: only
+        # keep the first occurrence of each page reference.
+        other_entity_links: list[str] = []
+        other_concept_links: list[str] = []
+        seen_other_entities: set[str] = set()
+        seen_other_concepts: set[str] = set()
+        raw_entity_count = 0
+        raw_concept_count = 0
+        in_entity_section = False
+        in_concept_section = False
+        for line in existing.splitlines():
+            stripped = line.strip()
+            if stripped == "## Other Entities":
+                in_entity_section = True
+                in_concept_section = False
+                continue
+            if stripped == "## Other Concepts":
+                in_concept_section = True
+                in_entity_section = False
+                continue
+            if stripped.startswith("## "):
+                in_entity_section = False
+                in_concept_section = False
+                continue
+            if in_entity_section or in_concept_section:
+                m = re.match(r"- \[\[([^\]]+)\]\]", stripped)
+                if m:
+                    target = m.group(1).strip().replace("\\", "/")
+                    page_ref = target if target.endswith(".md") else f"{target}.md"
+                    covered.add(page_ref)
+                    if in_entity_section:
+                        raw_entity_count += 1
+                        if page_ref not in seen_other_entities:
+                            seen_other_entities.add(page_ref)
+                            other_entity_links.append(line)
+                    else:
+                        raw_concept_count += 1
+                        if page_ref not in seen_other_concepts:
+                            seen_other_concepts.add(page_ref)
+                            other_concept_links.append(line)
+
         new_entities = sorted(set(entity_pages) - covered)
         new_concepts = sorted(set(concept_pages) - covered)
 
@@ -7459,7 +7511,14 @@ class LLMWikiEngine:
         # a previous run with a tighter threshold.
         self._clear_godnodes_warning()
 
-        if not new_entities and not new_concepts:
+        # Determine whether we need to rewrite the file (new entries or
+        # duplicates that need cleaning up).
+        needs_dedup = (
+            len(other_entity_links) != raw_entity_count
+            or len(other_concept_links) != raw_concept_count
+        )
+
+        if not new_entities and not new_concepts and not needs_dedup:
             return
 
         index_summary = self._index_summary_by_page()
@@ -7481,62 +7540,62 @@ class LLMWikiEngine:
             label = rel[:-3] if rel.endswith(".md") else rel
             return label.split("/", 1)[-1].replace("-", " ").replace("_", " ")
 
-        # Read current index, strip footer lines (--- and Total:)
-        existing = ""
-        try:
-            existing = self.index_godnodes_file.read_text(encoding="utf-8", errors="ignore")
-        except Exception:
-            pass
-        # Remove footer so we can append
-        existing = re.sub(r"\n---\n.*", "", existing, flags=re.DOTALL).rstrip()
+        # Rebuild the file: preserve everything before ## Other Entities,
+        # write deduplicated Other sections with new entries prepended,
+        # then preserve everything after the Other sections.
+        preamble_lines: list[str] = []
+        post_other_lines: list[str] = []
+        section = "preamble"
+        for line in existing.splitlines():
+            stripped = line.strip()
+            if stripped == "## Other Entities":
+                section = "other-entities"
+                continue
+            if stripped == "## Other Concepts":
+                section = "other-concepts"
+                continue
+            if stripped.startswith("## ") and section in ("other-entities", "other-concepts"):
+                section = "post-other"
+            if section == "preamble":
+                preamble_lines.append(line)
+            elif section in ("other-entities", "other-concepts"):
+                pass  # already captured in other_entity_links / other_concept_links
+            else:
+                post_other_lines.append(line)
 
-        lines = existing.splitlines() if existing else ["# Wiki Index (Community View)", ""]
-        modified = False
-
-        if new_entities:
-            # Find or add ## Other Entities section
-            other_idx = None
-            for i, line in enumerate(lines):
-                if line.strip() == "## Other Entities":
-                    other_idx = i
-                    break
-            if other_idx is None:
-                lines.append("## Other Entities")
-                other_idx = len(lines) - 1
+        lines = list(preamble_lines)
+        if other_entity_links or new_entities:
+            lines.append("## Other Entities")
             for node in new_entities:
                 rel = node[:-3] if node.endswith(".md") else node
                 title = _page_title(node)
-                lines.insert(other_idx + 1, f"- [[{rel}]] - {title[:120]}")
-                other_idx += 1
-            modified = True
-
-        if new_concepts:
-            other_idx = None
-            for i, line in enumerate(lines):
-                if line.strip() == "## Other Concepts":
-                    other_idx = i
-                    break
-            if other_idx is None:
-                lines.append("## Other Concepts")
-                other_idx = len(lines) - 1
+                lines.append(f"- [[{rel}]] - {title[:120]}")
+            lines.extend(other_entity_links)
+            lines.append("")
+        if other_concept_links or new_concepts:
+            lines.append("## Other Concepts")
             for node in new_concepts:
                 rel = node[:-3] if node.endswith(".md") else node
                 title = _page_title(node)
-                lines.insert(other_idx + 1, f"- [[{rel}]] - {title[:120]}")
-                other_idx += 1
-            modified = True
+                lines.append(f"- [[{rel}]] - {title[:120]}")
+            lines.extend(other_concept_links)
+            lines.append("")
+        lines.extend(post_other_lines)
 
-        if modified:
-            # Re-add footer with updated counts
-            total = sum(1 for l in lines if l.startswith("- [["))
-            lines.append("---")
-            lines.append(
-                f"Total: {total} pages. Use search_wiki to find pages by keyword, "
-                "or read_wiki_page to expand community pages "
-                "and see their members. Start with the community that best matches "
-                "the user's question."
-            )
-            self.index_godnodes_file.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+        # Strip trailing blank lines before adding footer
+        while lines and lines[-1] == "":
+            lines.pop()
+
+        # Re-add footer with updated counts
+        total = sum(1 for l in lines if l.startswith("- [["))
+        lines.append("---")
+        lines.append(
+            f"Total: {total} pages. Use search_wiki to find pages by keyword, "
+            "or read_wiki_page to expand community pages "
+            "and see their members. Start with the community that best matches "
+            "the user's question."
+        )
+        self.index_godnodes_file.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
 
     def _write_godnodes_warning(self, new_entities: int, new_concepts: int, threshold: int) -> None:
         """Write a warning flag so the UI can prompt the user to rebuild the index."""
