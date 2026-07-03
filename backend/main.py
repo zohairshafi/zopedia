@@ -527,6 +527,30 @@ async def _chat_history_delete_message(thread_id: str, message_id: str, request:
     return {"status": "ok"}
 
 
+@_chat_history_router.get("/chat/preferences")
+async def _chat_history_get_preferences(request: Request):
+    """Return stored user preferences (system prompt, inference params)."""
+    from chat_history_store import get_user_preferences
+
+    current_subject = await _require_valid_subject(request)
+    prefs = get_user_preferences(current_subject)
+    return {"preferences": prefs or {}}
+
+
+class _ChatPreferencesBody(_BaseModel):
+    preferences: dict
+
+
+@_chat_history_router.put("/chat/preferences")
+async def _chat_history_save_preferences(body: _ChatPreferencesBody, request: Request):
+    """Save user preferences (system prompt, inference params)."""
+    from chat_history_store import save_user_preferences
+
+    current_subject = await _require_valid_subject(request)
+    save_user_preferences(current_subject, body.preferences)
+    return {"status": "ok"}
+
+
 app.include_router(_chat_history_router, prefix="/api")
 
 # Research mode

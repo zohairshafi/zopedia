@@ -65,6 +65,15 @@ def _get_connection() -> sqlite3.Connection:
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_chat_messages_thread_id ON chat_messages(thread_id, username)"
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS user_preferences (
+            username TEXT PRIMARY KEY,
+            prefs_json TEXT NOT NULL DEFAULT '{}',
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
     conn.commit()
     return conn
 
@@ -300,5 +309,44 @@ def delete_all_threads(username: str) -> int:
         )
         conn.commit()
         return cur.rowcount
+    finally:
+        conn.close()
+
+
+# ── User Preferences ──────────────────────────────────────────────────
+
+
+def get_user_preferences(username: str) -> dict | None:
+    """Return stored preferences for a user, or None if not set."""
+    conn = _get_connection()
+    try:
+        row = conn.execute(
+            "SELECT prefs_json FROM user_preferences WHERE username = ?",
+            (username,),
+        ).fetchone()
+        if not row:
+            return None
+        return json.loads(row["prefs_json"])
+    finally:
+        conn.close()
+
+
+def save_user_preferences(username: str, prefs: dict) -> None:
+    """Create or update user preferences."""
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc).isoformat()
+    prefs_json = json.dumps(prefs, ensure_ascii=False)
+    conn = _get_connection()
+    try:
+        conn.execute(
+            """INSERT INTO user_preferences (username, prefs_json, updated_at)
+               VALUES (?, ?, ?)
+               ON CONFLICT(username) DO UPDATE SET
+                   prefs_json = excluded.prefs_json,
+                   updated_at = excluded.updated_at""",
+            (username, prefs_json, now),
+        )
+        conn.commit()
     finally:
         conn.close()

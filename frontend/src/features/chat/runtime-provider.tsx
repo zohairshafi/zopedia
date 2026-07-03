@@ -27,7 +27,7 @@ import { extractText, getDocumentProxy } from "unpdf";
 import { authFetch } from "@/features/auth";
 import { createOpenAIStreamAdapter } from "./api/chat-adapter";
 import { db, resetAndReload } from "./db";
-import { useChatRuntimeStore } from "./stores/chat-runtime-store";
+import { useChatRuntimeStore, loadPreferencesFromServer } from "./stores/chat-runtime-store";
 import type { MessageRecord, ModelType } from "./types";
 import {
   syncThreadListFromServer,
@@ -805,6 +805,7 @@ export function ChatRuntimeProvider({
   useEffect(() => {
     void syncThreadListFromServer();
     void maybeMigrateLocalToServer();
+    void loadPreferencesFromServer();
   }, []);
 
   return (

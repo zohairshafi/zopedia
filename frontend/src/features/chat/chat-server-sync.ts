@@ -515,3 +515,35 @@ export async function maybeMigrateLocalToServer(): Promise<boolean> {
   }
   return true;
 }
+
+// ── User Preferences (cross-device sync) ─────────────────────────────
+
+const PREFERENCES_DEBOUNCE_MS = 3000;
+let _pendingPrefsSave: ReturnType<typeof setTimeout> | null = null;
+
+export async function fetchUserPreferences(): Promise<Record<string, unknown>> {
+  try {
+    const res = await authFetch("/api/chat/preferences", { cache: "no-store" });
+    if (!res.ok) return {};
+    const data = await res.json();
+    return data.preferences ?? {};
+  } catch {
+    return {};
+  }
+}
+
+export function saveUserPreferencesToServer(prefs: Record<string, unknown>): void {
+  if (_pendingPrefsSave) clearTimeout(_pendingPrefsSave);
+  _pendingPrefsSave = setTimeout(async () => {
+    _pendingPrefsSave = null;
+    try {
+      await authFetch("/api/chat/preferences", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ preferences: prefs }),
+      });
+    } catch {
+      // Silently fail — localStorage is still the local source of truth
+    }
+  }, PREFERENCES_DEBOUNCE_MS);
+}

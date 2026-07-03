@@ -492,3 +492,55 @@ export const useChatRuntimeStore = create<ChatRuntimeStore>((set) => ({
     set({ pendingAudioBase64: null, pendingAudioName: null }),
   setContextUsage: (contextUsage) => set({ contextUsage }),
 }));
+
+// ── Cross-device preferences sync ─────────────────────────────────────
+
+let _prefsSaveTimer: ReturnType<typeof setTimeout> | null = null;
+
+function _debouncedSyncToServer(prefs: Record<string, unknown>): void {
+  if (_prefsSaveTimer) clearTimeout(_prefsSaveTimer);
+  _prefsSaveTimer = setTimeout(async () => {
+    _prefsSaveTimer = null;
+    try {
+      // Dynamic import to avoid circular dependency issues
+      const { saveUserPreferencesToServer } = await import(
+        "../chat-server-sync"
+      );
+      saveUserPreferencesToServer(prefs);
+    } catch {
+      // ignore — localStorage still has the value
+    }
+  }, 3000);
+}
+
+// Subscribe to params changes and sync to server (debounced)
+useChatRuntimeStore.subscribe((state, prev) => {
+  if (state.params === prev.params) return;
+  const { checkpoint, ...rest } = state.params;
+  void checkpoint;
+  _debouncedSyncToServer(rest as unknown as Record<string, unknown>);
+});
+
+let _serverPrefsLoaded = false;
+
+/** Fetch preferences from the server and merge into the store.
+ *  Server takes precedence over localStorage (cross-device sync).
+ *  Called once on app mount; safe to call multiple times (no-op after first). */
+export async function loadPreferencesFromServer(): Promise<void> {
+  if (_serverPrefsLoaded) return;
+  _serverPrefsLoaded = true;
+  try {
+    const { fetchUserPreferences } = await import("../chat-server-sync");
+    const serverPrefs = await fetchUserPreferences();
+    if (!serverPrefs || Object.keys(serverPrefs).length === 0) return;
+    // Cancel any pending save triggered by the initial localStorage load —
+    // the server value is fresher and we don't want to overwrite it.
+    if (_prefsSaveTimer) { clearTimeout(_prefsSaveTimer); _prefsSaveTimer = null; }
+    // Merge: server prefs overwrite local settings but preserve checkpoint
+    const store = useChatRuntimeStore.getState();
+    const merged = { ...store.params, ...serverPrefs, checkpoint: store.params.checkpoint };
+    store.setParams(merged);
+  } catch {
+    // Server unreachable — keep localStorage values
+  }
+}
