@@ -154,7 +154,7 @@ def main() -> None:
 
     # Register setup routes on the FastAPI app (first-run setup page)
     from setup_page import make_setup_routes
-    make_setup_routes(_main_module.app)
+    make_setup_routes(_main_module.app, str(CONFIG_PATH))
 
     _server_ref: list[uvicorn.Server | None] = [None]
 
