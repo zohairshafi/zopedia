@@ -543,6 +543,15 @@
 	scrollbar-color: oklch(0.67 0 0 / 0.5) var(--sidebar);
 }
 
+/* WKWebView (pywebview desktop app) can incorrectly propagate user-select: none
+   from unrelated UI elements into content areas. Force text selection on message
+   content so users can select and copy text in the desktop app. */
+.aui-thread-viewport .aui-assistant-message-content,
+.aui-thread-viewport .aui-user-message-content {
+	-webkit-user-select: text;
+	user-select: text;
+}
+
 .aui-thread-viewport::-webkit-scrollbar-track {
 	background: var(--sidebar);
 }

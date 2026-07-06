@@ -73,6 +73,10 @@ def _open_webview_window(
     import webview
     import AppKit
 
+    # Enable native download handling in WKWebView so blob: URL downloads
+    # (chat export, etc.) trigger a save dialog instead of navigating.
+    webview.settings['ALLOW_DOWNLOADS'] = True
+
     class TitlebarColorView(AppKit.NSView):
         """Opaque color view that still lets the window be dragged by it.
 
@@ -135,6 +139,35 @@ def _open_webview_window(
             if center is not None:
                 center.deliverNotification_(notif)
         AppHelper.callAfter(_post)
+
+    # ── Python helper: save a blob to disk via native save dialog ──
+    # WKWebView may not recognise programmatic blob: URL downloads, so
+    # JavaScript calls this directly for chat export / file downloads.
+    def save_blob(filename: str, data_b64: str) -> str:
+        # pywebview's JS bridge runs exposed functions on a background
+        # thread, but NSSavePanel must run on the main thread.  Dispatch
+        # via AppHelper and block with an event until the dialog returns.
+        import base64
+        import threading
+        data = base64.b64decode(data_b64)
+        result: list[str] = [""]
+        done = threading.Event()
+
+        def _on_main():
+            try:
+                save_dlg = AppKit.NSSavePanel.savePanel()
+                save_dlg.setNameFieldStringValue_(filename)
+                if save_dlg.runModal() == AppKit.NSFileHandlingPanelOKButton:
+                    filepath = save_dlg.URL().path()
+                    with open(filepath, "wb") as f:
+                        f.write(data)
+                    result[0] = filepath
+            finally:
+                done.set()
+
+        AppHelper.callAfter(_on_main)
+        done.wait()  # block this thread until the main-thread callback finishes
+        return result[0]
 
     # ── Titlebar theming ──────────────────────────────────────────
     # Make the titlebar transparent and set the window background to the
@@ -203,7 +236,7 @@ def _open_webview_window(
         # Name must NOT start with '_' (see open_url note above).
         AppHelper.callAfter(_apply_titlebar_theme, is_dark)
 
-    window.expose(open_url, set_native_theme, notify_completion)
+    window.expose(open_url, set_native_theme, notify_completion, save_blob)
 
     def _on_loaded():
         # Inject desktop flag so the frontend knows it's running inside pywebview
@@ -243,6 +276,12 @@ def _open_webview_window(
                     var a = e.target.closest('a');
                     if (!a || !a.href) return;
                     var url = a.href;
+                    // Blob / data / javascript / mailto / file URLs and download
+                    // links must stay in the webview (system browser can't resolve
+                    // blob: or data: URLs, and downloads need the native context).
+                    if (/^(blob|data|javascript|mailto|file):/i.test(url) || a.hasAttribute('download')) {
+                        return;
+                    }
                     if (url.startsWith(window.location.origin)) {
                         if (a.getAttribute('target') === '_blank') {
                             e.preventDefault();
@@ -260,6 +299,10 @@ def _open_webview_window(
                 var _origOpen = window.open;
                 window.open = function(url, target) {
                     if (!url) return _origOpen.apply(this, arguments);
+                    // Don't intercept blob/data/javascript/mailto/file URLs.
+                    if (/^(blob|data|javascript|mailto|file):/i.test(url)) {
+                        return _origOpen.apply(this, arguments);
+                    }
                     if (target === '_blank' || !target) {
                         var resolved = url;
                         if (resolved.indexOf('://') === -1) {

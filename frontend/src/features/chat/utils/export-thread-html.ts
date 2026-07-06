@@ -1304,15 +1304,29 @@ ${messagesHtml}
 </body>
 </html>`;
 
-  const blob = new Blob([html], { type: "text/html" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
   const safeTitle = (threadTitle || "zopedia-chat")
     .replace(/[^a-zA-Z0-9]+/g, "-")
     .replace(/^-|-$/g, "")
     .slice(0, 60);
-  a.download = `zopedia-${safeTitle}-${new Date().toISOString().slice(0, 10)}.html`;
+  const filename = `zopedia-${safeTitle}-${new Date().toISOString().slice(0, 10)}.html`;
+
+  // Desktop app (pywebview): use native save dialog so the file lands on
+  // disk. WKWebView does not handle programmatic blob: URL downloads.
+  const api = (window as { pywebview?: { api?: Record<string, (...a: unknown[]) => Promise<unknown>> } }).pywebview?.api;
+  if (api?.save_blob) {
+    // Encode as base64 safely for UTF-8 content
+    const bytes = new TextEncoder().encode(html);
+    const b64 = btoa(Array.from(bytes, (b) => String.fromCharCode(b)).join(""));
+    void api.save_blob(filename, b64);
+    return;
+  }
+
+  // Browser: use blob URL + <a download> (works in all modern browsers).
+  const blob = new Blob([html], { type: "text/html" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
   document.body.appendChild(a);
   a.click();
   a.remove();
