@@ -84,6 +84,19 @@ cd ../backend && python main.py
 
 Drop files into `backend/wiki_data/raw/` or use the **Upload Files** button in the sidebar under Wiki Options.
 
+### macOS Desktop App
+
+A native macOS app is available on the [Releases](https://github.com/zohairshafi/zopedia/releases) page. Both Apple Silicon (`arm64`) and Intel (`x86_64`) DMGs are provided.
+
+The desktop app bundles the full backend + frontend into a self-contained `.app` with:
+- Native titlebar that matches the app theme (dark/light)
+- Close button hides to dock (Cmd+Q quits)
+- Links to external URLs open in your system browser
+- Native macOS notifications on chat completion
+- Auto-updater via GitHub Releases
+
+The app stores its data at `~/zopedia/` by default (configurable in `~/.config/Zopedia/config.json`).
+
 ### Windows Setup
 
 On Windows, use PowerShell and replace `export` with `$env:`:
@@ -275,12 +288,13 @@ zopedia/
 │   │       └── bridge.py    # ZOPEDIA_* → UNSLOTH_* env mapping
 │   ├── routes/
 │   │   ├── chat.py          # /v1/chat/completions — tool-calling + streaming
-│   │   └── wiki.py          # Wiki management endpoints (17 endpoints)
+│   │   └── wiki.py          # Wiki management endpoints (22 endpoints)
 │   ├── models/wiki.py       # Pydantic models
 │   ├── auth/                # JWT auth (router, storage, authentication, hashing)
 │   └── chat_history_store.py  # Server-side chat history (SQLite, per-user)
 ├── frontend/                # React + Vite + TypeScript (assistant-ui)
 ├── graphify/                # Graph analysis library (minimal — 7 files)
+├── packaging/               # macOS desktop app (pywebview + PyInstaller)
 ├── notebooks/               # Jupyter notebooks for graph exploration
 └── docs/                    # Architecture, multi-user plan, etc.
 ```
@@ -357,15 +371,22 @@ POST /v1/chat/completions    OpenAI-compatible chat with tool-calling + streamin
 ```
 GET    /api/inference/wiki/env              List all config variables
 POST   /api/inference/wiki/env              Update config variables
+POST   /api/inference/wiki/ingest           Ingest a file or URL into the wiki
+POST   /api/inference/wiki/query            Ask a question against the wiki
 GET    /api/inference/wiki/lint             Run health scan
 POST   /api/inference/wiki/retry-fallback   Re-query fallback analyses
 POST   /api/inference/wiki/enrich           Run enrichment pipeline
 POST   /api/inference/wiki/analysis-backlinks  Refresh backlink sections
 POST   /api/inference/wiki/rebuild-index    Backlinks + god-nodes index rebuild
 POST   /api/inference/wiki/merge-maintenance   Merge duplicate pages
+POST   /api/inference/wiki/archive/stale    Archive stale source pages
+POST   /api/inference/wiki/delete/preview   Preview deletion cascade
+POST   /api/inference/wiki/delete/apply     Apply wiki deletions
 POST   /api/inference/wiki/chat-history/save   Save chat to wiki raw/
-GET    /api/inference/wiki/data-graph       Get knowledge graph data
-POST   /api/inference/wiki/delete-entries   Delete wiki entries
+GET    /api/inference/wiki/data/graph       Get knowledge graph data
+GET    /api/inference/wiki/files            Browse wiki file tree
+GET    /api/inference/wiki-file             Serve a wiki page as markdown
+GET    /api/inference/wiki/warnings         Active wiki warnings
 ```
 
 ### Auth
@@ -379,10 +400,14 @@ POST /api/auth/register          Register new user (admin only)
 
 ### Chat History (server-side, auth required)
 ```
-GET    /v1/api/chat/threads          List threads for current user
-GET    /v1/api/chat/threads/{id}     Load thread + messages
-POST   /v1/api/chat/threads          Save thread + messages
-DELETE /v1/api/chat/threads/{id}     Delete thread
+GET    /api/chat/threads             List threads for current user
+GET    /api/chat/threads/{id}        Load thread + messages
+POST   /api/chat/threads             Save thread + messages
+PATCH  /api/chat/threads/{id}        Update thread title
+POST   /api/chat/threads/{id}/messages  Append messages incrementally
+DELETE /api/chat/threads/{id}        Delete thread
+GET    /api/chat/preferences         Get user chat preferences
+PUT    /api/chat/preferences         Update user chat preferences
 ```
 
 ### Other

@@ -56,12 +56,18 @@ zopedia/
 │   │       └── bridge.py    # ZOPEDIA_* → UNSLOTH_* env mapping
 │   ├── routes/
 │   │   ├── chat.py          # /v1/chat/completions with tool-calling + dynamic system prompt
-│   │   └── wiki.py          # Wiki management endpoints (17 endpoints)
+│   │   └── wiki.py          # Wiki management endpoints (22 endpoints)
 │   ├── models/wiki.py       # Pydantic models
 │   ├── auth/                # JWT auth (router, storage, authentication, hashing)
 │   └── chat_history_store.py  # Server-side chat history (SQLite, per-user)
 ├── frontend/                # React + Vite + TypeScript
 ├── graphify/                # Standalone graph analysis library (copied as-is)
+├── packaging/               # macOS desktop app (pywebview + PyInstaller)
+│   ├── launcher.py          # Native window, titlebar theming, JS bridge
+│   ├── config.py            # Desktop config (wiki path, LLM settings)
+│   ├── setup_page.py        # First-run setup page
+│   ├── updater.py           # GitHub auto-updater
+│   └── Zopedia.spec         # PyInstaller spec for .app bundle
 └── notebooks/               # Jupyter notebooks for graph exploration
 ```
 
@@ -381,7 +387,7 @@ User visits   → login form with username + password fields
 - `hashing.py` — PBKDF2-HMAC-SHA256 (100k iterations)
 
 **Chat history store** (`backend/chat_history_store.py`):
-- SQLite database alongside `auth.db` at `~/.unsloth/studio/auth/chat_history.db`
+- SQLite database alongside `auth.db` at `$ZOPEDIA_HOME/.zopedia/auth/chat_history.db` (defaults to `~/.zopedia/auth/chat_history.db`)
 - Tables: `chat_threads` (id, username, title, timestamps) and `chat_messages` (id, thread_id, username, role, content, reasoning_content, parent_id)
 - All queries scoped by `username` — each user sees only their own threads
 - Message content capped at 100KB to prevent SQLite bloat from tool call results
@@ -409,10 +415,14 @@ User visits   → login form with username + password fields
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/v1/api/chat/threads` | List threads for current user |
-| `GET` | `/v1/api/chat/threads/{id}` | Load thread + messages |
-| `POST` | `/v1/api/chat/threads` | Upsert thread + replace all messages |
-| `DELETE` | `/v1/api/chat/threads/{id}` | Delete thread |
+| `GET` | `/api/chat/threads` | List threads for current user |
+| `GET` | `/api/chat/threads/{id}` | Load thread + messages |
+| `POST` | `/api/chat/threads` | Upsert thread + replace all messages |
+| `PATCH` | `/api/chat/threads/{id}` | Update thread title |
+| `POST` | `/api/chat/threads/{id}/messages` | Append messages incrementally |
+| `DELETE` | `/api/chat/threads/{id}` | Delete thread |
+| `GET` | `/api/chat/preferences` | Get user chat preferences |
+| `PUT` | `/api/chat/preferences` | Update user chat preferences |
 
 ## All LLM Prompt Locations
 
