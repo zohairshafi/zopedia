@@ -140,12 +140,12 @@ def _inject_rag_context(messages: list[dict], query: str) -> tuple[list[dict], O
     return new_messages, context
 
 
-async def _resolve_tool_calls(messages: list[dict], tools: list[dict], resolved_model: str, max_turns: int | None = None) -> list[dict]:
+async def _resolve_tool_calls(messages: list[dict], tools: list[dict], resolved_model: str, max_turns: int | None = None, thinking: dict | None = None) -> list[dict]:
     """Execute tool-calling loop. Returns messages array (non-streaming path)."""
     if max_turns is None:
         max_turns = _wiki_max_tool_turns()
     result = None
-    async for _ in _resolve_tool_calls_stream(messages, tools, resolved_model, max_turns):
+    async for _ in _resolve_tool_calls_stream(messages, tools, resolved_model, max_turns, thinking=thinking):
         pass
     # The generator mutates messages in place; return it
     return messages
@@ -156,6 +156,7 @@ async def _resolve_tool_calls_stream(
     tools: list[dict],
     resolved_model: str,
     max_turns: int | None = None,
+    thinking: dict | None = None,
 ):
     if max_turns is None:
         max_turns = _wiki_max_tool_turns()
@@ -185,6 +186,7 @@ async def _resolve_tool_calls_stream(
             temperature=0.7,
             max_tokens=4096,
             tools=tools,
+            thinking=thinking,
         )
 
         if "error" in result:
@@ -437,6 +439,17 @@ async def openai_chat_completions(request: Request):
     response_format = body.get("response_format")
     enable_tools = bool(body.get("enable_tools", False))
     enabled_tools: list[str] = body.get("enabled_tools") or []
+    reasoning_effort = body.get("reasoning_effort")  # "low" | "medium" | "high" | "max"
+    enable_thinking = body.get("enable_thinking")     # bool | None
+
+    # Build thinking param for upstream API.  When reasoning_effort is
+    # set the frontend wants effort-based reasoning; otherwise a simple
+    # enable/disable toggle (or omit the field entirely for upstream default).
+    thinking: dict | None = None
+    if isinstance(reasoning_effort, str) and reasoning_effort:
+        thinking = {"type": "enabled", "reasoning_effort": reasoning_effort}
+    elif isinstance(enable_thinking, bool):
+        thinking = {"type": "enabled" if enable_thinking else "disabled"}
 
     resolved_model = _resolve_model(model)
 
@@ -608,7 +621,7 @@ async def openai_chat_completions(request: Request):
 
                 # Phase 1: tool resolution with progress events
                 try:
-                    async for evt in _resolve_tool_calls_stream(messages, wiki_tools, resolved_model):
+                    async for evt in _resolve_tool_calls_stream(messages, wiki_tools, resolved_model, thinking=thinking):
                         etype = evt["type"]
                         if etype == "tool_status":
                             yield f"data: {json.dumps({'type': 'tool_status', 'content': evt['text']})}\n\n"
@@ -634,7 +647,7 @@ async def openai_chat_completions(request: Request):
                 # Phase 2: always stream the final answer from the API.
                 # This ensures proper token-by-token output with full CoT visibility
                 # and prevents hallucinated/narration text from being treated as the answer.
-                async for event in chat_completions_stream(messages, model=resolved_model, temperature=temperature, max_tokens=max_tokens, tools=None, tool_choice=None):
+                async for event in chat_completions_stream(messages, model=resolved_model, temperature=temperature, max_tokens=max_tokens, tools=None, tool_choice=None, thinking=thinking):
                     if event["type"] == "reasoning":
                         yield f"data: {json.dumps({'id': chunk_id, 'object': 'chat.completion.chunk', 'created': created, 'model': resolved_model, 'choices': [{'index': 0, 'delta': {'reasoning_content': event['content']}, 'finish_reason': None}]})}\n\n"
                     elif event["type"] == "text":
@@ -657,7 +670,7 @@ async def openai_chat_completions(request: Request):
         else:
             # ── Non-streaming tool resolution ──────────────────────
             try:
-                messages = await _resolve_tool_calls(list(messages), wiki_tools, resolved_model)
+                messages = await _resolve_tool_calls(list(messages), wiki_tools, resolved_model, thinking=thinking)
                 if messages and messages[-1].get("role") == "assistant" and messages[-1].get("content") and not messages[-1].get("tool_calls"):
                     messages.pop()
                 messages.append({"role": "user", "content": CHAT_SYNTHESIS_PROMPT, "_ephemeral": True})
@@ -672,7 +685,7 @@ async def openai_chat_completions(request: Request):
     # ── Non-streaming final response ───────────────────────────────
 
     if not stream:
-        result = await chat_completions_non_streaming(messages, model=resolved_model, temperature=temperature, max_tokens=max_tokens, tools=tools, response_format=response_format)
+        result = await chat_completions_non_streaming(messages, model=resolved_model, temperature=temperature, max_tokens=max_tokens, tools=tools, response_format=response_format, thinking=thinking)
         # Remove ephemeral synthesis instruction so it doesn't leak into the response
         for i in range(len(messages) - 1, -1, -1):
             if messages[i].get("_ephemeral"):

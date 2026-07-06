@@ -1,4 +1,13 @@
 // Central API base URL for Tauri vs browser mode
+
+declare global {
+  interface Window {
+    __ZOPEDIA_DESKTOP__?: boolean;
+    pywebview?: {
+      api: Record<string, (...args: unknown[]) => Promise<unknown>>;
+    };
+  }
+}
 let apiBase = ''
 
 const isTauri = typeof window !== 'undefined' && '__TAURI__' in window
@@ -23,10 +32,16 @@ export function apiUrl(path: string): string {
 
 export { isTauri }
 
-// Desktop pywebview mode: launcher.py injects window.__ZOPEDIA_DESKTOP__
-// Use a getter so it's evaluated after page load (pywebview injects it on 'loaded' event)
+// Desktop pywebview mode. Detected via the launcher's custom user agent
+// (set on the WKWebView before the page loads). navigator.userAgent is
+// available synchronously on first render, so layout/theme can branch with
+// no flash — and a real browser can never have this token. The window flag
+// is kept as a secondary signal (injected after load).
+const DESKTOP_UA_TOKEN = 'ZopediaDesktop'
 function getIsDesktop(): boolean {
-  return typeof window !== 'undefined' && (window as unknown as Record<string, unknown>).__ZOPEDIA_DESKTOP__ === true
+  if (typeof window === 'undefined') return false
+  if (window.__ZOPEDIA_DESKTOP__ === true) return true
+  return navigator.userAgent.indexOf(DESKTOP_UA_TOKEN) !== -1
 }
 
 export { getIsDesktop }

@@ -25,7 +25,7 @@ const REASONING_STYLE_KEY = "unsloth_reasoning_style";
 const PRESERVE_THINKING_KEY = "unsloth_preserve_thinking";
 
 export type ReasoningStyle = "enable_thinking" | "reasoning_effort";
-export type ReasoningEffort = "low" | "medium" | "high";
+export type ReasoningEffort = "low" | "medium" | "high" | "max";
 
 function loadReasoningStyle(fallback: ReasoningStyle): ReasoningStyle {
   if (!canUseStorage()) return fallback;
@@ -42,7 +42,7 @@ function loadReasoningEffort(fallback: ReasoningEffort): ReasoningEffort {
   if (!canUseStorage()) return fallback;
   try {
     const raw = localStorage.getItem(REASONING_EFFORT_KEY);
-    if (raw === "low" || raw === "medium" || raw === "high") return raw;
+    if (raw === "low" || raw === "medium" || raw === "high" || raw === "max") return raw;
     return fallback;
   } catch {
     return fallback;
@@ -301,7 +301,7 @@ export const useChatRuntimeStore = create<ChatRuntimeStore>((set) => ({
   supportsReasoning: false,
   reasoningAlwaysOn: true,
   reasoningEnabled: true,
-  reasoningStyle: loadReasoningStyle("enable_thinking"),
+  reasoningStyle: loadReasoningStyle("reasoning_effort"),
   reasoningEffort: loadReasoningEffort("high"),
   supportsPreserveThinking: false,
   preserveThinking: loadBool(PRESERVE_THINKING_KEY, false),

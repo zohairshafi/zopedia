@@ -11,6 +11,13 @@ const debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
 // uses INSERT OR IGNORE so re-sending is harmless.
 const syncedMessageIds = new Set<string>();
 
+// Thread IDs the user has deleted this session. The server list-sync
+// (which can fire on visibilitychange) skips re-adding these, so a slow
+// or failed server-side delete can't make an empty thread reappear in
+// the sidebar. Cleared on reload; the server is the source of truth
+// across sessions.
+const recentlyDeletedThreadIds = new Set<string>();
+
 function flushPendingSaves() {
   for (const [threadId, timer] of debounceTimers) {
     clearTimeout(timer);
@@ -330,10 +337,11 @@ export async function updateThreadTitleOnServer(threadId: string, title: string)
 }
 
 export async function deleteThreadFromServer(threadId: string): Promise<void> {
+  recentlyDeletedThreadIds.add(threadId);
   try {
     await authFetch(`/api/chat/threads/${encodeURIComponent(threadId)}`, { method: "DELETE" });
   } catch {
-    // Silently fail
+    // Silently fail — the guard above keeps it out of the sidebar regardless.
   }
 }
 
@@ -379,6 +387,9 @@ export async function syncThreadListFromServer(): Promise<void> {
     for (const st of serverThreads) {
       // Skip server threads with no messages — they're empty shells
       if (!st.message_count) continue;
+      // Skip threads the user just deleted locally, so a slow/failed server
+      // delete can't resurrect an empty entry in the sidebar.
+      if (recentlyDeletedThreadIds.has(st.id)) continue;
     const local = await db.threads.get(st.id);
     // Always sync from server — server is the source of truth.
     // Preserve local createdAt if available (more accurate than server's).

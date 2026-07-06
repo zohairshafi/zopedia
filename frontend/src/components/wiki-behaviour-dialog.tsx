@@ -407,7 +407,7 @@ export function WikiBehaviourDialog({
           </div>
         </DialogHeader>
 
-        <ScrollArea className="h-[min(68vh,760px)] px-6 pb-2">
+        <ScrollArea className="max-h-[min(68vh,760px)] px-6 pb-2">
           {loading ? (
             <div className="py-8 text-sm text-muted-foreground">Loading wiki settings...</div>
           ) : groupedVariables.length === 0 ? (

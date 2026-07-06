@@ -9,6 +9,7 @@ import { useTauriBackend } from "@/hooks/use-tauri-backend";
 import { useTauriUpdate } from "@/hooks/use-tauri-update";
 import { useDesktopUpdate } from "@/hooks/use-desktop-update";
 import { isTauri, getIsDesktop } from "@/lib/api-base";
+import { useTheme } from "@/features/settings/stores/theme-store";
 import { ThemeProvider } from "next-themes";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
@@ -215,6 +216,7 @@ function DesktopWrapper({ children }: { children: ReactNode }) {
   // __ZOPEDIA_DESKTOP__ is injected by pywebview after the page loads,
   // so we re-check on a short delay to pick it up.
   const [isDesktop, setIsDesktop] = useState(false);
+  const { resolved: resolvedTheme } = useTheme();
 
   useEffect(() => {
     if (getIsDesktop()) {
@@ -226,6 +228,15 @@ function DesktopWrapper({ children }: { children: ReactNode }) {
     }, 500);
     return () => clearTimeout(t);
   }, []);
+
+  // Sync resolved theme to native window chrome (pywebview)
+  useEffect(() => {
+    if (!isDesktop) return;
+    const api = (window as any).pywebview?.api;
+    if (!api?.set_native_theme) return;
+    const isDark = resolvedTheme === "dark";
+    api.set_native_theme(isDark).catch(() => {});
+  }, [resolvedTheme, isDesktop]);
 
   if (!isDesktop) return <>{children}</>;
 

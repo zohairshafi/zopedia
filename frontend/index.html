@@ -9,6 +9,25 @@
     <link rel="icon" type="image/png" href="/favicon_light.png" media="(prefers-color-scheme: dark)" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>zopedia</title>
+    <script>
+      // Desktop app (pywebview) defaults to dark mode when the user hasn't
+      // picked a theme. The launcher sets a custom user agent containing
+      // "ZopediaDesktop" on the WKWebView, available synchronously here
+      // (before paint, so no light-mode flash). A real browser never has
+      // this token, so the website is completely unaffected.
+      (function () {
+        try {
+          if (navigator.userAgent.indexOf("ZopediaDesktop") === -1) return;
+          var t = localStorage.getItem("theme");
+          if (t !== "light" && t !== "dark" && t !== "system") {
+            localStorage.setItem("theme", "dark");
+          }
+          if (localStorage.getItem("theme") === "dark") {
+            document.documentElement.classList.add("dark");
+          }
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

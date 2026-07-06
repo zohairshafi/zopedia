@@ -227,6 +227,26 @@ def make_setup_routes(app: FastAPI, config_path: str) -> None:
         tmp.write_text(json.dumps(cfg, indent=2, ensure_ascii=False) + "\n")
         _os.replace(tmp, cfg_path)
 
+        # Persist the auth toggle to wiki_env_overrides.json — the single source
+        # of truth the launcher reads on every start (same file the in-app
+        # wiki-details dialog writes). auth_enabled checked → auth ON.
+        auth_disabled_val = "false" if body.auth_enabled else "true"
+        overrides_path = _Path(
+            _os.environ.get("ZOPEDIA_HOME", str(_Path.home()))
+        ) / ".zopedia" / "wiki_env_overrides.json"
+        overrides: dict = {}
+        if overrides_path.is_file():
+            try:
+                overrides = json.loads(overrides_path.read_text())
+            except (json.JSONDecodeError, OSError):
+                overrides = {}
+        overrides["ZOPEDIA_AUTH_DISABLED"] = auth_disabled_val
+        overrides_path.parent.mkdir(parents=True, exist_ok=True)
+        ov_tmp = overrides_path.with_suffix(".tmp")
+        ov_tmp.write_text(json.dumps(overrides, indent=2, ensure_ascii=False) + "\n")
+        _os.replace(ov_tmp, overrides_path)
+        _os.environ["ZOPEDIA_AUTH_DISABLED"] = auth_disabled_val
+
         # Apply to current process env so the running server picks them up
         for key, env_key in [
             ("llm_base_url", "ZOPEDIA_LLM_BASE_URL"),

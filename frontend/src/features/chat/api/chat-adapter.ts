@@ -1125,15 +1125,17 @@ export function createOpenAIStreamAdapter(): ChatModelAdapter {
         }
         runtime.setThreadRunning(threadKey, false);
 
-        if (
-          completedSuccessfully &&
-          document.visibilityState === "hidden" &&
-          "Notification" in window &&
-          Notification.permission === "granted"
-        ) {
+        if (completedSuccessfully && document.visibilityState === "hidden") {
           const store = useChatRuntimeStore.getState();
           if (store.notifyOnComplete) {
-            new Notification("Zopedia", { body: "Response ready", icon: `${window.location.origin}/logotext.png` });
+            // Desktop app: post a native macOS notification (shows the
+            // Zopedia app icon). Browser: fall back to the Web Notification API.
+            const nativeApi = (window as { pywebview?: { api?: Record<string, (...a: unknown[]) => Promise<unknown>> } }).pywebview?.api;
+            if (nativeApi?.notify_completion) {
+              void nativeApi.notify_completion("Zopedia", "Response ready");
+            } else if ("Notification" in window && Notification.permission === "granted") {
+              new Notification("Zopedia", { body: "Response ready", icon: `${window.location.origin}/logotext.png` });
+            }
           }
         }
       }

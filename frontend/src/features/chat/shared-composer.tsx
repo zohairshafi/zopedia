@@ -14,7 +14,7 @@ import { applyQwenThinkingParams } from "@/features/chat/utils/qwen-params";
 import { AUDIO_ACCEPT, MAX_AUDIO_SIZE, fileToBase64 } from "@/lib/audio-utils";
 import { useAui } from "@assistant-ui/react";
 import { cn } from "@/lib/utils";
-import { ArrowUpIcon, GaugeIcon, GlobeIcon, HeadphonesIcon, LightbulbIcon, LightbulbOffIcon, MicIcon, PlusIcon, SquareIcon, XIcon } from "lucide-react";
+import { ArrowUpIcon, GlobeIcon, HeadphonesIcon, LightbulbIcon, LightbulbOffIcon, MicIcon, PlusIcon, SquareIcon, XIcon } from "lucide-react";
 import { toast } from "sonner";
 import { loadModel, validateModel } from "./api/chat-api";
 import {
@@ -663,47 +663,7 @@ export function SharedComposer({
                 {reasoningEnabled ? "Disable thinking" : "Enable thinking"}
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              {(["low", "medium", "high"] as const).map((level) => (
-                <DropdownMenuItem
-                  key={level}
-                  disabled={reasoningDisabled}
-                  onSelect={() => {
-                    setReasoningStyle("reasoning_effort");
-                    setReasoningEffort(level);
-                    setReasoningEnabled(true);
-                  }}
-                >
-                  Effort: {level.charAt(0).toUpperCase() + level.slice(1)}
-                  {reasoningStyle === "reasoning_effort" && reasoningEffort === level
-                    ? " \u2713"
-                    : ""}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild={true}>
-              <button
-                type="button"
-                disabled={reasoningDisabled}
-                className={cn(
-                  "flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-colors",
-                  reasoningDisabled
-                    ? "cursor-not-allowed opacity-40"
-                    : reasoningStyle === "reasoning_effort"
-                      ? "bg-primary/10 text-primary hover:bg-primary/20"
-                      : "bg-muted text-muted-foreground hover:bg-muted-foreground/15",
-                )}
-                aria-label={`Reasoning effort: ${reasoningEffort}`}
-              >
-                <GaugeIcon className="size-3.5" />
-                <span>
-                  Effort: {reasoningEffort.charAt(0).toUpperCase() + reasoningEffort.slice(1)}
-                </span>
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              {(["low", "medium", "high"] as const).map((level) => (
+              {(["low", "medium", "high", "max"] as const).map((level) => (
                 <DropdownMenuItem
                   key={level}
                   disabled={reasoningDisabled}

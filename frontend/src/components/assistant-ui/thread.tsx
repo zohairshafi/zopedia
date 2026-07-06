@@ -63,7 +63,6 @@ import {
   ChevronRightIcon,
   CopyIcon,
   DownloadIcon,
-  GaugeIcon,
   GlobeIcon,
   HeadphonesIcon,
   LightbulbIcon,
@@ -560,67 +559,7 @@ const ReasoningToggle: FC = () => {
           {reasoningEnabled ? "Disable thinking" : "Enable thinking"}
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        {(["low", "medium", "high"] as const).map((level) => (
-          <DropdownMenuItem
-            key={level}
-            disabled={disabled}
-            onSelect={() => {
-              setReasoningStyle("reasoning_effort");
-              setReasoningEffort(level);
-              setReasoningEnabled(true);
-            }}
-          >
-            Effort: {level.charAt(0).toUpperCase() + level.slice(1)}
-            {reasoningStyle === "reasoning_effort" && reasoningEffort === level
-              ? " \u2713"
-              : ""}
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-};
-
-const ReasoningEffortControl: FC = () => {
-  const modelLoaded = useChatRuntimeStore(
-    (s) => !!s.params.checkpoint && !s.modelLoading,
-  );
-  const useUpstream = useChatRuntimeStore((s) => s.useUpstream);
-  const supportsReasoning = useChatRuntimeStore((s) => s.supportsReasoning);
-  const reasoningStyle = useChatRuntimeStore((s) => s.reasoningStyle);
-  const reasoningEffort = useChatRuntimeStore((s) => s.reasoningEffort);
-  const setReasoningStyle = useChatRuntimeStore((s) => s.setReasoningStyle);
-  const setReasoningEffort = useChatRuntimeStore((s) => s.setReasoningEffort);
-  const setReasoningEnabled = useChatRuntimeStore((s) => s.setReasoningEnabled);
-
-  const controlsReady = modelLoaded || useUpstream;
-  const disabled = !controlsReady || (!useUpstream && !supportsReasoning);
-  const effortLabel =
-    reasoningEffort.charAt(0).toUpperCase() + reasoningEffort.slice(1);
-  const effortModeActive = reasoningStyle === "reasoning_effort";
-
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild={true}>
-        <button
-          type="button"
-          disabled={disabled}
-          className={cn(
-            "flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-colors",
-            disabled
-              ? "cursor-not-allowed opacity-40"
-              : effortModeActive
-                ? "bg-primary/10 text-primary hover:bg-primary/20"
-                : "bg-muted text-muted-foreground hover:bg-muted-foreground/15",
-          )}
-          aria-label={`Reasoning effort: ${reasoningEffort}`}
-        >
-          <GaugeIcon className="size-3.5" />
-          <span>Effort: {effortLabel}</span>
-        </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        {(["low", "medium", "high"] as const).map((level) => (
+        {(["low", "medium", "high", "max"] as const).map((level) => (
           <DropdownMenuItem
             key={level}
             disabled={disabled}
@@ -1043,7 +982,6 @@ const ComposerAction: FC<{ disabled?: boolean }> = ({ disabled }) => {
         <ComposerAddAttachment />
         <ComposerAudioUpload />
         <ReasoningToggle />
-        <ReasoningEffortControl />
         <PreserveThinkingToggle />
         <WebSearchToggle />
         <DatabaseQueryToggle />
