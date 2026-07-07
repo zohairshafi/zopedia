@@ -13,6 +13,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { usePlatformStore } from "@/config/env";
+import { isClientMode } from "@/lib/mode";
+import { disconnectFromServer } from "@/features/connect";
 import { resetOnboardingDone } from "@/features/auth";
 import { useChatRuntimeStore } from "@/features/chat/stores/chat-runtime-store";
 import { useSettingsDialogStore } from "@/features/settings";
@@ -146,6 +148,28 @@ export function GeneralTab() {
           <Switch checked={autoTitle} onCheckedChange={setAutoTitle} />
         </SettingsRow>
       </SettingsSection>
+
+      {isClientMode() && (
+        <SettingsSection title="Server">
+          <SettingsRow
+            destructive
+            label="Disconnect from server"
+            description="Clears the stored server address and sign-in. You'll need to reconnect."
+          >
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                disconnectFromServer();
+                window.location.href = "/connect";
+              }}
+              className="text-destructive hover:text-destructive hover:border-destructive/60"
+            >
+              Disconnect
+            </Button>
+          </SettingsRow>
+        </SettingsSection>
+      )}
 
       <SettingsSection title="Danger zone">
         <SettingsRow

@@ -7,7 +7,10 @@ import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
 // https://vite.dev/config/
-export default defineConfig({
+// `--mode client` (loads .env.client → VITE_ZOPEDIA_MODE=client) builds the
+// lightweight client SPA into dist-client/; the default build is the full
+// co-located server app into dist/.
+export default defineConfig(({ mode }) => ({
   plugins: [react(), tailwindcss()],
   optimizeDeps: {
     include: ["@dagrejs/dagre", "@dagrejs/graphlib"],
@@ -56,8 +59,9 @@ export default defineConfig({
     },
   },
   build: {
+    outDir: mode === "client" ? "dist-client" : "dist",
     commonjsOptions: {
       include: [/node_modules/, /@dagrejs\/dagre/, /@dagrejs\/graphlib/],
     },
   },
-});
+}));

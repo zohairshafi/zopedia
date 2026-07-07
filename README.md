@@ -97,6 +97,71 @@ The desktop app bundles the full backend + frontend into a self-contained `.app`
 
 The app stores its data at `~/zopedia/` by default (configurable in `~/.config/Zopedia/config.json`).
 
+### Client App (thin client)
+
+A second build variant — **Zopedia Client** — is a lightweight front-end-only app that connects to a Zopedia **server running elsewhere** (home server, cloud VM, another machine). It has no backend of its own: no model management, no wiki maintenance, no server-admin settings. It just renders chat / wiki-browse / research and talks to a remote server over the REST API.
+
+The same React codebase builds in two modes via the `VITE_ZOPEDIA_MODE` flag:
+- **server** (default) — full co-located app (frontend + backend in one process)
+- **client** — the thin client
+
+#### Run the client (web, for development)
+
+```bash
+cd frontend
+npm run dev:client          # vite dev server in client mode (loads .env.client)
+# open the printed URL, e.g. http://localhost:5173
+```
+
+You'll land on a **Connect to server** page. Enter your server's URL (e.g. `http://192.168.1.50:8000` or `https://zopedia.example.com`), username, and password. The server URL + JWT are stored in the browser; all API calls go to that server.
+
+Requirements for the server: auth **enabled** with a real user account, and CORS open (open by default; for production hardening set `ZOPEDIA_CORS_ORIGINS=https://your-client-origin`). The client sends Bearer tokens, so non-credentialed cross-origin requests work.
+
+To serve the production build instead of the dev server:
+```bash
+npm run build:client && npm run preview:client
+```
+
+#### Build the client desktop app
+
+The client also ships as a native macOS app — a self-contained WKWebView wrapping the client SPA. It's ~60 MB (vs ~1 GB for the server app) because it bundles no backend. Output: `dist/Zopedia Client.app` and `dist/ZopediaClient-v1.0.0.dmg`.
+
+```bash
+# 1. Build the client SPA (→ frontend/dist-client)
+cd frontend && npm run build:client && cd ..
+
+# 2. Build the .app (arm64, using the packaging venv)
+source .venv-packaging/bin/activate
+rm -rf "dist/Zopedia Client.app" dist/ZopediaClient build/ZopediaClient
+pyinstaller --clean packaging/ZopediaClient.spec
+
+# 3. (Optional) package a DMG
+hdiutil create -volname "Zopedia Client" \
+  -srcfolder "dist/Zopedia Client.app" -ov -format UDZO \
+  dist/ZopediaClient-v1.0.0.dmg
+```
+
+On first launch the app opens straight to the Connect page — enter your server URL and credentials. (The static SPA is served from a local in-process HTTP server; no port configuration is needed.)
+
+#### Building the (server) desktop app
+
+The full server app is built from `packaging/Zopedia.spec` (entry point `packaging/launcher.py`). Apple Silicon and Intel builds require separate Python environments — Intel via Rosetta/conda. **Clean `dist/` between architecture builds**: PyInstaller's `--clean` only clears `build/`, not `dist/`, so leftover binaries from the previous architecture contaminate the next build.
+
+```bash
+# Build the frontend (server mode → frontend/dist)
+cd frontend && npm run build && cd ..
+
+# Apple Silicon (arm64)
+source .venv-packaging/bin/activate
+rm -rf dist/Zopedia dist/Zopedia.app build/Zopedia
+pyinstaller --clean packaging/Zopedia.spec
+file dist/Zopedia.app/Contents/MacOS/Zopedia   # must report: arm64
+hdiutil create -volname "Zopedia" -srcfolder dist/Zopedia.app \
+  -ov -format UDZO dist/Zopedia-v1.0.0.dmg
+```
+
+For the Intel build, repeat in an `osx-64` conda environment (see `.venv-packaging-intel-conda` in the release steps) and verify `file ... x86_64`.
+
 ### Windows Setup
 
 On Windows, use PowerShell and replace `export` with `$env:`:

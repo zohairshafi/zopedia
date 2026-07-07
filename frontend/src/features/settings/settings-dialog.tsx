@@ -20,6 +20,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { motion, useReducedMotion } from "motion/react";
+import { isServerMode } from "@/lib/mode";
 import { useSettingsDialogStore, type SettingsTab } from "./stores/settings-dialog-store";
 import { AboutTab } from "./tabs/about-tab";
 import { ApiKeysTab } from "./tabs/api-keys-tab";
@@ -44,6 +45,11 @@ const TABS: TabDef[] = [
   { id: "users", label: "Users", icon: UserAdd02Icon },
   { id: "about", label: "About", icon: SparklesIcon },
 ];
+
+// API Keys and Users are server-admin functions — hidden in client builds.
+const VISIBLE_TABS = isServerMode()
+  ? TABS
+  : TABS.filter((t) => t.id !== "api-keys" && t.id !== "users");
 
 function renderTab(tab: SettingsTab) {
   switch (tab) {
@@ -90,7 +96,7 @@ export function SettingsDialog() {
         <div className="flex h-full min-h-0">
           <aside className="font-heading flex w-[200px] shrink-0 flex-col border-r border-border bg-muted/20 p-2">
             <nav className="flex flex-col gap-0.5">
-              {TABS.map((tab) => {
+              {VISIBLE_TABS.map((tab) => {
                 const active = activeTab === tab.id;
                 return (
                   <button

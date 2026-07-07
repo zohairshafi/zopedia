@@ -5,6 +5,8 @@
  * into clickable markdown links that open the wiki page.
  */
 
+import { apiUrl } from "@/lib/api-base";
+
 const WIKI_LINK_RE = /\[\[([^\]]+)\]\]/g;
 
 // Match wiki-style paths: concepts/topic.md, entities/person.md, etc.
@@ -30,22 +32,28 @@ function resolveWikiPath(ref: string): string {
  * Links point to /api/inference/wiki-file?path=... which the backend serves as markdown.
  */
 export function preprocessWikiLinks(text: string): string {
+  // Links use apiUrl() so that in client mode they resolve to the remote
+  // server's URL (the static client origin has no backend). In server/Tauri
+  // mode apiUrl() returns a relative or local-absolute path as before.
+  const link = (path: string) =>
+    apiUrl(`/api/inference/wiki-file?path=${encodeURIComponent(path)}`);
+
   // Step 1: Convert [[wiki links]]
   text = text.replace(WIKI_LINK_RE, (_match, ref: string) => {
     const path = resolveWikiPath(ref);
-    return `[${ref}](/api/inference/wiki-file?path=${encodeURIComponent(path)})`;
+    return `[${ref}](${link(path)})`;
   });
 
   // Step 2: Convert plain .md path references that look like wiki pages
   text = text.replace(WIKI_PATH_RE, (match) => {
     const path = resolveWikiPath(match);
-    return `[${match}](/api/inference/wiki-file?path=${encodeURIComponent(path)})`;
+    return `[${match}](${link(path)})`;
   });
 
   // Step 3: Convert analysis/YYYY-MM-DD-HH-MM-title-slug paths (without .md)
   text = text.replace(ANALYSIS_PATH_RE, (match) => {
     const path = match + ".md";
-    return `[${match}](/api/inference/wiki-file?path=${encodeURIComponent(path)})`;
+    return `[${match}](${link(path)})`;
   });
 
   return text;

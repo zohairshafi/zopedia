@@ -3,6 +3,7 @@
 
 import { usePlatformStore } from "@/config/env";
 import { isTauri } from "@/lib/api-base";
+import { isClientMode } from "@/lib/mode";
 
 export const AUTH_TOKEN_KEY = "unsloth_auth_token";
 export const AUTH_REFRESH_TOKEN_KEY = "unsloth_auth_refresh_token";
@@ -80,6 +81,7 @@ export function resetOnboardingDone(): void {
 }
 
 export function getPostAuthRoute(): PostAuthRoute {
+  if (isClientMode()) return "/chat";
   if (isTauri) return "/chat";
   if (mustChangePassword()) return "/change-password";
   if (usePlatformStore.getState().isChatOnly()) return "/chat";

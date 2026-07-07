@@ -5,11 +5,18 @@ import { Route as indexRoute } from "./routes/index";
 import { Route as loginRoute } from "./routes/login";
 import { Route as changePasswordRoute } from "./routes/change-password";
 import { Route as researchRoute } from "./routes/research";
+import { Route as connectRoute } from "./routes/connect";
 
+// All routes are always registered so TanStack's strict redirect typing knows
+// every path. Mode gating (server vs client) happens in each route's beforeLoad,
+// so e.g. /connect redirects to / in server builds and /login redirects to
+// /connect in client builds. Page components are lazy-loaded, so an
+// unreachable route adds only its tiny definition object to the bundle.
 const routeTree = rootRoute.addChildren([
   indexRoute,
   loginRoute,
   changePasswordRoute,
+  connectRoute,
   chatRoute,
   researchRoute,
 ]);

@@ -385,7 +385,21 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Zopedia", version="0.1.0", lifespan=lifespan)
 
 # CORS
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+# Default allows all origins (backward compatible). The client app uses Bearer
+# tokens (non-credentialed requests), so a wildcard works for it. For production
+# hardening, set ZOPEDIA_CORS_ORIGINS to a comma-separated allowlist, e.g.
+# "https://app.example.com,https://staging.example.com".
+_cors_env = os.environ.get("ZOPEDIA_CORS_ORIGINS", "").strip()
+_cors_origins = (
+    [o.strip() for o in _cors_env.split(",") if o.strip()] if _cors_env else ["*"]
+)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # ── Routers ────────────────────────────────────────────────────────
 

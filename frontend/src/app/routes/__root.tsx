@@ -23,6 +23,7 @@ const CHAT_ONLY_ALLOWED = new Set([
   "/login",
   "/signup",
   "/change-password",
+  "/connect",
 ]);
 
 function isChatOnlyAllowed(pathname: string): boolean {
@@ -44,7 +45,7 @@ export const Route = createRootRoute({
   component: RootLayout,
 });
 
-const HIDDEN_NAVBAR_ROUTES = ["/onboarding", "/login", "/change-password"];
+const HIDDEN_NAVBAR_ROUTES = ["/onboarding", "/login", "/change-password", "/connect"];
 
 function RootLayout() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });

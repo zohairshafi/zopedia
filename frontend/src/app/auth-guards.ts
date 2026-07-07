@@ -3,14 +3,17 @@
 
 import { redirect } from "@tanstack/react-router";
 import { apiUrl, isTauri } from "@/lib/api-base";
+import { isClientMode } from "@/lib/mode";
 import {
   getPostAuthRoute,
   hasAuthToken,
   hasRefreshToken,
+  logout,
   mustChangePassword,
   refreshSession,
   tauriAutoAuth,
 } from "@/features/auth";
+import { hasServerConfig } from "@/features/connect";
 
 async function hasActiveSession(): Promise<boolean> {
   if (hasAuthToken()) return true;
@@ -58,6 +61,15 @@ function authRedirect(to: "/login" | "/change-password"): never {
 
 export async function requireAuth(): Promise<void> {
   console.log("[requireAuth] called, isTauri:", isTauri);
+
+  if (isClientMode()) {
+    // No local backend — every request goes to the connected remote server.
+    if (!hasServerConfig()) throw redirect({ to: "/connect" });
+    if (await hasActiveSession()) return;
+    if (await refreshSession()) return;
+    logout(); // session expired → clear stale tokens and re-prompt for password
+    throw redirect({ to: "/connect" });
+  }
 
   if (isTauri) {
     await tauriAutoAuth();
@@ -110,4 +122,12 @@ export async function requirePasswordChangeFlow(): Promise<void> {
     throw redirect({ to: getPostAuthRoute() });
   }
   authRedirect(status.initialized ? "/login" : "/change-password");
+}
+
+// Guard for /connect (client mode only): if already configured with a live
+// session, skip straight to the app.
+export async function requireClientConnect(): Promise<void> {
+  if (hasServerConfig() && (hasAuthToken() || (await refreshSession()))) {
+    throw redirect({ to: "/chat" });
+  }
 }

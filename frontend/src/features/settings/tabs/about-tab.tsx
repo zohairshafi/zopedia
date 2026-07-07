@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { ShutdownDialog } from "@/components/shutdown-dialog";
 import { apiUrl } from "@/lib/api-base";
+import { isServerMode } from "@/lib/mode";
 import {
   ArrowUpRight01Icon,
 } from "@hugeicons/core-free-icons";
@@ -54,28 +55,32 @@ export function AboutTab() {
         </SettingsRow>
       </SettingsSection>
 
-      <SettingsSection title="Danger zone">
-        <SettingsRow
-          destructive
-          label="Shut down Zopedia"
-          description="Stops the Zopedia server process and ends your session."
-        >
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setShutdownOpen(true)}
-            className="text-destructive hover:text-destructive hover:border-destructive/60"
-          >
-            Shut down now
-          </Button>
-        </SettingsRow>
-      </SettingsSection>
+      {isServerMode() && (
+        <>
+          <SettingsSection title="Danger zone">
+            <SettingsRow
+              destructive
+              label="Shut down Zopedia"
+              description="Stops the Zopedia server process and ends your session."
+            >
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShutdownOpen(true)}
+                className="text-destructive hover:text-destructive hover:border-destructive/60"
+              >
+                Shut down now
+              </Button>
+            </SettingsRow>
+          </SettingsSection>
 
-      <ShutdownDialog
-        open={shutdownOpen}
-        onOpenChange={setShutdownOpen}
-        onAfterShutdown={undefined}
-      />
+          <ShutdownDialog
+            open={shutdownOpen}
+            onOpenChange={setShutdownOpen}
+            onAfterShutdown={undefined}
+          />
+        </>
+      )}
     </div>
   );
 }

@@ -83,6 +83,7 @@ import { toast } from "sonner";
 import { ShutdownDialog } from "@/components/shutdown-dialog";
 import { WikiBehaviourDialog } from "@/components/wiki-behaviour-dialog";
 import { WikiDataDialog } from "@/components/wiki-data-dialog";
+import { isServerMode } from "@/lib/mode";
 import { WikiFileBrowser } from "@/components/wiki-file-browser";
 import { WikiUploadDialog } from "@/components/wiki-upload-dialog";
 
@@ -820,6 +821,8 @@ export function AppSidebar() {
             <CollapsibleContent>
               <SidebarGroupContent>
                 <SidebarMenu>
+                  {isServerMode() && (
+                  <>
                   <SidebarMenuItem>
                     <SidebarMenuButton
                       onClick={() => {
@@ -855,6 +858,8 @@ export function AppSidebar() {
                       </span>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
+                  </>
+                  )}
 
                   <SidebarMenuItem>
                     <SidebarMenuButton
@@ -877,6 +882,8 @@ export function AppSidebar() {
           </SidebarGroup>
         </Collapsible>
 
+        {isServerMode() && (
+          <>
         {/* Advanced Settings */}
         <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen} asChild>
           <SidebarGroup className="group-data-[collapsible=icon]:hidden overflow-hidden px-2 py-0">
@@ -968,6 +975,8 @@ export function AppSidebar() {
             </CollapsibleContent>
           </SidebarGroup>
         </Collapsible>
+          </>
+        )}
 
         {/* Recent Chats — hide on Studio only (Eyera fac13); chatOpen = ec695 clickability */}
         {!isStudioRoute && (chatItemsLoading || chatItems.length > 0) && (
@@ -1099,10 +1108,12 @@ export function AppSidebar() {
                   <HugeiconsIcon icon={Logout03Icon} strokeWidth={1.75} className="size-[18px]" />
                   <span>Logout</span>
                 </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => setShutdownOpen(true)}>
-                  <HugeiconsIcon icon={EcoPowerIcon} className="size-4" />
-                  <span>Shutdown</span>
-                </DropdownMenuItem>
+                {isServerMode() && (
+                  <DropdownMenuItem onSelect={() => setShutdownOpen(true)}>
+                    <HugeiconsIcon icon={EcoPowerIcon} className="size-4" />
+                    <span>Shutdown</span>
+                  </DropdownMenuItem>
+                )}
               </DropdownMenuContent>
             </DropdownMenu>
           </SidebarMenuItem>
@@ -1110,23 +1121,29 @@ export function AppSidebar() {
       </SidebarFooter>
     </Sidebar>
     <ChatSearchDialog />
-    <ShutdownDialog
-      open={shutdownOpen}
-      onOpenChange={setShutdownOpen}
-      onAfterShutdown={undefined}
-    />
-    <WikiBehaviourDialog
-      open={wikiBehaviourOpen}
-      onOpenChange={setWikiBehaviourOpen}
-    />
+    {isServerMode() && (
+      <ShutdownDialog
+        open={shutdownOpen}
+        onOpenChange={setShutdownOpen}
+        onAfterShutdown={undefined}
+      />
+    )}
+    {isServerMode() && (
+      <WikiBehaviourDialog
+        open={wikiBehaviourOpen}
+        onOpenChange={setWikiBehaviourOpen}
+      />
+    )}
     <WikiUploadDialog
       open={wikiUploadOpen}
       onOpenChange={setWikiUploadOpen}
     />
-    <WikiDataDialog
-      open={wikiDataOpen}
-      onOpenChange={setWikiDataOpen}
-    />
+    {isServerMode() && (
+      <WikiDataDialog
+        open={wikiDataOpen}
+        onOpenChange={setWikiDataOpen}
+      />
+    )}
     <WikiFileBrowser
       open={wikiFilesOpen}
       onOpenChange={setWikiFilesOpen}

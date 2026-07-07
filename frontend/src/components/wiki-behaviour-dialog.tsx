@@ -85,6 +85,14 @@ type WikiVariableCategory = (typeof CATEGORY_ORDER)[number];
 
 const EXPECTED_RUNTIME_WIKI_ENV_VARS = 0;  // disabled: zopedia has fewer vars
 
+// Always-on operational defaults — not meaningful for users to toggle, so they
+// are hidden from the dialog. The backend already defaults each of these to true.
+const HIDDEN_VARS = new Set([
+  "ZOPEDIA_WIKI_WATCHER",
+  "ZOPEDIA_WIKI_AUTO_QUERY_ON_INGEST",
+  "ZOPEDIA_WIKI_TOOL_RETRIEVAL",
+]);
+
 function displayValue(value: string): string {
   if (!value) return "(empty)";
   return value;
@@ -215,6 +223,7 @@ export function WikiBehaviourDialog({
 
   const groupedVariables = useMemo(() => {
     const filtered = variables.filter((item) => {
+      if (HIDDEN_VARS.has(item.name)) return false;
       if (!query.trim()) return true;
       const needle = query.trim().toLowerCase();
       return (

@@ -46,6 +46,7 @@ import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { isServerMode } from "@/lib/mode";
 import { cn } from "@/lib/utils";
 import {
   ArrowDown01Icon,
@@ -926,6 +927,8 @@ export function ChatSettingsPanel({
           />
         </div>
 
+        {isServerMode() && (
+        <>
         <CollapsibleSection
           icon={Settings02Icon}
           label="Model"
@@ -1125,6 +1128,8 @@ export function ChatSettingsPanel({
         </CollapsibleSection>
 
         <ChatTemplateSection onReloadModel={onReloadModel} />
+        </>
+        )}
       </div>
       </div>
       <Dialog

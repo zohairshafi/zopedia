@@ -9,6 +9,7 @@ import { UpstreamConfigButton } from "@/components/upstream-config-button";
 import { WikiWarningIndicator } from "@/components/wiki-warning-indicator";
 import { Thread } from "@/components/assistant-ui/thread";
 import { cn } from "@/lib/utils";
+import { isServerMode } from "@/lib/mode";
 import { GuidedTour, useGuidedTourController } from "@/features/tour";
 import { useSidebar } from "@/components/ui/sidebar";
 import { Settings05Icon } from "@hugeicons/core-free-icons";
@@ -355,7 +356,9 @@ function GeneralCompareHeader({
         side === "left" ? "pl-12 pr-3 md:pl-2" : "pl-3 pr-12",
       )}
     >
-      <UpstreamConfigButton variant="ghost" className="max-w-[80%] !h-[34px]" />
+      {isServerMode() && (
+        <UpstreamConfigButton variant="ghost" className="max-w-[80%] !h-[34px]" />
+      )}
     </div>
   );
 }
@@ -911,10 +914,10 @@ export function ChatPage(): ReactElement {
           )}
         >
           <div className="flex items-center gap-1">
-            {view.mode !== "compare" && (
+            {view.mode !== "compare" && isServerMode() && (
               <UpstreamConfigButton variant="ghost" className="max-w-[62vw] sm:max-w-none !h-[34px]" />
             )}
-            <WikiWarningIndicator />
+            {isServerMode() && <WikiWarningIndicator />}
             {loadingModel && loadToastDismissed ? (
               <ModelLoadInlineStatus
                 label={

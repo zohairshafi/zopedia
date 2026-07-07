@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright 2026-present the Zopedia team. All rights reserved. See /studio/LICENSE.AGPL-3.0
 
-import { createRoute } from "@tanstack/react-router";
+import { createRoute, redirect } from "@tanstack/react-router";
 import { lazy } from "react";
+import { isClientMode } from "@/lib/mode";
 import { requirePasswordChangeFlow } from "../auth-guards";
 import { Route as rootRoute } from "./__root";
 
@@ -15,6 +16,9 @@ const ChangePasswordPage = lazy(() =>
 export const Route = createRoute({
   getParentRoute: () => rootRoute,
   path: "/change-password",
-  beforeLoad: () => requirePasswordChangeFlow(),
+  beforeLoad: () => {
+    if (isClientMode()) throw redirect({ to: "/connect" });
+    return requirePasswordChangeFlow();
+  },
   component: ChangePasswordPage,
 });

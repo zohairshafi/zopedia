@@ -18,6 +18,8 @@ test/
 *.local
 .env
 .env.*
+# Vite mode-env files are build config (no secrets) and must be committed.
+!.env.client
 .omx/
 
 # Editor directories and files

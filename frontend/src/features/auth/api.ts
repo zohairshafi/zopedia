@@ -2,6 +2,7 @@
 // Copyright 2026-present the Zopedia team. All rights reserved. See /studio/LICENSE.AGPL-3.0
 
 import { apiUrl, isTauri } from "@/lib/api-base";
+import { isClientMode } from "@/lib/mode";
 import {
   clearAuthTokens,
   getAuthToken,
@@ -32,6 +33,13 @@ async function isPasswordChangeRequiredResponse(response: Response): Promise<boo
 async function redirectToAuth(): Promise<void> {
   if (isRedirecting) return;
   isRedirecting = true;
+
+  if (isClientMode()) {
+    // No local login page — clear tokens and return to the server-connect flow.
+    clearAuthTokens();
+    window.location.href = "/connect";
+    return;
+  }
 
   let target = "/login";
   try {

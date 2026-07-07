@@ -8,7 +8,10 @@
   },
   "scripts": {
     "dev": "vite",
+    "dev:client": "vite --mode client",
     "build": "tsc -b && vite build",
+    "build:client": "tsc -b && vite build --mode client",
+    "preview:client": "vite preview --mode client --outDir dist-client",
     "lint": "eslint .",
     "preview": "vite preview",
     "typecheck": "tsc -b --pretty false",
