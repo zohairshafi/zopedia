@@ -810,7 +810,7 @@ export function AppSidebar() {
                   <SidebarMenuItem key={item.id} className="group/recent-item relative">
                     <SidebarMenuButton
                       isActive={activeThreadId === item.id}
-                      className={`${isNativeIOS() ? "h-11" : "h-[32px]"} rounded-[10px] pl-2.5 pr-7 text-[14px] leading-[18px] tracking-[0.01em] font-medium text-[#383835] dark:text-[#c7c7c4] hover:bg-[#f0f0f0]! dark:hover:bg-[#2a2c2f]! hover:text-black! dark:hover:text-white! data-active:bg-[#f0f0f0]! dark:data-active:bg-[#2a2c2f]! data-active:text-black! dark:data-active:text-white!"`}
+                      className={`${isNativeIOS() ? "h-11" : "h-[32px]"} rounded-[10px] pl-2.5 pr-7 text-[14px] leading-[18px] tracking-[0.01em] font-medium text-[#383835] dark:text-[#c7c7c4] hover:bg-[#f0f0f0]! dark:hover:bg-[#2a2c2f]! hover:text-black! dark:hover:text-white! data-active:bg-[#f0f0f0]! dark:data-active:bg-[#2a2c2f]! dark:data-active:text-white!"`}
                       onClick={() => {
                         navigate({
                           to: "/chat",
