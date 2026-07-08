@@ -187,8 +187,8 @@ if sys.platform == "darwin":
         info_plist={
             "CFBundleName": "Zopedia",
             "CFBundleDisplayName": "Zopedia",
-            "CFBundleVersion": "1.0.0",
-            "CFBundleShortVersionString": "1.0.0",
+            "CFBundleVersion": "1.0.1",
+            "CFBundleShortVersionString": "1.0.1",
             "NSHighResolutionCapable": True,
             "LSBackgroundOnly": False,
             "NSRequiresAquaSystemAppearance": False,
