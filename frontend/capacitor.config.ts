@@ -2,7 +2,7 @@ import { CapacitorConfig } from "@capacitor/cli";
 
 const config: CapacitorConfig = {
   appId: "com.zopedia.client",
-  appName: "Zopedia Client",
+  appName: "Zopedia",
   webDir: "dist-client",
   server: {
     androidScheme: "https",

@@ -1,5 +1,5 @@
 {
-  "name": "Zopedia Client",
+  "name": "Zopedia",
   "short_name": "Zopedia",
   "description": "Thin client for Zopedia — connect to a remote server and chat with your wiki",
   "start_url": "/connect",
