@@ -6,6 +6,15 @@
  */
 
 import { apiUrl } from "@/lib/api-base";
+import { SERVER_URL_KEY } from "@/lib/mode";
+
+// Read the connected server's URL directly from localStorage (not from the
+// mutable apiBase variable) so wiki links are correct even if apiBase hasn't
+// been set yet or React hasn't re-rendered after it changed.
+function getServerBase(): string {
+  if (typeof window === "undefined") return "";
+  return (localStorage.getItem(SERVER_URL_KEY) ?? "").replace(/\/+$/, "");
+}
 
 const WIKI_LINK_RE = /\[\[([^\]]+)\]\]/g;
 
@@ -32,11 +41,14 @@ function resolveWikiPath(ref: string): string {
  * Links point to /api/inference/wiki-file?path=... which the backend serves as markdown.
  */
 export function preprocessWikiLinks(text: string): string {
-  // Links use apiUrl() so that in client mode they resolve to the remote
-  // server's URL (the static client origin has no backend). In server/Tauri
-  // mode apiUrl() returns a relative or local-absolute path as before.
-  const link = (path: string) =>
-    apiUrl(`/api/inference/wiki-file?path=${encodeURIComponent(path)}`);
+  // In client mode, read the server URL directly from localStorage so links
+  // are absolute ({serverUrl}/api/...) and never resolve to the local static
+  // server origin. In server/Tauri mode apiUrl() handles it as before.
+  const server = getServerBase();
+  const link = (path: string) => {
+    if (server) return `${server}/api/inference/wiki-file?path=${encodeURIComponent(path)}`;
+    return apiUrl(`/api/inference/wiki-file?path=${encodeURIComponent(path)}`);
+  };
 
   // Step 1: Convert [[wiki links]]
   text = text.replace(WIKI_LINK_RE, (_match, ref: string) => {

@@ -15,6 +15,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { authFetch } from "@/features/auth";
+import { apiUrl } from "@/lib/api-base";
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -65,7 +66,7 @@ function FileRow({ file }: { file: WikiFile }) {
       className="flex items-center gap-2 w-full px-2 py-1 rounded text-xs text-left hover:bg-muted transition-colors group"
       onClick={() =>
         window.open(
-          `/api/inference/wiki-file?path=${encodeURIComponent(file.relative_path)}`,
+          apiUrl(`/api/inference/wiki-file?path=${encodeURIComponent(file.relative_path)}`),
           "_blank",
           "noopener,noreferrer",
         )

@@ -1163,3 +1163,136 @@ async def list_wiki_files():
         raise HTTPException(status_code=500, detail=str(exc))
 
     return {"directories": directories, "root_files": root_files}
+
+
+# ── Scheduled Maintenance ───────────────────────────────────────────────
+# CRUD + trigger for recurring wiki maintenance jobs (server-only, scoped
+# to the authenticated user).
+
+
+from pydantic import BaseModel as PydanticBaseModel
+
+
+class CreateMaintenanceScheduleRequest(PydanticBaseModel):
+    interval_type: str  # hourly, daily, weekly, monthly
+    with_web_fill: bool = False
+    run_hour: int | None = None
+    run_dow: int | None = None
+    run_dom: int | None = None
+
+
+class UpdateMaintenanceScheduleRequest(PydanticBaseModel):
+    enabled: bool | None = None
+    interval_type: str | None = None
+    with_web_fill: bool | None = None
+    run_hour: int | None = None
+    run_dow: int | None = None
+    run_dom: int | None = None
+
+
+@router.get("/wiki/maintenance/scheduled")
+async def list_scheduled_maintenance(current_subject: str = Depends(_require_valid_subject_dep)):
+    from maintenance_store import list_schedules
+    return {"schedules": list_schedules(current_subject)}
+
+
+@router.post("/wiki/maintenance/scheduled")
+async def create_scheduled_maintenance(
+    body: CreateMaintenanceScheduleRequest,
+    current_subject: str = Depends(_require_valid_subject_dep),
+):
+    from maintenance_store import create_schedule
+    from maintenance_scheduler import _compute_next_run
+
+    interval = body.interval_type
+    if interval not in ("hourly", "daily", "weekly", "monthly"):
+        raise HTTPException(status_code=400, detail=f"Invalid interval: {interval}")
+
+    next_run = _compute_next_run(interval, body.run_hour, body.run_dow, body.run_dom)
+    sid = create_schedule(
+        current_subject, interval, body.with_web_fill, next_run,
+        body.run_hour, body.run_dow, body.run_dom,
+    )
+    return {"id": sid, "next_run_at": next_run}
+
+
+@router.put("/wiki/maintenance/scheduled/{schedule_id}")
+async def update_scheduled_maintenance(
+    schedule_id: str,
+    body: UpdateMaintenanceScheduleRequest,
+    current_subject: str = Depends(_require_valid_subject_dep),
+):
+    from maintenance_store import get_schedule, update_schedule
+    from maintenance_scheduler import _compute_next_run
+
+    existing = get_schedule(schedule_id, current_subject)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+
+    updates: dict = {}
+    if body.enabled is not None:
+        updates["enabled"] = int(body.enabled)
+    if body.with_web_fill is not None:
+        updates["with_web_fill"] = int(body.with_web_fill)
+    if body.run_hour is not None:
+        updates["run_hour"] = body.run_hour
+    if body.run_dow is not None:
+        updates["run_dow"] = body.run_dow
+    if body.run_dom is not None:
+        updates["run_dom"] = body.run_dom
+    if body.interval_type:
+        updates["interval_type"] = body.interval_type
+        updates["next_run_at"] = _compute_next_run(
+            body.interval_type, body.run_hour, body.run_dow, body.run_dom,
+        )
+
+    if updates:
+        update_schedule(schedule_id, current_subject, **updates)
+    return {"status": "updated"}
+
+
+@router.delete("/wiki/maintenance/scheduled/{schedule_id}")
+async def delete_scheduled_maintenance(
+    schedule_id: str,
+    current_subject: str = Depends(_require_valid_subject_dep),
+):
+    from maintenance_store import delete_schedule
+
+    if not delete_schedule(schedule_id, current_subject):
+        raise HTTPException(status_code=404, detail="Schedule not found")
+    return {"status": "deleted"}
+
+
+@router.post("/wiki/maintenance/scheduled/{schedule_id}/run-now")
+async def run_scheduled_maintenance_now(
+    schedule_id: str,
+    current_subject: str = Depends(_require_valid_subject_dep),
+    request: Request = None,  # type: ignore[assignment]
+):
+    from maintenance_store import get_schedule, update_schedule
+    from maintenance_scheduler import run_maintenance_pipeline, _compute_next_run
+    from datetime import datetime as dt
+
+    entry = get_schedule(schedule_id, current_subject)
+    if not entry:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+
+    with_web = bool(entry.get("with_web_fill", 0))
+    try:
+        result = await run_maintenance_pipeline(
+            request.app, current_subject, with_web,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    update_schedule(
+        schedule_id, current_subject,
+        last_run_at=dt.now(timezone.utc).isoformat(),
+        next_run_at=_compute_next_run(
+            entry["interval_type"],
+            entry.get("run_hour"),
+            entry.get("run_dow"),
+            entry.get("run_dom"),
+        ),
+    )
+    return {"status": "completed", "result": result}

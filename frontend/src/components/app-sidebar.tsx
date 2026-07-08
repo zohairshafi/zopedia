@@ -30,6 +30,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useAnimatedThemeToggle } from "@/components/ui/animated-theme-toggler";
 import { cn } from "@/lib/utils";
+import { isNativeIOS } from "@/lib/mode";
 import { authFetch, logout } from "@/features/auth";
 import { db } from "@/features/chat/db";
 import {
@@ -86,6 +87,7 @@ import { WikiDataDialog } from "@/components/wiki-data-dialog";
 import { isServerMode } from "@/lib/mode";
 import { WikiFileBrowser } from "@/components/wiki-file-browser";
 import { WikiUploadDialog } from "@/components/wiki-upload-dialog";
+import { ScheduledMaintenanceDialog } from "@/components/scheduled-maintenance-dialog";
 
 type WikiLintApiResponse = {
   status: string;
@@ -307,6 +309,7 @@ export function AppSidebar() {
   const [wikiFilesOpen, setWikiFilesOpen] = useState(false);
   const [isRunningRebuildIndex, setIsRunningRebuildIndex] = useState(false);
   const [wikiUploadOpen, setWikiUploadOpen] = useState(false);
+  const [scheduledMaintenanceOpen, setScheduledMaintenanceOpen] = useState(false);
 
   // Chat collapsible state — open by default, auto-expand on route entry
   const isChatRoute = pathname.startsWith("/chat");
@@ -316,9 +319,6 @@ export function AppSidebar() {
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [isRunningWikiLint, setIsRunningWikiLint] = useState(false);
   const [isRunningWikiMaintenance, setIsRunningWikiMaintenance] = useState(false);
-  const [activeWikiMaintenanceMode, setActiveWikiMaintenanceMode] =
-    useState<WikiMaintenanceMode | null>(null);
-
   useEffect(() => { if (isChatRoute) setChatOpen(true); }, [isChatRoute]);
 
   const { displayTitle, avatarDataUrl } = useEffectiveProfile();
@@ -488,181 +488,6 @@ export function AppSidebar() {
     }
   }
 
-  async function handleWikiMaintenance(
-    mode: WikiMaintenanceMode,
-  ): Promise<void> {
-    if (isRunningWikiMaintenance || isRunningWikiLint) return;
-
-    const fillGapsFromWeb = mode === "with-web-fill";
-
-    setIsRunningWikiMaintenance(true);
-    setActiveWikiMaintenanceMode(mode);
-    try {
-      const mergeResponse = await authFetch("/api/inference/wiki/merge-maintenance", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dry_run: false }),
-      });
-      if (!mergeResponse.ok) {
-        throw new Error(
-          `Merge maintenance failed: ${await parseApiErrorMessage(mergeResponse)}`,
-        );
-      }
-
-      const retryResponse = await authFetch("/api/inference/wiki/retry-fallback", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dry_run: false }),
-      });
-      if (!retryResponse.ok) {
-        throw new Error(
-          `Fallback retry failed: ${await parseApiErrorMessage(retryResponse)}`,
-        );
-      }
-
-      const enrichResponse = await authFetch("/api/inference/wiki/enrich", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          dry_run: false,
-          run_fallback_retry_first: false,
-          fill_gaps_from_web: fillGapsFromWeb,
-          ...(fillGapsFromWeb ? { max_web_gap_queries: 8 } : {}),
-        }),
-      });
-      if (!enrichResponse.ok) {
-        throw new Error(
-          `Wiki enrichment failed: ${await parseApiErrorMessage(enrichResponse)}`,
-        );
-      }
-
-      const rebuildResponse = await authFetch(
-        "/api/inference/wiki/rebuild-index",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            dry_run: false,
-            max_links_per_page: 128,
-          }),
-        },
-      );
-      if (!rebuildResponse.ok) {
-        throw new Error(
-          `Index rebuild failed: ${await parseApiErrorMessage(rebuildResponse)}`,
-        );
-      }
-
-      const mergeResult = (await mergeResponse.json()) as WikiMaintenanceResult;
-      const retryResult = (await retryResponse.json()) as WikiRetryFallbackResult;
-      const enrichResult = (await enrichResponse.json()) as WikiEnrichResult;
-      const rebuildResult =
-        (await rebuildResponse.json()) as WikiAnalysisBacklinksResult;
-
-      const appliedMerges = Number(mergeResult.applied_merges ?? 0);
-      const rewrittenLinks = Number(mergeResult.rewritten_links ?? 0);
-      const archived = Array.isArray(mergeResult.archived_pages)
-        ? mergeResult.archived_pages.length
-        : 0;
-
-      const fallbackFound = Number(retryResult.fallback_pages_found ?? 0);
-      const fallbackRegenerated = Number(retryResult.regenerated_pages ?? 0);
-      const fallbackStill = Number(retryResult.fallback_still ?? 0);
-
-      const enrichScanned = Number(enrichResult.scanned_pages ?? 0);
-      const enrichUpdated = Number(enrichResult.updated_pages ?? 0);
-
-      const webGapFillResult = enrichResult.web_gap_fill;
-      const webGapEnabled = Boolean(webGapFillResult?.enabled);
-      const webLintMissingConcepts = Number(webGapFillResult?.lint_missing_concepts ?? 0);
-      const webConceptsConsidered = Number(webGapFillResult?.concepts_considered ?? 0);
-      const webQueriesUsed = Number(webGapFillResult?.queries_used ?? 0);
-      const webConceptsCreated = Number(webGapFillResult?.concepts_created ?? 0);
-      const webPlannerOkConcepts = Number(
-        webGapFillResult?.llm_web_planner_ok_concepts ?? 0,
-      );
-      const webSelectorOkConcepts = Number(
-        webGapFillResult?.llm_web_selector_ok_concepts ?? 0,
-      );
-      const webDirectResultsUsed = Number(
-        webGapFillResult?.llm_web_direct_results_used ?? 0,
-      );
-      const webFailedConcepts = Array.isArray(webGapFillResult?.failed_concepts)
-        ? webGapFillResult.failed_concepts.length
-        : 0;
-      const webAuditEntries = Array.isArray(webGapFillResult?.web_discovery_audit)
-        ? webGapFillResult.web_discovery_audit.length
-        : 0;
-
-      const refreshResult = enrichResult.non_fallback_refresh;
-      const refreshEnabled = Boolean(refreshResult?.enabled);
-      const refreshRequested = Number(refreshResult?.requested_pages ?? 0);
-      const refreshRefreshed = Number(refreshResult?.refreshed_pages ?? 0);
-      const refreshSkippedNoQuestion = Number(refreshResult?.skipped_no_question ?? 0);
-      const refreshSkippedFallback = Number(refreshResult?.skipped_refresh_fallback ?? 0);
-      const refreshErrors = Array.isArray(refreshResult?.errors)
-        ? refreshResult.errors.length
-        : 0;
-
-      const linkRepairResult = enrichResult.analysis_link_repair;
-      const repairAnswerLinksEnabled = Boolean(
-        linkRepairResult?.repair_answer_links_enabled,
-      );
-      const repairedPages = Number(linkRepairResult?.repaired_pages ?? 0);
-      const removedBrokenLinks = Number(linkRepairResult?.removed_links ?? 0);
-
-      const backlinkTargetPages = Number(rebuildResult.target_pages ?? 0);
-      const backlinkLinkedTargets = Number(
-        rebuildResult.linked_target_pages ?? 0,
-      );
-      const backlinkUpdatedPages = Number(rebuildResult.updated_pages ?? 0);
-      const backlinkRemovedSections = Number(rebuildResult.removed_sections ?? 0);
-
-      const mergeErrors = Array.isArray(mergeResult.errors)
-        ? mergeResult.errors.length
-        : 0;
-      const retryErrors = Array.isArray(retryResult.errors)
-        ? retryResult.errors.length
-        : 0;
-      const totalErrors = mergeErrors + retryErrors + refreshErrors;
-
-      const refreshSummary = refreshEnabled
-        ? ` Refreshed oldest non-fallback pages: ${refreshRefreshed}/${refreshRequested} (fallback skips: ${refreshSkippedFallback}, missing question: ${refreshSkippedNoQuestion}).`
-        : "";
-      const repairSummary =
-        repairedPages > 0 || removedBrokenLinks > 0
-          ? ` Repaired analysis links on ${repairedPages} page(s); removed broken links: ${removedBrokenLinks}${repairAnswerLinksEnabled ? " (including Answer sections)" : ""}.`
-          : repairAnswerLinksEnabled
-            ? " Answer-section link repair mode was enabled."
-            : "";
-      const webFillSummary = fillGapsFromWeb
-        ? ` Web fill ${webGapEnabled ? "enabled" : "disabled"}: lint gaps: ${webLintMissingConcepts}, considered: ${webConceptsConsidered}, queries used: ${webQueriesUsed}, concepts created: ${webConceptsCreated}, planner ok: ${webPlannerOkConcepts}, selector ok: ${webSelectorOkConcepts}, direct results: ${webDirectResultsUsed}, failed concepts: ${webFailedConcepts}, audit entries: ${webAuditEntries}.`
-        : "";
-      const backlinkSummary =
-        ` Backlinks: linked targets ${backlinkLinkedTargets}/${backlinkTargetPages}, ` +
-        `updated pages: ${backlinkUpdatedPages}, removed stale sections: ${backlinkRemovedSections}.`;
-
-      const maintenanceTitle = fillGapsFromWeb
-        ? "Wiki maintenance (with web fill) completed"
-        : "Wiki maintenance (without web fill) completed";
-
-      toast.success(maintenanceTitle, {
-        description:
-          `Fallbacks found: ${fallbackFound}, regenerated: ${fallbackRegenerated}, still fallback: ${fallbackStill}. ` +
-          `Applied merges: ${appliedMerges}, rewritten links: ${rewrittenLinks}, archived pages: ${archived}. ` +
-          `Enriched pages: ${enrichUpdated}/${enrichScanned}.${backlinkSummary}${webFillSummary}${refreshSummary}${repairSummary} Errors: ${totalErrors}`,
-      });
-      closeMobileIfOpen();
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Unexpected maintenance failure";
-      toast.error("Wiki maintenance failed", { description: message });
-    } finally {
-      setIsRunningWikiMaintenance(false);
-      setActiveWikiMaintenanceMode(null);
-    }
-  }
-
   return (
     <>
     <Sidebar
@@ -822,43 +647,20 @@ export function AppSidebar() {
               <SidebarGroupContent>
                 <SidebarMenu>
                   {isServerMode() && (
-                  <>
                   <SidebarMenuItem>
                     <SidebarMenuButton
                       onClick={() => {
-                        void handleWikiMaintenance("without-web-fill");
+                        setScheduledMaintenanceOpen(true);
+                        closeMobileIfOpen();
                       }}
-                      disabled={isRunningWikiMaintenance || isRunningWikiLint}
                       className="h-[32px] rounded-[10px] gap-[8.5px] px-2.5 font-medium text-[#383835] dark:text-[#c7c7c4] hover:bg-[#f0f0f0]! dark:hover:bg-[#2a2c2f]! hover:text-black! dark:hover:text-white! data-active:bg-[#f0f0f0]! dark:data-active:bg-[#2a2c2f]! data-active:text-black! dark:data-active:text-white!"
                     >
-                      <HugeiconsIcon icon={GearsIcon} strokeWidth={1.75} className="size-[18px]! shrink-0" />
+                      <HugeiconsIcon icon={LicenseMaintenanceIcon} strokeWidth={1.75} className="size-[18px]! shrink-0" />
                       <span className="text-[14px] leading-[18px] tracking-[0.01em]">
-                        {isRunningWikiMaintenance
-                          && activeWikiMaintenanceMode === "without-web-fill"
-                          ? "Running..."
-                          : "Run Maintenance"}
+                        Scheduled Maintenance
                       </span>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
-
-                  <SidebarMenuItem>
-                    <SidebarMenuButton
-                      onClick={() => {
-                        void handleWikiMaintenance("with-web-fill");
-                      }}
-                      disabled={isRunningWikiMaintenance || isRunningWikiLint}
-                      className="h-[32px] rounded-[10px] gap-[8.5px] px-2.5 font-medium text-[#383835] dark:text-[#c7c7c4] hover:bg-[#f0f0f0]! dark:hover:bg-[#2a2c2f]! hover:text-black! dark:hover:text-white! data-active:bg-[#f0f0f0]! dark:data-active:bg-[#2a2c2f]! data-active:text-black! dark:data-active:text-white!"
-                    >
-                      <HugeiconsIcon icon={ComputerSettingsIcon} strokeWidth={1.75} className="size-[18px]! shrink-0" />
-                      <span className="text-[14px] leading-[18px] tracking-[0.01em]">
-                        {isRunningWikiMaintenance
-                          && activeWikiMaintenanceMode === "with-web-fill"
-                          ? "Running..."
-                          : "Run Maintenance + Web Fill"}
-                      </span>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                  </>
                   )}
 
                   <SidebarMenuItem>
@@ -1008,7 +810,7 @@ export function AppSidebar() {
                   <SidebarMenuItem key={item.id} className="group/recent-item relative">
                     <SidebarMenuButton
                       isActive={activeThreadId === item.id}
-                      className="h-[32px] rounded-[10px] pl-2.5 pr-7 text-[14px] leading-[18px] tracking-[0.01em] font-medium text-[#383835] dark:text-[#c7c7c4] hover:bg-[#f0f0f0]! dark:hover:bg-[#2a2c2f]! hover:text-black! dark:hover:text-white! data-active:bg-[#f0f0f0]! dark:data-active:bg-[#2a2c2f]! data-active:text-black! dark:data-active:text-white!"
+                      className={`${isNativeIOS() ? "h-11" : "h-[32px]"} rounded-[10px] pl-2.5 pr-7 text-[14px] leading-[18px] tracking-[0.01em] font-medium text-[#383835] dark:text-[#c7c7c4] hover:bg-[#f0f0f0]! dark:hover:bg-[#2a2c2f]! hover:text-black! dark:hover:text-white! data-active:bg-[#f0f0f0]! dark:data-active:bg-[#2a2c2f]! data-active:text-black! dark:data-active:text-white!"`}
                       onClick={() => {
                         navigate({
                           to: "/chat",
@@ -1022,7 +824,7 @@ export function AppSidebar() {
                     >
                       <span className="truncate">{item.title}</span>
                     </SidebarMenuButton>
-                    <div className="absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-0.5 scale-90 opacity-0 transition-all duration-150 group-hover/recent-item:scale-100 group-hover/recent-item:opacity-100">
+                    <div className="absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-0.5 transition-all duration-150 scale-100 md:scale-90 md:group-hover/recent-item:scale-100 opacity-100 md:opacity-0 md:group-hover/recent-item:opacity-100">
                       <button
                         type="button"
                         onClick={(e) => {
@@ -1148,6 +950,12 @@ export function AppSidebar() {
       open={wikiFilesOpen}
       onOpenChange={setWikiFilesOpen}
     />
+    {isServerMode() && (
+      <ScheduledMaintenanceDialog
+        open={scheduledMaintenanceOpen}
+        onOpenChange={setScheduledMaintenanceOpen}
+      />
+    )}
     </>
   );
 }

@@ -18,3 +18,14 @@ export function isClientMode(): boolean {
 export function isServerMode(): boolean {
   return !isClientMode();
 }
+
+// True ONLY when running inside the native iOS Capacitor app (not the PWA/web
+// build). Capacitor's native bridge injects `window.Capacitor` before the page
+// loads; in a plain browser or the PWA it is undefined. Used for iOS-only UX
+// tweaks (e.g. docking the composer at the bottom on the New Chat screen).
+export function isNativeIOS(): boolean {
+  if (typeof window === "undefined") return false;
+  const cap = (window as { Capacitor?: { getPlatform?: () => string; platform?: string } })
+    .Capacitor;
+  return !!cap && (cap.getPlatform?.() === "ios" || cap.platform === "ios");
+}

@@ -11,7 +11,25 @@ import { defineConfig } from "vite";
 // lightweight client SPA into dist-client/; the default build is the full
 // co-located server app into dist/.
 export default defineConfig(({ mode }) => ({
-  plugins: [react(), tailwindcss()],
+  plugins: [
+    react(),
+    tailwindcss(),
+    // Inject the service worker registration script only in client builds.
+    // In server mode the desktop app has no use for a service worker.
+    {
+      name: "inject-sw",
+      transformIndexHtml: mode === "client"
+        ? () => [
+            {
+              tag: "script",
+              children:
+                `if ('serviceWorker' in navigator) { window.addEventListener('load', function() { navigator.serviceWorker.register('/sw.js').catch(function() {}) }) }`,
+              injectTo: "head",
+            },
+          ]
+        : undefined,
+    },
+  ],
   optimizeDeps: {
     include: ["@dagrejs/dagre", "@dagrejs/graphlib"],
   },

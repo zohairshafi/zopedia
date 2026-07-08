@@ -285,6 +285,17 @@ async def lifespan(app: FastAPI):
         logger.warning("Periodic scheduler startup failed: %s", exc)
         app.state.periodic_scheduler = None
 
+    # Start scheduled maintenance scheduler
+    try:
+        from maintenance_scheduler import MaintenanceScheduler
+        maint_scheduler = MaintenanceScheduler(app)
+        maint_scheduler.start()
+        app.state.maintenance_scheduler = maint_scheduler
+        logger.info("Maintenance scheduler started")
+    except Exception as exc:
+        logger.warning("Maintenance scheduler startup failed: %s", exc)
+        app.state.maintenance_scheduler = None
+
     # Initialize database connection pool (PostgreSQL — optional)
     try:
         from core.database import create_pool
@@ -372,6 +383,14 @@ async def lifespan(app: FastAPI):
             logger.info("Periodic scheduler stopped.")
         except Exception as exc:
             logger.warning("Error stopping periodic scheduler: %s", exc)
+    # Stop maintenance scheduler
+    maint = getattr(app.state, "maintenance_scheduler", None)
+    if maint:
+        try:
+            await maint.stop()
+            logger.info("Maintenance scheduler stopped.")
+        except Exception as exc:
+            logger.warning("Error stopping maintenance scheduler: %s", exc)
     # Close database connection pool
     try:
         from core.database import close_pool

@@ -352,7 +352,7 @@ function GeneralCompareHeader({
   return (
     <div
       className={cn(
-        "flex h-[48px] shrink-0 items-start pt-[11px] gap-2 bg-background",
+        "flex h-[calc(48px+env(safe-area-inset-top,0px))] shrink-0 items-start pt-[calc(11px+env(safe-area-inset-top,0px))] gap-2 bg-background",
         side === "left" ? "pl-12 pr-3 md:pl-2" : "pl-3 pr-12",
       )}
     >
@@ -907,7 +907,7 @@ export function ChatPage(): ReactElement {
       <div className="relative flex min-h-0 min-w-0 flex-1 basis-0 flex-col overflow-hidden">
         <div
           className={cn(
-            "absolute top-0 left-0 right-[10px] z-30 flex h-[48px] shrink-0 items-start pt-[11px] pr-2 bg-background",
+            "absolute top-0 left-0 right-[10px] z-30 flex h-[calc(48px+env(safe-area-inset-top,0px))] shrink-0 items-start pt-[calc(11px+env(safe-area-inset-top,0px))] pr-2 bg-background",
             isMobile ? "pl-12 pr-1.5" : "pl-2",
             view.mode === "compare" &&
               "right-[10px] left-auto w-auto bg-transparent pl-0 pr-2",

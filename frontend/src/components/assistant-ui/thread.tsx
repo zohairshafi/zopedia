@@ -42,6 +42,7 @@ import { exportThreadAsHtml } from "@/features/chat/utils/export-thread-html";
 import { AUDIO_ACCEPT, MAX_AUDIO_SIZE, fileToBase64 } from "@/lib/audio-utils";
 import { copyToClipboard } from "@/lib/copy-to-clipboard";
 import { cn } from "@/lib/utils";
+import { isNativeIOS } from "@/lib/mode";
 import {
   ActionBarMorePrimitive,
   ActionBarPrimitive,
@@ -127,8 +128,8 @@ export const Thread: FC<{
           scrollToBottomOnInitialize={false}
           scrollToBottomOnThreadSwitch={false}
           className={cn(
-            "aui-thread-viewport relative flex min-h-0 min-w-0 flex-1 basis-0 flex-col overflow-x-auto overflow-y-auto scroll-smooth px-5",
-            hideComposer ? "pt-4" : "pt-[48px]",
+            "aui-thread-viewport relative flex min-h-0 min-w-0 flex-1 basis-0 flex-col overflow-x-auto overflow-y-auto overscroll-contain scroll-smooth px-5",
+            hideComposer ? "pt-4" : "pt-[calc(48px+env(safe-area-inset-top,0px))]",
           )}
         >
           {!hideWelcome && (
@@ -160,7 +161,7 @@ export const Thread: FC<{
             <ThreadPrimitive.ViewportFooter
               className={cn(
                 "aui-thread-viewport-footer pointer-events-none sticky z-20 flex w-full justify-center bg-transparent",
-                hideComposer ? "bottom-3" : "bottom-[140px]",
+                hideComposer ? "bottom-[calc(0.75rem+env(safe-area-inset-bottom,0px))]" : "bottom-[calc(140px+env(safe-area-inset-bottom,0px))]",
               )}
             >
               <ThreadScrollToBottom />
@@ -169,13 +170,13 @@ export const Thread: FC<{
         </ThreadPrimitive.Viewport>
 
         {!hideComposer && (
-          <AuiIf condition={({ thread }) => hideWelcome || !thread.isEmpty}>
+          <AuiIf condition={({ thread }) => hideWelcome || !thread.isEmpty || isNativeIOS()}>
             <div className="aui-thread-composer-dock pointer-events-none absolute bottom-0 left-0 right-0 md:right-2 z-20">
               <div
                 aria-hidden={true}
                 className="absolute inset-x-0 bottom-0 top-[10px] bg-background"
               />
-              <div className="relative px-5 pb-2">
+              <div className="relative px-5 pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))]">
                 <div className="pointer-events-auto mx-auto w-full max-w-(--thread-max-width)">
                   <ComposerAnimated disabled={isComposerAttachPending} />
                 </div>
@@ -239,7 +240,7 @@ const ThreadWelcome: FC<{ hideComposer?: boolean }> = ({ hideComposer }) => {
             </p>
           </div>
           <GeneratingSpinner />
-          {!hideComposer && <ComposerAnimated />}
+          {!hideComposer && !isNativeIOS() && <ComposerAnimated />}
         </div>
       </div>
     </div>

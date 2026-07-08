@@ -4,7 +4,7 @@
 import { AppSidebar } from "@/components/app-sidebar";
 import { Navbar } from "@/components/navbar";
 import { fetchDeviceType, usePlatformStore } from "@/config/env";
-import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
+import { SidebarInset, SidebarProvider, useSidebar } from "@/components/ui/sidebar";
 import { SettingsDialog, useSettingsDialogStore } from "@/features/settings";
 import { useSidebarPin } from "@/hooks/use-sidebar-pin";
 import {
@@ -15,6 +15,7 @@ import {
 } from "@tanstack/react-router";
 import { AnimatePresence, motion } from "motion/react";
 import { Suspense, useEffect } from "react";
+import { isClientMode, SERVER_URL_KEY } from "@/lib/mode";
 import { AppProvider } from "../provider";
 
 const CHAT_ONLY_ALLOWED = new Set([
@@ -47,6 +48,50 @@ export const Route = createRootRoute({
 
 const HIDDEN_NAVBAR_ROUTES = ["/onboarding", "/login", "/change-password", "/connect"];
 
+function EdgeSwipeDetector() {
+  const { isMobile, openMobile, setOpenMobile } = useSidebar();
+
+  useEffect(() => {
+    if (!isMobile) return;
+
+    let startX = 0;
+    let startY = 0;
+    let tracking = false;
+
+    const onStart = (e: TouchEvent) => {
+      if (openMobile || e.touches.length !== 1) return;
+      startX = e.touches[0].clientX;
+      startY = e.touches[0].clientY;
+      tracking = true;
+    };
+
+    const onMove = (e: TouchEvent) => {
+      if (!tracking || !e.touches[0]) return;
+      const deltaX = e.touches[0].clientX - startX;
+      const deltaY = e.touches[0].clientY - startY;
+      // Require a deliberate rightward swipe (primarily horizontal, >100px)
+      if (deltaX > 100 && deltaX > Math.abs(deltaY) * 2) {
+        setOpenMobile(true);
+        tracking = false;
+      }
+    };
+
+    const onEnd = () => { tracking = false; };
+
+    document.addEventListener("touchstart", onStart, { passive: true });
+    document.addEventListener("touchmove", onMove, { passive: true });
+    document.addEventListener("touchend", onEnd);
+
+    return () => {
+      document.removeEventListener("touchstart", onStart);
+      document.removeEventListener("touchmove", onMove);
+      document.removeEventListener("touchend", onEnd);
+    };
+  }, [isMobile, openMobile, setOpenMobile]);
+
+  return null;
+}
+
 function RootLayout() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const hideNavbar = HIDDEN_NAVBAR_ROUTES.includes(pathname);
@@ -63,6 +108,29 @@ function RootLayout() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
+  }, []);
+
+  // Client mode: intercept clicks on relative /api/inference/wiki-file?... links
+  // and rewrite them to the connected server's URL. This is a belt-and-suspenders
+  // guard — wiki-links.ts and wiki-file-browser.tsx already use apiUrl(), but this
+  // catches any dynamically-injected or third-party-generated wiki-file links.
+  useEffect(() => {
+    if (!isClientMode()) return;
+
+    function handleWikiLinkClick(e: MouseEvent) {
+      const a = (e.target as Element).closest("a[href^=\"/api/inference/wiki-file\"]");
+      if (!a) return;
+      const href = a.getAttribute("href");
+      if (!href) return;
+      const server = localStorage.getItem(SERVER_URL_KEY);
+      if (!server) return;
+      e.preventDefault();
+      const url = new URL(href, server.replace(/\/+$/, ""));
+      window.open(url.href, "_blank", "noopener,noreferrer");
+    }
+
+    document.addEventListener("click", handleWikiLinkClick);
+    return () => document.removeEventListener("click", handleWikiLinkClick);
   }, []);
 
   return (
@@ -82,6 +150,7 @@ function RootLayout() {
           className="!min-h-0 h-dvh overflow-hidden"
         >
           <AppSidebar />
+          <EdgeSwipeDetector />
           <SidebarInset className={isChatRoute ? "overflow-hidden" : "overflow-y-auto"}>
             <Navbar />
             <div

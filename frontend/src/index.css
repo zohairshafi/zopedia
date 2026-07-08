@@ -589,3 +589,34 @@
 	animation: none;
 	mix-blend-mode: normal;
 }
+
+/* ── iOS PWA / mobile fixes ──────────────────────────────────────────── */
+
+/* Prevent the full-screen PWA from bouncing (desktop WKWebView too —
+   a desktop app window shouldn't have a rubber-band effect). */
+html {
+	overscroll-behavior: none;
+}
+
+body {
+	overscroll-behavior: none;
+	/* No tap highlight on iOS */
+	-webkit-tap-highlight-color: transparent;
+}
+
+/* Safe area utility classes (no-op on desktop: env() falls back to 0px). */
+.safe-bottom {
+	padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.safe-top {
+	padding-top: env(safe-area-inset-top, 0px);
+}
+
+.safe-left {
+	padding-left: env(safe-area-inset-left, 0px);
+}
+
+.safe-right {
+	padding-right: env(safe-area-inset-right, 0px);
+}
