@@ -604,6 +604,12 @@ body {
 	-webkit-tap-highlight-color: transparent;
 }
 
+/* Prevent sonner toasts from being chopped off by the iOS notch.
+   sonner sets top via inline style — we override it with the safe-area inset. */
+[data-sonner-toaster] {
+  top: env(safe-area-inset-top, 0px) !important;
+}
+
 /* Safe area utility classes (no-op on desktop: env() falls back to 0px). */
 .safe-bottom {
 	padding-bottom: env(safe-area-inset-bottom, 0px);
