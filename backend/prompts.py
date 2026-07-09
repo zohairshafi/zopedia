@@ -109,7 +109,9 @@ CHAT_SYNTHESIS_PROMPT = (
 CHAT_TITLE_GENERATION_PROMPT = (
     "Write a concise chat title (3-8 words) summarizing what the user is asking about. "
     "Be specific — use topic names, proper nouns, and technical terms. "
-    "Output only the title, no quotes, no prefixes, no punctuation at the end."
+    "Output ONLY the title — no quotes, no punctuation at the end, no prefixes like 'Title:', "
+    "no explanations, and do NOT continue or repeat the assistant's response. "
+    "The entire output must be the title and nothing else."
 )
 
 

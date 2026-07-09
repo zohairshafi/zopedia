@@ -326,7 +326,7 @@ const Composer: FC<{ disabled?: boolean }> = ({ disabled }) => {
           className="aui-composer-input mb-1 min-h-12 w-full resize-none overflow-y-auto bg-transparent pl-5 pr-4 pt-2 pb-3 text-sm font-[450] outline-none placeholder:text-muted-foreground focus-visible:ring-0"
           minRows={1}
           maxRows={6}
-          autoFocus={!disabled}
+          autoFocus={!disabled && !isNativeIOS()}
           disabled={disabled}
           aria-label="Message input"
         />

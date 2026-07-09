@@ -503,7 +503,7 @@ def main() -> None:
     # ── Start server in background thread ─────────────────────────────
     config = uvicorn.Config(
         _main_module.app,
-        host="127.0.0.1",
+        host="0.0.0.0",
         port=port,
         log_level="warning",
         reload=False,

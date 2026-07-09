@@ -17,27 +17,94 @@
     <link rel="manifest" href="/manifest.json" />
     <title>zopedia</title>
     <script>
-      // Desktop app (pywebview) defaults to dark mode when the user hasn't
-      // picked a theme. The launcher sets a custom user agent containing
-      // "ZopediaDesktop" on the WKWebView, available synchronously here
-      // (before paint, so no light-mode flash). A real browser never has
-      // this token, so the website is completely unaffected.
+      // Apply the stored (or default) theme before the first paint so the
+      // native fallback and React LoadingScreen both get the correct
+      // background immediately.  We default to dark because the two native
+      // apps that use this build (pywebview desktop, Capacitor iOS) both
+      // default to dark.  PWA / regular-browser users who prefer light will
+      // get a one-time dark flash on first visit; next-themes stores their
+      // preference on subsequent visits and this script honours it.
       (function () {
         try {
-          if (navigator.userAgent.indexOf("ZopediaDesktop") === -1) return;
-          var t = localStorage.getItem("theme");
-          if (t !== "light" && t !== "dark" && t !== "system") {
+          var theme = localStorage.getItem("theme");
+          // If no preference is stored, default to dark (matches native apps).
+          // next-themes will persist whatever the user picks later.
+          if (!theme) {
+            theme = "dark";
             localStorage.setItem("theme", "dark");
           }
-          if (localStorage.getItem("theme") === "dark") {
+          if (theme === "dark") {
             document.documentElement.classList.add("dark");
+          } else if (theme === "system") {
+            if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
+              document.documentElement.classList.add("dark");
+            }
           }
         } catch (e) {}
       })();
     </script>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <!-- Native DOM fallback: shown immediately on page load, replaced by React
+           once it mounts. If React never renders (JS error, route deadlock, etc.),
+           this fallback stays visible so the user sees something other than a
+           blank screen.  -->
+      <div id="zopedia-native-fallback" style="position:fixed;inset:0;z-index:50;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1.5rem;background:#1a1b1e;color:#e5e7eb;font-family:-apple-system,BlinkMacSystemFont,sans-serif">
+        <style>
+          #zopedia-native-fallback.light { background:#fff; color:#111 }
+          #zopedia-native-fallback.light .zfb-msg { color:#6b7280 }
+          .zfb-spinner { width:24px;height:24px;animation:zfb-spin 1s linear infinite;color:#9ca3af }
+          .zfb-spinner circle { opacity:0.25;stroke:currentColor;stroke-width:4;fill:none }
+          .zfb-spinner path { opacity:0.75;fill:currentColor }
+          @keyframes zfb-spin { to { transform:rotate(360deg) } }
+          .zfb-btn { display:none;margin-top:0.5rem;padding:0.5rem 1rem;font-size:0.875rem;font-weight:500;border:1px solid #4b5563;border-radius:0.375rem;background:transparent;cursor:pointer;color:#e5e7eb }
+          #zopedia-native-fallback.light .zfb-btn { border-color:#d1d5db;color:#111 }
+          .zfb-btn.visible { display:inline-block }
+        </style>
+        <img src="logo_main_light.png" alt="Zopedia" style="width:96px;height:96px;object-fit:contain;display:none" class="zfb-light-logo" />
+        <img src="logo_main.png" alt="Zopedia" style="width:96px;height:96px;object-fit:contain" class="zfb-dark-logo" />
+        <svg class="zfb-spinner" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+        <p class="zfb-msg" style="font-size:0.875rem;color:#6b7280">Connecting to server…</p>
+        <button class="zfb-btn" id="zfb-disconnect-btn" onclick="(function(){localStorage.removeItem('zopedia_server_url');localStorage.removeItem('unsloth_auth_token');localStorage.removeItem('unsloth_auth_refresh_token');window.location.reload()})()">Connect to a different server</button>
+        <script>
+          (function(){
+            var el = document.getElementById('zopedia-native-fallback');
+            var btn = document.getElementById('zfb-disconnect-btn');
+
+            // The <head> script defaults to dark.  We only switch to light
+            // if the user explicitly chose "light" or "system" with a light
+            // preference.  Default (no localStorage, no dark class) = dark.
+            var useLight = false;
+            try {
+              var theme = localStorage.getItem('theme');
+              if (theme === 'light') {
+                useLight = true;
+              } else if (theme === 'system' && window.matchMedia('(prefers-color-scheme: light)').matches) {
+                useLight = true;
+              }
+            } catch(e) {}
+
+            if (useLight) {
+              el.classList.add('light');
+              var lightLogo = el.querySelector('.zfb-light-logo');
+              var darkLogo = el.querySelector('.zfb-dark-logo');
+              if (lightLogo) lightLogo.style.display = 'block';
+              if (darkLogo) darkLogo.style.display = 'none';
+            }
+
+            // Show disconnect button after 8 seconds
+            setTimeout(function(){ btn && btn.classList.add('visible') }, 8000);
+            // Log startup info
+            try {
+              console.debug('[zopedia:native-fallback] serverUrl:', localStorage.getItem('zopedia_server_url'));
+              console.debug('[zopedia:native-fallback] hasAuthToken:', !!localStorage.getItem('unsloth_auth_token'));
+              console.debug('[zopedia:native-fallback] useLight:', useLight);
+            } catch(e) {}
+          })();
+        </script>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

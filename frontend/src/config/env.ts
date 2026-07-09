@@ -50,7 +50,9 @@ export async function fetchDeviceType(): Promise<DeviceType> {
   if (fetched) return usePlatformStore.getState().deviceType;
 
   try {
-    const res = await fetch(apiUrl("/api/health"));
+    const res = await fetch(apiUrl("/api/health"), {
+      signal: AbortSignal.timeout(5000),
+    });
     if (res.ok) {
       const data = (await res.json()) as { device_type?: string; chat_only?: boolean; llm_provider?: string; llm_model?: string };
       const deviceType = data.device_type ?? detectLocalPlatform();
@@ -61,9 +63,12 @@ export async function fetchDeviceType(): Promise<DeviceType> {
       return deviceType;
     }
   } catch {
+    // Server unreachable — use local platform detection and mark as
+    // fetched so we don't retry on every beforeLoad (which would add
+    // another timeout delay before any component renders).
     const deviceType = detectLocalPlatform();
     const chatOnly = false;
-    usePlatformStore.setState({ deviceType, chatOnly, fetched: false });
+    usePlatformStore.setState({ deviceType, chatOnly, fetched: true });
     return deviceType;
   }
 

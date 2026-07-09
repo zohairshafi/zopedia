@@ -112,7 +112,7 @@ function categoryForVariable(name: string): WikiVariableCategory {
   if (name.startsWith("ZOPEDIA_DB_") || name === "ZOPEDIA_DATABASE_URL") {
     return "Database";
   }
-  if (name.startsWith("ZOPEDIA_LLM_")) {
+  if (name.startsWith("ZOPEDIA_LLM_") || name.startsWith("ZOPEDIA_BRAVE_")) {
     return "Upstream API";
   }
   if (name.startsWith("ZOPEDIA_WIKI_LLM_")) {
@@ -502,7 +502,7 @@ export function WikiBehaviourDialog({
                                 ) : (
                                   <div className="flex items-center gap-1.5 flex-1 min-w-0">
                                     <Input
-                                      type="text"
+                                      type={item.name.includes("API_KEY") ? "password" : "text"}
                                       autoComplete="off"
                                       value={value}
                                       onChange={(event) => setDraftValue(item.name, event.target.value)}

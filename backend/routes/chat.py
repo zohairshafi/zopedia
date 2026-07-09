@@ -715,9 +715,9 @@ async def generate_title(body: dict):
 
     assistant_text = (body.get("assistantText") or "").strip()
 
-    context = f"User: {user_text[:400]}"
+    context = f"User message: {user_text[:400]}"
     if assistant_text:
-        context += f"\nAssistant response begins: {assistant_text[:300]}"
+        context += f"\nAssistant replied: {assistant_text[:200]}"
 
     messages = [
         {
@@ -730,7 +730,7 @@ async def generate_title(body: dict):
     result = await chat_completions_non_streaming(
         messages,
         temperature=0.2,
-        max_tokens=32,
+        max_tokens=20,
         thinking={"type": "disabled"},
     )
 
@@ -743,8 +743,10 @@ async def generate_title(body: dict):
     title = re.sub(r"^#+\s*", "", title)  # Markdown heading markers
     title = title.replace("Title:", "").replace("title:", "").strip()
     title = title.strip("\"'`")
-    if not title:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Model returned empty title")
+    # Reject titles that look like full sentences — a real title is 3-8 words
+    # and should not contain sentence-ending punctuation or be excessively long.
+    if not title or len(title) > 100:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Model returned unusable title")
 
     return {"title": title}
 

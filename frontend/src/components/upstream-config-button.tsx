@@ -27,6 +27,7 @@ export function UpstreamConfigButton({ variant = "ghost", size: _size = "sm", cl
   const [baseUrl, setBaseUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [model, setModel] = useState("");
+  const [braveApiKey, setBraveApiKey] = useState("");
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -40,6 +41,7 @@ export function UpstreamConfigButton({ variant = "ghost", size: _size = "sm", cl
         setBaseUrl(byName["ZOPEDIA_LLM_BASE_URL"] ?? "");
         setApiKey(byName["ZOPEDIA_LLM_API_KEY"] ?? "");
         setModel(byName["ZOPEDIA_LLM_MODEL"] ?? "");
+        setBraveApiKey(byName["ZOPEDIA_BRAVE_API_KEY"] ?? "");
       })
       .catch(() => {});
   }, [open]);
@@ -55,13 +57,14 @@ export function UpstreamConfigButton({ variant = "ghost", size: _size = "sm", cl
             ZOPEDIA_LLM_BASE_URL: baseUrl || null,
             ZOPEDIA_LLM_API_KEY: apiKey || null,
             ZOPEDIA_LLM_MODEL: model || null,
+            ZOPEDIA_BRAVE_API_KEY: braveApiKey || null,
           },
           restart_backend: true,
         }),
       });
       const result = await resp.json();
       if (result.status === "ok" || result.status === "partial") {
-        toast.success("LLM config updated. Backend restarting...");
+        toast.success("Configuration updated. Backend restarting...");
         setOpen(false);
       } else {
         toast.error("Failed to update config");
@@ -71,7 +74,7 @@ export function UpstreamConfigButton({ variant = "ghost", size: _size = "sm", cl
     } finally {
       setLoading(false);
     }
-  }, [baseUrl, apiKey, model]);
+  }, [baseUrl, apiKey, model, braveApiKey]);
 
   const label = upstreamModel && upstreamModel !== "default"
     ? `${upstreamProvider || "API"} / ${upstreamModel}`
@@ -128,6 +131,22 @@ export function UpstreamConfigButton({ variant = "ghost", size: _size = "sm", cl
               placeholder="gpt-4o"
               className="h-8 text-xs"
             />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label className="text-xs">Brave Search API Key</Label>
+            <Input
+              type="password"
+              value={braveApiKey}
+              onChange={(e) => setBraveApiKey(e.target.value)}
+              placeholder="BSA..."
+              className="h-8 text-xs"
+            />
+            <p className="text-[11px] text-muted-foreground">
+              Enables web search in chats and research.{" "}
+              <a href="https://brave.com/search/api/" target="_blank" rel="noopener noreferrer" className="underline">
+                Get a free key
+              </a>
+            </p>
           </div>
           <Button size="sm" onClick={save} disabled={loading} className="mt-1">
             {loading ? "Saving..." : "Save & Restart"}

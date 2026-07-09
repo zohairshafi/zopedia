@@ -11,11 +11,28 @@ import {
   Outlet,
   createRootRoute,
   redirect,
+  useNavigate,
   useRouterState,
 } from "@tanstack/react-router";
 import { AnimatePresence, motion } from "motion/react";
-import { Suspense, useEffect } from "react";
+import { Suspense, useEffect, useRef, useSyncExternalStore } from "react";
 import { isClientMode, SERVER_URL_KEY } from "@/lib/mode";
+import { apiUrl } from "@/lib/api-base";
+import { LoadingScreen } from "@/components/loading-screen";
+import { clearClientAuthLoading, clientAuthLoadingStore } from "../auth-guards";
+import { disconnectFromServer } from "@/features/connect";
+import { useServerHealthPoll, serverHealthStore, checkHealthNow } from "@/hooks/use-server-health";
+// The healthUrl helper is re-implemented locally to avoid importing a module-internal
+// function. It reads the server URL directly from localStorage so the initial health
+// check and the periodic poll both use the same URL construction.
+function healthUrl(): string {
+  const url = apiUrl("/api/health");
+  if (url.startsWith("/")) {
+    const server = (localStorage.getItem(SERVER_URL_KEY) ?? "").replace(/\/+$/, "");
+    if (server) return `${server}/api/health`;
+  }
+  return url;
+}
 import { AppProvider } from "../provider";
 
 const CHAT_ONLY_ALLOWED = new Set([
@@ -97,6 +114,117 @@ function RootLayout() {
   const hideNavbar = HIDDEN_NAVBAR_ROUTES.includes(pathname);
   const isChatRoute = pathname.startsWith("/chat");
   const { pinned, setPinned, togglePinned } = useSidebarPin();
+  const navigate = useNavigate();
+
+  // Client mode: while requireAuth() is waiting for the server to respond
+  // (e.g. cold Modal startup), show a loading screen.
+  const clientAuthLoading = useSyncExternalStore(
+    clientAuthLoadingStore.subscribe,
+    clientAuthLoadingStore.getSnapshot,
+  );
+
+  // Debug: log on every render so we can see in Safari Web Inspector.
+  console.debug(
+    "[zopedia:RootLayout] render",
+    `pathname=${pathname}`,
+    `clientAuthLoading=${clientAuthLoading}`,
+    `isClientMode=${isClientMode()}`,
+  );
+
+  function handleDisconnect() {
+    clearClientAuthLoading();
+    disconnectFromServer();
+    navigate({ to: "/connect" });
+  }
+
+  async function handleRetry() {
+    await checkHealthNow();
+    if (serverHealthStore.getSnapshot()) {
+      clearClientAuthLoading();
+    }
+  }
+
+  // Client mode: periodically check the server is still reachable so we can
+  // warn the user proactively instead of waiting for an API call to fail.
+  useServerHealthPoll();
+  const serverReachable = useSyncExternalStore(
+    serverHealthStore.subscribe,
+    serverHealthStore.getSnapshot,
+  );
+
+  // Client mode: on first mount (cold start), verify the server is reachable
+  // and dismiss the loading screen.  clientAuthLoading starts as `true` (set
+  // at module init), so the loading screen is already visible when this runs.
+  // If the server is unreachable the loading screen stays and its built-in
+  // disconnect button appears after 8 s.
+  useEffect(() => {
+    if (!isClientMode()) {
+      console.debug("[zopedia:health-check] not client mode, skipping");
+      return;
+    }
+    if (!clientAuthLoadingStore.getSnapshot()) {
+      console.debug("[zopedia:health-check] clientAuthLoading already false, skipping");
+      return;
+    }
+
+    let cancelled = false;
+
+    async function check() {
+      const url = healthUrl();
+      console.debug("[zopedia:health-check] checking", url);
+      try {
+        const res = await fetch(url, {
+          signal: AbortSignal.timeout(15000),
+          cache: "no-store",
+        });
+        const ct = res.headers.get("content-type") ?? "";
+        console.debug("[zopedia:health-check] response", res.status, ct);
+        if (!cancelled && res.ok && ct.includes("application/json")) {
+          console.debug("[zopedia:health-check] success — clearing loading screen");
+          clearClientAuthLoading();
+        } else if (!cancelled) {
+          console.warn("[zopedia:health-check] unexpected response — status:", res.status, "content-type:", ct);
+        }
+      } catch (err) {
+        console.warn("[zopedia:health-check] failed:", err);
+        // Server unreachable — loading screen stays.
+      }
+    }
+
+    check();
+
+    return () => { cancelled = true; };
+  }, []);
+
+  // Watch the full location href so we fire on thread switches (which only
+  // change ?thread=, not the pathname).
+  const locationHref = useRouterState({ select: (s) => s.location.href });
+
+  // Client mode: immediate health check on every navigation (thread switch,
+  // tab change, etc.).  A single failure is enough to show the banner —
+  // no threshold, instant feedback.
+  useEffect(() => {
+    if (!isClientMode()) return;
+    void checkHealthNow();
+  }, [locationHref]);
+
+  // Client mode: when the health poll detects the server came back online
+  // after a disconnection, dismiss any lingering loading screen.
+  const prevServerReachable = useRef(serverReachable);
+  useEffect(() => {
+    if (!isClientMode()) return;
+    console.debug(
+      "[zopedia:serverReachable] changed:",
+      `prev=${prevServerReachable.current}`,
+      `now=${serverReachable}`,
+      `clientAuthLoading=${clientAuthLoading}`,
+    );
+    if (serverReachable && !prevServerReachable.current) {
+      console.debug("[zopedia:serverReachable] server came back — clearing loading screen");
+      clearClientAuthLoading();
+    }
+    prevServerReachable.current = serverReachable;
+  }, [serverReachable]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -133,9 +261,52 @@ function RootLayout() {
     return () => document.removeEventListener("click", handleWikiLinkClick);
   }, []);
 
+  // Client mode: show a loading screen while requireAuth() waits for the
+  // server to respond (e.g. cold Modal startup). A "Connect to a different
+  // server" button appears after 8 seconds in case the server is unreachable.
+  if (clientAuthLoading) {
+    return (
+      <AppProvider>
+        <LoadingScreen onRetry={handleRetry} onDisconnect={handleDisconnect} />
+      </AppProvider>
+    );
+  }
+
   return (
     <AppProvider>
       <SettingsDialog />
+
+      {/* Client mode: warn when the remote server becomes unreachable.
+           The health poll checks every 15s (5s fast-poll when unreachable);
+           after 2 consecutive failures this banner appears.  Not shown
+           during auth loading — the LoadingScreen handles that case. */}
+      {isClientMode() && !serverReachable && !clientAuthLoading && (
+        <div
+          className="fixed bottom-4 left-4 right-4 z-50 flex items-center justify-between gap-3 rounded-lg bg-destructive px-4 py-3 text-sm text-destructive-foreground shadow-lg"
+          style={{ marginBottom: "env(safe-area-inset-bottom, 0px)" }}
+        >
+          <span className="font-medium">
+            Server unreachable — check your connection.
+          </span>
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={() => { void checkHealthNow(); }}
+              className="rounded-md bg-white/20 px-3 py-1 text-xs font-medium hover:bg-white/30 transition-colors"
+            >
+              Retry
+            </button>
+            <button
+              type="button"
+              onClick={handleDisconnect}
+              className="rounded-md bg-white/20 px-3 py-1 text-xs font-medium hover:bg-white/30 transition-colors"
+            >
+              Disconnect
+            </button>
+          </div>
+        </div>
+      )}
+
       {hideNavbar ? (
         <main className="flex-1">
           <Suspense fallback={null}>

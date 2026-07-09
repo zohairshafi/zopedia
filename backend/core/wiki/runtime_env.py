@@ -75,6 +75,12 @@ WIKI_ENV_SPECS: tuple[WikiEnvSpec, ...] = (
         description="Upstream model name.",
     ),
     WikiEnvSpec(
+        name="ZOPEDIA_BRAVE_API_KEY",
+        kind="string",
+        default="",
+        description="Brave Search API key for web search. Sign up at https://brave.com/search/api/",
+    ),
+    WikiEnvSpec(
         name="ZOPEDIA_AUTH_DISABLED",
         kind="bool",
         default="false",

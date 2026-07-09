@@ -496,11 +496,21 @@ function createDexieAdapter(
       try {
         const firstAssistant = messages.find((m) => m.role === "assistant");
         const assistantText = extractTextParts(firstAssistant) || undefined;
+        const llmTitle = await generateTitleWithModel({
+          userText,
+          assistantText,
+        });
+
+        // Belt-and-suspenders: if the server returned a title that looks
+        // like a full assistant response (too long, contains sentence-ending
+        // punctuation), discard it and use the fallback instead.
+        const looksLikeSentence =
+          llmTitle &&
+          (llmTitle.length > 100 ||
+           /[.!?]$/.test(llmTitle.trim()) ||
+           llmTitle.split(/\s+/).length > 12);
         const title =
-          (await generateTitleWithModel({
-            userText,
-            assistantText,
-          })) ||
+          (llmTitle && !looksLikeSentence ? llmTitle : null) ||
           fallbackTitleFromUserText(userText);
 
         await persistTitle(title);

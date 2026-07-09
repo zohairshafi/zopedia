@@ -94,7 +94,14 @@ if (!rootElement) {
   throw new Error("Root element not found");
 }
 
+// Hide the native DOM fallback once React takes over. We do this before
+// fetchDeviceType() so that even if the health-check fetch hangs, the user
+// sees the native fallback until React renders, then the React loading
+// screen takes over.
+const nativeFallback = document.getElementById("zopedia-native-fallback");
+
 fetchDeviceType().then(() => {
+  if (nativeFallback) nativeFallback.style.display = "none";
   createRoot(rootElement).render(
     <StrictMode>
       <App />
