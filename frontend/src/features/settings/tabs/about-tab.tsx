@@ -44,7 +44,7 @@ export function AboutTab() {
           description="Learn how to use Zopedia for your personal wiki and RAG workflows."
         >
           <a
-            href="https://github.com/zopedia"
+            href="https://github.com/zohairshafi/zopedia"
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"

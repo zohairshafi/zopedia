@@ -76,7 +76,7 @@ def serve():
 @app.function(
     volumes={ZK_DATA: wiki_volume} if wiki_volume else {},
     secrets=[modal.Secret.from_name("zopedia-env")],
-    cpu=0.1,
+    cpu=1,
     timeout=300,
 )
 def list_users():
@@ -112,7 +112,7 @@ def list_users():
 @app.function(
     volumes={ZK_DATA: wiki_volume} if wiki_volume else {},
     secrets=[modal.Secret.from_name("zopedia-env")],
-    cpu=0.1,
+    cpu=1,
     timeout=300,
 )
 def reset_password(username: str = "zopedia", new_password: str = ""):
@@ -185,7 +185,7 @@ def reset_password(username: str = "zopedia", new_password: str = ""):
 @app.function(
     volumes={ZK_DATA: wiki_volume} if wiki_volume else {},
     secrets=[modal.Secret.from_name("zopedia-env")],
-    cpu=0.25,
+    cpu=1,
     timeout=600,
 )
 def export_chat_history(output_file: str = "/tmp/zopedia_chat_export.json"):
@@ -239,7 +239,7 @@ def export_chat_history(output_file: str = "/tmp/zopedia_chat_export.json"):
 @app.function(
     volumes={ZK_DATA: wiki_volume} if wiki_volume else {},
     secrets=[modal.Secret.from_name("zopedia-env")],
-    cpu=0.25,
+    cpu=1,
     timeout=600,
 )
 def import_chat_history(input_file: str = "/tmp/zopedia_chat_export.json"):
