@@ -25,6 +25,8 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { motion, useReducedMotion } from "motion/react";
 import { isServerMode } from "@/lib/mode";
+import { getAuthToken } from "@/features/auth";
+import { decodeJwtSubject } from "@/features/profile/utils/jwt-subject";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useSettingsDialogStore, type SettingsTab } from "./stores/settings-dialog-store";
 import { AboutTab } from "./tabs/about-tab";
@@ -52,9 +54,17 @@ const TABS: TabDef[] = [
 ];
 
 // API Keys and Users are server-admin functions — hidden in client builds.
-const VISIBLE_TABS = isServerMode()
-  ? TABS
-  : TABS.filter((t) => t.id !== "api-keys" && t.id !== "users");
+// In server mode, the Users tab is further gated to the admin user ("zopedia").
+const VISIBLE_TABS = (() => {
+  if (!isServerMode()) {
+    return TABS.filter((t) => t.id !== "api-keys" && t.id !== "users");
+  }
+  const subject = decodeJwtSubject(getAuthToken());
+  if (subject !== "zopedia") {
+    return TABS.filter((t) => t.id !== "users");
+  }
+  return TABS;
+})();
 
 function renderTab(tab: SettingsTab) {
   switch (tab) {

@@ -773,6 +773,33 @@ if _AUTH_DISABLED:
             detail="API keys require authentication to be enabled.",
         )
 
+    # ── Admin user management stubs (auth-disabled) ─────────────
+
+    @_auth_stub.post("/auth/register")
+    async def _auth_register():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User management requires authentication to be enabled.",
+        )
+
+    @_auth_stub.get("/auth/users")
+    async def _auth_list_users():
+        return {"users": []}
+
+    @_auth_stub.post("/auth/users/{username}/reset-password")
+    async def _auth_reset_password(username: str):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User management requires authentication to be enabled.",
+        )
+
+    @_auth_stub.delete("/auth/users/{username}")
+    async def _auth_delete_user(username: str):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User management requires authentication to be enabled.",
+        )
+
     app.include_router(_auth_stub, prefix="/api")
 else:
     from auth.router import router as _auth_router
