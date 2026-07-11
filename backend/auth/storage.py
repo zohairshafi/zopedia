@@ -279,6 +279,19 @@ def _pbkdf2_desktop_secret(raw_secret: str) -> str:
     return _pbkdf2_api_key(raw_secret)
 
 
+def list_all_users() -> list[dict]:
+    """Return all users (username + must_change_password flag).  Does NOT
+    expose password hashes or JWT secrets."""
+    conn = get_connection()
+    try:
+        cur = conn.execute(
+            "SELECT username, must_change_password FROM auth_user ORDER BY id"
+        )
+        return [dict(r) for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+
 def is_initialized() -> bool:
     """Check if auth is ready for login (at least one user exists in DB)."""
     conn = get_connection()

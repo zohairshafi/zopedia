@@ -16,9 +16,11 @@ from .hashing import verify_password
 from .storage import (
     create_api_key,
     create_initial_user,
+    delete_user,
     ensure_default_admin,
     get_user_and_secret,
     is_initialized,
+    list_all_users,
     list_api_keys,
     requires_password_change,
     revoke_api_key,
@@ -165,6 +167,87 @@ async def auth_register(
             detail=f"User '{body.username}' already exists.",
         )
     return {"status": "ok", "username": body.username}
+
+
+# ── Admin user management ───────────────────────────────────────────
+
+
+class AdminResetPasswordRequest(BaseModel):
+    new_password: str = Field("", min_length=0)
+
+
+@router.get("/auth/users")
+async def admin_list_users(
+    current_subject: str = Depends(get_current_subject),
+):
+    """List all users (admin only)."""
+    if current_subject != "zopedia":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admin can list users.",
+        )
+    users = list_all_users()
+    return {"users": users}
+
+
+@router.post("/auth/users/{username}/reset-password")
+async def admin_reset_password(
+    username: str,
+    body: AdminResetPasswordRequest,
+    current_subject: str = Depends(get_current_subject),
+):
+    """Reset a user's password (admin only).  If *new_password* is empty
+    a 4-word diceware passphrase is generated and returned."""
+    if current_subject != "zopedia":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admin can reset passwords.",
+        )
+
+    record = get_user_and_secret(username)
+    if record is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"User '{username}' not found.",
+        )
+
+    new_password = body.new_password.strip()
+    if not new_password:
+        import diceware
+        new_password = diceware.get_passphrase(
+            options=diceware.handle_options(args=["-n", "4", "-d", "", "-c"])
+        )
+
+    update_password(username, new_password)
+    revoke_user_refresh_tokens(username)
+    return {"status": "ok", "username": username, "password": new_password}
+
+
+@router.delete("/auth/users/{username}")
+async def admin_delete_user(
+    username: str,
+    current_subject: str = Depends(get_current_subject),
+):
+    """Delete a user (admin only).  Cannot delete the admin account."""
+    if current_subject != "zopedia":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admin can delete users.",
+        )
+    if username == "zopedia":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot delete the admin account.",
+        )
+    record = get_user_and_secret(username)
+    if record is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"User '{username}' not found.",
+        )
+    delete_user(username)
+    revoke_user_refresh_tokens(username)
+    return {"status": "ok", "username": username}
 
 
 # ── API key management ──────────────────────────────────────────────
