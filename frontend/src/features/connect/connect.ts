@@ -11,6 +11,14 @@ type TokenResponse = {
   must_change_password: boolean;
 };
 
+export interface RecentServer {
+  url: string;
+  username: string;
+}
+
+const RECENT_SERVERS_KEY = "zopedia_recent_servers";
+const MAX_RECENT_SERVERS = 5;
+
 function normalizeUrl(raw: string): string {
   return raw.trim().replace(/\/+$/, "");
 }
@@ -22,6 +30,45 @@ export function getServerUrl(): string | null {
 
 export function hasServerConfig(): boolean {
   return getServerUrl() !== null;
+}
+
+/** Return the list of previously connected servers, most recent first. */
+export function getRecentServers(): RecentServer[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(RECENT_SERVERS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (s): s is RecentServer =>
+        typeof s === "object" && s !== null &&
+        typeof s.url === "string" && s.url.length > 0 &&
+        typeof s.username === "string" && s.username.length > 0,
+    );
+  } catch {
+    return [];
+  }
+}
+
+/** Add or move a server to the top of the recent list. */
+function saveRecentServer(url: string, username: string): void {
+  if (typeof window === "undefined") return;
+  const servers = getRecentServers().filter((s) => s.url !== url);
+  servers.unshift({ url, username });
+  if (servers.length > MAX_RECENT_SERVERS) servers.length = MAX_RECENT_SERVERS;
+  try {
+    localStorage.setItem(RECENT_SERVERS_KEY, JSON.stringify(servers));
+  } catch { /* storage full — silently drop */ }
+}
+
+/** Remove a server from the recent list. */
+export function removeRecentServer(url: string): void {
+  if (typeof window === "undefined") return;
+  const servers = getRecentServers().filter((s) => s.url !== url);
+  try {
+    localStorage.setItem(RECENT_SERVERS_KEY, JSON.stringify(servers));
+  } catch { /* ignore */ }
 }
 
 /**
@@ -57,6 +104,7 @@ export async function connectToServer(
 
   const token = (await response.json()) as TokenResponse;
   localStorage.setItem(SERVER_URL_KEY, url);
+  saveRecentServer(url, username.trim());
   applyServerUrl(url);
   storeAuthTokens(token.access_token, token.refresh_token, token.must_change_password);
 }
