@@ -129,7 +129,10 @@ export async function deleteChatItem(
   // Delete from server in background — don't block UI responsiveness.
   void Promise.all(threadIds.map((id) => deleteThreadFromServer(id)));
 
-  if (activeId === item.id) {
+  // Navigate away if the deleted thread is currently active.  For
+  // compare items, item.id is the pairId while activeId is the actual
+  // thread ID — so we check against the resolved threadIds list.
+  if (activeId && threadIds.includes(activeId)) {
     useChatRuntimeStore.getState().setActiveThreadId(null);
     onSelect({ mode: "single", newThreadNonce: crypto.randomUUID() });
   }

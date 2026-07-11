@@ -391,8 +391,14 @@ export async function syncThreadListFromServer(): Promise<void> {
       // delete can't resurrect an empty entry in the sidebar.
       if (recentlyDeletedThreadIds.has(st.id)) continue;
     const local = await db.threads.get(st.id);
-    // Always sync from server — server is the source of truth.
-    // Preserve local createdAt if available (more accurate than server's).
+    // Use the most recent timestamp across local and server so the
+    // sidebar sort order converges across all clients.  The server's
+    // updated_at reflects the last activity from ANY client; the local
+    // createdAt may be newer if the local client just bumped it.
+    const serverTs = st.updated_at
+      ? new Date(st.updated_at).getTime()
+      : (st.created_at ? new Date(st.created_at).getTime() : 0);
+    const createdAt = Math.max(local?.createdAt ?? 0, serverTs) || Date.now();
     await db.threads.put({
         id: st.id,
         title: st.title ?? "New Chat",
@@ -400,7 +406,7 @@ export async function syncThreadListFromServer(): Promise<void> {
         modelId: local?.modelId ?? "",
         pairId: local?.pairId,
         archived: false,
-        createdAt: local?.createdAt ?? (st.updated_at ? new Date(st.updated_at).getTime() : (st.created_at ? new Date(st.created_at).getTime() : Date.now())),
+        createdAt,
         messageCount: st.message_count ?? local?.messageCount ?? 0,
         syncedFromServer: true,
         syncSubject: subject,
