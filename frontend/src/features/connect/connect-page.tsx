@@ -16,6 +16,10 @@ export function ConnectPage() {
   const passwordRef = useRef<HTMLInputElement>(null);
 
   const [recentServers, setRecentServers] = useState<RecentServer[]>(getRecentServers);
+  // When a recent server is selected, we store it separately so the compact
+  // "Connecting to X as Y" view only appears after an explicit tap, not while
+  // the user is manually typing a server URL.
+  const [pickedServer, setPickedServer] = useState<RecentServer | null>(null);
   const [serverUrl, setServerUrl] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -24,15 +28,16 @@ export function ConnectPage() {
   const [error, setError] = useState<string | null>(null);
 
   function selectServer(s: RecentServer) {
+    setPickedServer(s);
     setServerUrl(s.url);
     setUsername(s.username);
     setPassword("");
     setError(null);
-    // Focus the password field after React commits the render
     requestAnimationFrame(() => passwordRef.current?.focus());
   }
 
   function clearSelection() {
+    setPickedServer(null);
     setServerUrl("");
     setUsername("");
     setPassword("");
@@ -43,6 +48,8 @@ export function ConnectPage() {
     e.stopPropagation();
     removeRecentServer(url);
     setRecentServers(getRecentServers());
+    // If the removed server was the selected one, clear the form
+    if (pickedServer?.url === url) clearSelection();
   }
 
   async function handleSubmit(event: SyntheticEvent<HTMLFormElement>) {
@@ -89,7 +96,7 @@ export function ConnectPage() {
               <p className="text-xs font-medium text-muted-foreground">Recent servers</p>
               <div className="space-y-1.5">
                 {recentServers.map((s) => {
-                  const isSelected = serverUrl === s.url && username === s.username;
+                  const isSelected = pickedServer?.url === s.url;
                   return (
                     <button
                       key={s.url}
@@ -124,11 +131,11 @@ export function ConnectPage() {
 
           {/* ── Connection form ─────────────────────────────────────── */}
           <form className="space-y-5" onSubmit={handleSubmit}>
-            {serverUrl && (
+            {pickedServer && (
               <div className="flex items-center gap-2">
                 <p className="text-xs text-muted-foreground truncate flex-1">
-                  Connecting to <span className="font-medium text-foreground">{serverUrl}</span>
-                  {" "}as <span className="font-medium text-foreground">{username}</span>
+                  Connecting to <span className="font-medium text-foreground">{pickedServer.url.replace(/^https?:\/\//, "")}</span>
+                  {" "}as <span className="font-medium text-foreground">{pickedServer.username}</span>
                 </p>
                 <button
                   type="button"
@@ -139,7 +146,7 @@ export function ConnectPage() {
                 </button>
               </div>
             )}
-            {!serverUrl && (
+            {!pickedServer && (
               <>
                 <div className="space-y-2">
                   <Label htmlFor="server-url">Server URL</Label>

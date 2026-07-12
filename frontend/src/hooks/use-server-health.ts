@@ -141,9 +141,9 @@ const FAST_POLL_MS = 5_000;
  * Once it's marked unreachable we switch to FAST_POLL_MS (5 s) so the
  * banner disappears quickly after connectivity returns.
  */
-export function useServerHealthPoll(): void {
+export function useServerHealthPoll(skip?: boolean): void {
   useEffect(() => {
-    if (!isClientMode()) return;
+    if (skip || !isClientMode()) return;
 
     let timeoutId: ReturnType<typeof setTimeout>;
 
@@ -158,5 +158,5 @@ export function useServerHealthPoll(): void {
     void poll();
 
     return () => clearTimeout(timeoutId);
-  }, []);
+  }, [skip]);
 }

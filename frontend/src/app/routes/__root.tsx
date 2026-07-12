@@ -146,7 +146,9 @@ function RootLayout() {
 
   // Client mode: periodically check the server is still reachable so we can
   // warn the user proactively instead of waiting for an API call to fail.
-  useServerHealthPoll();
+  // Skip on /connect — there's no server configured yet.
+  const isConnectPage = pathname === "/connect";
+  useServerHealthPoll(isConnectPage);
   const serverReachable = useSyncExternalStore(
     serverHealthStore.subscribe,
     serverHealthStore.getSnapshot,
@@ -158,8 +160,8 @@ function RootLayout() {
   // If the server is unreachable the loading screen stays and its built-in
   // disconnect button appears after 8 s.
   useEffect(() => {
-    if (!isClientMode()) {
-      console.debug("[zopedia:health-check] not client mode, skipping");
+    if (!isClientMode() || isConnectPage) {
+      console.debug("[zopedia:health-check] not client mode or connect page, skipping");
       return;
     }
     if (!clientAuthLoadingStore.getSnapshot()) {
@@ -202,11 +204,11 @@ function RootLayout() {
 
   // Client mode: immediate health check on every navigation (thread switch,
   // tab change, etc.).  A single failure is enough to show the banner —
-  // no threshold, instant feedback.
+  // no threshold, instant feedback.  Skipped on /connect.
   useEffect(() => {
-    if (!isClientMode()) return;
+    if (!isClientMode() || isConnectPage) return;
     void checkHealthNow();
-  }, [locationHref]);
+  }, [locationHref, isConnectPage]);
 
   // Client mode: when the health poll detects the server came back online
   // after a disconnection, dismiss any lingering loading screen.
@@ -279,8 +281,9 @@ function RootLayout() {
       {/* Client mode: warn when the remote server becomes unreachable.
            The health poll checks every 15s (5s fast-poll when unreachable);
            after 2 consecutive failures this banner appears.  Not shown
-           during auth loading — the LoadingScreen handles that case. */}
-      {isClientMode() && !serverReachable && !clientAuthLoading && (
+           during auth loading — the LoadingScreen handles that case.
+           Also not shown on /connect — there's no server configured yet. */}
+      {isClientMode() && !isConnectPage && !serverReachable && !clientAuthLoading && (
         <div
           className="fixed bottom-4 left-4 right-4 z-50 flex items-center justify-between gap-3 rounded-lg bg-destructive px-4 py-3 text-sm text-destructive-foreground shadow-lg"
           style={{ marginBottom: "env(safe-area-inset-bottom, 0px)" }}
