@@ -233,6 +233,7 @@ async def admin_reset_password(
 class PermissionsUpdateRequest(BaseModel):
     can_save_chat_history: bool | None = None
     can_upload_files: bool | None = None
+    is_admin: bool | None = None
 
 
 @router.patch("/auth/users/{username}/permissions")
@@ -262,6 +263,8 @@ async def admin_update_permissions(
         current_perms["can_save_chat_history"] = body.can_save_chat_history
     if body.can_upload_files is not None:
         current_perms["can_upload_files"] = body.can_upload_files
+    if body.is_admin is not None:
+        current_perms["is_admin"] = body.is_admin
 
     update_user_permissions(username, current_perms)
     revoke_user_refresh_tokens(username)
