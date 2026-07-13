@@ -37,6 +37,7 @@ import { sentAudioNames } from "@/features/chat/api/chat-adapter";
 import { db } from "@/features/chat/db";
 import { useChatRuntimeStore } from "@/features/chat/stores/chat-runtime-store";
 import { applyQwenThinkingParams } from "@/features/chat/utils/qwen-params";
+import { getPermissions } from "@/features/auth";
 import { deleteThreadMessage } from "@/features/chat/utils/delete-thread-message";
 import { exportThreadAsHtml } from "@/features/chat/utils/export-thread-html";
 import { AUDIO_ACCEPT, MAX_AUDIO_SIZE, fileToBase64 } from "@/lib/audio-utils";
@@ -987,7 +988,7 @@ const ComposerAction: FC<{ disabled?: boolean }> = ({ disabled }) => {
         <WebSearchToggle />
         <DatabaseQueryToggle />
         <CompactChatButton />
-        <WikiChatHistoryToggle />
+        {getPermissions().can_save_chat_history && <WikiChatHistoryToggle />}
         <ExportHTMLButton />
       </div>
       <div className="shrink-0 flex items-center gap-1">
