@@ -21,6 +21,10 @@ import {
 interface UserEntry {
   username: string;
   must_change_password: boolean;
+  permissions?: {
+    can_save_chat_history?: boolean;
+    can_upload_files?: boolean;
+  };
 }
 
 export function UsersTab() {
@@ -46,6 +50,37 @@ export function UsersTab() {
   // ── Delete user ──────────────────────────────────────────────────
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
+
+  // ── Permissions ──────────────────────────────────────────────────
+  const [togglingPerm, setTogglingPerm] = useState<string | null>(null);
+
+  async function handleTogglePermission(
+    targetUsername: string,
+    key: "can_save_chat_history" | "can_upload_files",
+    currentValue: boolean,
+  ) {
+    setTogglingPerm(`${targetUsername}:${key}`);
+    try {
+      const res = await authFetch(
+        `/api/auth/users/${encodeURIComponent(targetUsername)}/permissions`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ [key]: !currentValue }),
+        },
+      );
+      if (!res.ok) {
+        const err = await res.json().catch(() => null);
+        toast.error(err?.detail ?? "Failed to update permissions.");
+        return;
+      }
+      void fetchUsers();
+    } catch {
+      toast.error("An unexpected error occurred.");
+    } finally {
+      setTogglingPerm(null);
+    }
+  }
 
   const fetchUsers = useCallback(async () => {
     setListLoading(true);
@@ -218,6 +253,8 @@ export function UsersTab() {
                 <tr className="border-b text-left text-xs text-muted-foreground">
                   <th className="py-2 pr-4 font-medium">Username</th>
                   <th className="py-2 pr-4 font-medium">Status</th>
+                  <th className="py-2 pr-2 font-medium text-center">Save History</th>
+                  <th className="py-2 pr-2 font-medium text-center">Upload Files</th>
                   <th className="py-2 pr-4 font-medium" />
                 </tr>
               </thead>
@@ -234,6 +271,36 @@ export function UsersTab() {
                     </td>
                     <td className="py-2 pr-4 text-xs text-muted-foreground">
                       {u.must_change_password ? "Password change required" : "Active"}
+                    </td>
+                    <td className="py-2 pr-2 text-center">
+                      <input
+                        type="checkbox"
+                        checked={u.permissions?.can_save_chat_history ?? true}
+                        disabled={togglingPerm !== null}
+                        onChange={() =>
+                          handleTogglePermission(
+                            u.username,
+                            "can_save_chat_history",
+                            u.permissions?.can_save_chat_history ?? true,
+                          )
+                        }
+                        className="size-4 accent-primary cursor-pointer"
+                      />
+                    </td>
+                    <td className="py-2 pr-2 text-center">
+                      <input
+                        type="checkbox"
+                        checked={u.permissions?.can_upload_files ?? true}
+                        disabled={togglingPerm !== null}
+                        onChange={() =>
+                          handleTogglePermission(
+                            u.username,
+                            "can_upload_files",
+                            u.permissions?.can_upload_files ?? true,
+                          )
+                        }
+                        className="size-4 accent-primary cursor-pointer"
+                      />
                     </td>
                     <td className="py-2">
                       <div className="flex items-center gap-1 justify-end">

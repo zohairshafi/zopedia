@@ -7,6 +7,7 @@ export { authFetch, logout, refreshSession } from "./api";
 export {
   clearAuthTokens,
   getAuthToken,
+  getPermissions,
   getPostAuthRoute,
   hasAuthToken,
   hasRefreshToken,
@@ -17,6 +18,7 @@ export {
   setMustChangePassword,
   storeAuthTokens,
 } from "./session";
+export type { UserPermissions } from "./session";
 export {
   clearTauriAuthFailure,
   getTauriAuthFailure,

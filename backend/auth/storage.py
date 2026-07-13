@@ -6,6 +6,7 @@ SQLite storage for authentication data (user credentials + JWT secret).
 """
 
 import hashlib
+import json
 import os
 import secrets
 import sqlite3
@@ -178,6 +179,15 @@ def get_connection() -> sqlite3.Connection:
         conn.execute(
             "ALTER TABLE auth_user ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0"
         )
+    if "permissions" not in columns:
+        conn.execute(
+            "ALTER TABLE auth_user ADD COLUMN permissions TEXT NOT NULL DEFAULT '{}'"
+        )
+        # Backfill existing users with full permissions
+        conn.execute(
+            "UPDATE auth_user SET permissions = ? WHERE permissions = '{}'",
+            ('{"can_save_chat_history": true, "can_upload_files": true}',),
+        )
     refresh_columns = {
         row["name"] for row in conn.execute("PRAGMA table_info(refresh_tokens)")
     }
@@ -280,16 +290,77 @@ def _pbkdf2_desktop_secret(raw_secret: str) -> str:
 
 
 def list_all_users() -> list[dict]:
-    """Return all users (username + must_change_password flag).  Does NOT
-    expose password hashes or JWT secrets."""
+    """Return all users (username + must_change_password flag + permissions).
+    Does NOT expose password hashes or JWT secrets."""
     conn = get_connection()
     try:
         cur = conn.execute(
-            "SELECT username, must_change_password FROM auth_user ORDER BY id"
+            "SELECT username, must_change_password, permissions FROM auth_user ORDER BY id"
         )
-        return [dict(r) for r in cur.fetchall()]
+        results: list[dict] = []
+        for r in cur.fetchall():
+            d = dict(r)
+            # Parse permissions JSON for the response
+            try:
+                d["permissions"] = json.loads(d["permissions"])
+            except (json.JSONDecodeError, TypeError):
+                d["permissions"] = {}
+            results.append(d)
+        return results
     finally:
         conn.close()
+
+
+def get_user_permissions(username: str) -> dict:
+    """Return the permissions dict for a user, or empty dict if not found."""
+    conn = get_connection()
+    try:
+        cur = conn.execute(
+            "SELECT permissions FROM auth_user WHERE username = ?",
+            (username,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return {}
+        try:
+            return json.loads(row["permissions"])
+        except (json.JSONDecodeError, TypeError):
+            return {}
+    finally:
+        conn.close()
+
+
+def update_user_permissions(username: str, permissions: dict) -> bool:
+    """Update a user's permissions. Returns True if the user was found."""
+    permissions_json = json.dumps(permissions)
+    conn = get_connection()
+    try:
+        cur = conn.execute(
+            "UPDATE auth_user SET permissions = ? WHERE username = ?",
+            (permissions_json, username),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
+def user_can_save_chat_history(username: str) -> bool:
+    """Check if a user has permission to save chat history.
+    The admin account always has full permissions."""
+    if username == DEFAULT_ADMIN_USERNAME:
+        return True
+    perms = get_user_permissions(username)
+    return bool(perms.get("can_save_chat_history", True))
+
+
+def user_can_upload_files(username: str) -> bool:
+    """Check if a user has permission to upload files.
+    The admin account always has full permissions."""
+    if username == DEFAULT_ADMIN_USERNAME:
+        return True
+    perms = get_user_permissions(username)
+    return bool(perms.get("can_upload_files", True))
 
 
 def is_initialized() -> bool:
@@ -325,11 +396,13 @@ def create_initial_user(
                 password_salt,
                 password_hash,
                 jwt_secret,
-                must_change_password
+                must_change_password,
+                permissions
             )
-            VALUES (?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (username, salt, pwd_hash, jwt_secret, int(must_change_password)),
+            (username, salt, pwd_hash, jwt_secret, int(must_change_password),
+             '{"can_save_chat_history": true, "can_upload_files": true}'),
         )
         conn.commit()
     finally:

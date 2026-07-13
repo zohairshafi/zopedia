@@ -31,7 +31,7 @@ import {
 import { useAnimatedThemeToggle } from "@/components/ui/animated-theme-toggler";
 import { cn } from "@/lib/utils";
 import { isNativeIOS } from "@/lib/mode";
-import { authFetch, logout } from "@/features/auth";
+import { authFetch, getPermissions, logout } from "@/features/auth";
 import { db } from "@/features/chat/db";
 import {
   Book03Icon,
@@ -612,15 +612,17 @@ export function AppSidebar() {
                 closeMobileIfOpen();
               }}
             />
-            <NavItem
-              icon={FolderUploadIcon}
-              label="Upload Files"
-              active={false}
-              onClick={() => {
-                setWikiUploadOpen(true);
-                closeMobileIfOpen();
-              }}
-            />
+            {getPermissions().can_upload_files && (
+              <NavItem
+                icon={FolderUploadIcon}
+                label="Upload Files"
+                active={false}
+                onClick={() => {
+                  setWikiUploadOpen(true);
+                  closeMobileIfOpen();
+                }}
+              />
+            )}
           </SidebarMenu>
         </SidebarGroupContent>
       </SidebarGroup>

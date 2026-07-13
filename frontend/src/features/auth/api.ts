@@ -15,6 +15,7 @@ type RefreshResponse = {
   access_token: string;
   refresh_token: string;
   must_change_password: boolean;
+  permissions?: { can_save_chat_history?: boolean; can_upload_files?: boolean };
 };
 
 let isRedirecting = false;
@@ -96,6 +97,7 @@ export async function refreshSession(): Promise<boolean> {
       payload.access_token,
       payload.refresh_token,
       payload.must_change_password,
+      payload.permissions as { can_save_chat_history: boolean; can_upload_files: boolean } | undefined,
     );
     return true;
   } catch {

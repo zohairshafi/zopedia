@@ -9,6 +9,17 @@ export const AUTH_TOKEN_KEY = "unsloth_auth_token";
 export const AUTH_REFRESH_TOKEN_KEY = "unsloth_auth_refresh_token";
 export const ONBOARDING_DONE_KEY = "unsloth_onboarding_done";
 export const AUTH_MUST_CHANGE_PASSWORD_KEY = "unsloth_auth_must_change_password";
+const PERMISSIONS_KEY = "unsloth_auth_permissions";
+
+export interface UserPermissions {
+  can_save_chat_history: boolean;
+  can_upload_files: boolean;
+}
+
+const DEFAULT_PERMISSIONS: UserPermissions = {
+  can_save_chat_history: true,
+  can_upload_files: true,
+};
 
 type PostAuthRoute = "/change-password" | "/chat";
 
@@ -40,11 +51,13 @@ export function storeAuthTokens(
   accessToken: string,
   refreshToken: string,
   mustChangePassword = false,
+  permissions?: UserPermissions,
 ): void {
   if (!canUseStorage()) return;
   localStorage.setItem(AUTH_TOKEN_KEY, accessToken);
   localStorage.setItem(AUTH_REFRESH_TOKEN_KEY, refreshToken);
   localStorage.setItem(AUTH_MUST_CHANGE_PASSWORD_KEY, String(mustChangePassword));
+  if (permissions) storePermissions(permissions);
   window.dispatchEvent(new CustomEvent("auth-tokens-updated"));
 }
 
@@ -53,6 +66,34 @@ export function clearAuthTokens(): void {
   localStorage.removeItem(AUTH_TOKEN_KEY);
   localStorage.removeItem(AUTH_REFRESH_TOKEN_KEY);
   localStorage.removeItem(AUTH_MUST_CHANGE_PASSWORD_KEY);
+  localStorage.removeItem(PERMISSIONS_KEY);
+}
+
+export function storePermissions(permissions: UserPermissions): void {
+  if (!canUseStorage()) return;
+  try {
+    localStorage.setItem(PERMISSIONS_KEY, JSON.stringify(permissions));
+  } catch { /* storage full */ }
+}
+
+export function getPermissions(): UserPermissions {
+  if (!canUseStorage()) return { ...DEFAULT_PERMISSIONS };
+  try {
+    const raw = localStorage.getItem(PERMISSIONS_KEY);
+    if (!raw) return { ...DEFAULT_PERMISSIONS };
+    const parsed = JSON.parse(raw);
+    return {
+      can_save_chat_history: parsed.can_save_chat_history ?? true,
+      can_upload_files: parsed.can_upload_files ?? true,
+    };
+  } catch {
+    return { ...DEFAULT_PERMISSIONS };
+  }
+}
+
+export function clearPermissions(): void {
+  if (!canUseStorage()) return;
+  localStorage.removeItem(PERMISSIONS_KEY);
 }
 
 export function mustChangePassword(): boolean {

@@ -9,6 +9,7 @@ type TokenResponse = {
   access_token: string;
   refresh_token: string;
   must_change_password: boolean;
+  permissions?: { can_save_chat_history?: boolean; can_upload_files?: boolean };
 };
 
 export interface RecentServer {
@@ -106,7 +107,12 @@ export async function connectToServer(
   localStorage.setItem(SERVER_URL_KEY, url);
   saveRecentServer(url, username.trim());
   applyServerUrl(url);
-  storeAuthTokens(token.access_token, token.refresh_token, token.must_change_password);
+  storeAuthTokens(
+    token.access_token,
+    token.refresh_token,
+    token.must_change_password,
+    token.permissions as { can_save_chat_history: boolean; can_upload_files: boolean } | undefined,
+  );
 }
 
 /** Clear the stored server URL and auth tokens — returns the user to /connect. */

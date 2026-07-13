@@ -440,6 +440,17 @@ from pydantic import BaseModel as _BaseModel
 _chat_history_router = _APIRouter()
 
 
+def _require_can_save_chat_history(username: str) -> None:
+    """Raise 403 if the user doesn't have permission to save chat history."""
+    from auth.storage import user_can_save_chat_history
+
+    if not user_can_save_chat_history(username):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have permission to save chat history.",
+        )
+
+
 class _ChatHistoryThread(_BaseModel):
     thread_id: str
     title: Optional[str] = None
@@ -475,6 +486,7 @@ async def _chat_history_save_thread(body: _ChatHistoryThread, request: Request):
     from chat_history_store import upsert_thread
 
     current_subject = await _require_valid_subject(request)
+    _require_can_save_chat_history(current_subject)
     logger.info(
         "chat_history: save_thread for %s thread_id=%s title=%r msgs=%d",
         current_subject, body.thread_id, body.title, len(body.messages),
@@ -497,6 +509,7 @@ async def _chat_history_patch_thread(thread_id: str, request: Request):
     from chat_history_store import patch_thread_title
 
     current_subject = await _require_valid_subject(request)
+    _require_can_save_chat_history(current_subject)
     body = await request.json()
     title = (body.get("title") or "").strip()
     if not title:
@@ -520,6 +533,7 @@ async def _chat_history_append_messages(thread_id: str, body: _ChatHistoryAppend
     from chat_history_store import append_thread_messages
 
     current_subject = await _require_valid_subject(request)
+    _require_can_save_chat_history(current_subject)
     logger.info(
         "chat_history: append_messages for %s thread_id=%s title=%r msgs=%d",
         current_subject, thread_id, body.title, len(body.messages),
@@ -540,6 +554,7 @@ async def _chat_history_delete_thread(thread_id: str, request: Request):
     from chat_history_store import delete_thread
 
     current_subject = await _require_valid_subject(request)
+    _require_can_save_chat_history(current_subject)
     deleted = delete_thread(thread_id, current_subject)
     if not deleted:
         raise HTTPException(status_code=404, detail="Thread not found")
@@ -556,6 +571,7 @@ async def _chat_history_delete_message(thread_id: str, message_id: str, request:
     from chat_history_store import delete_message
 
     current_subject = await _require_valid_subject(request)
+    _require_can_save_chat_history(current_subject)
     delete_message(message_id, thread_id, current_subject)
     return {"status": "ok"}
 
@@ -610,6 +626,15 @@ async def shutdown():
 @app.post("/api/upload")
 async def upload_file(request: Request):
     """Upload files directly to the wiki raw/ folder for ingestion."""
+    from auth.storage import user_can_upload_files
+
+    current_subject = await _require_valid_subject(request)
+    if not user_can_upload_files(current_subject):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have permission to upload files.",
+        )
+
     from routes.wiki import _WIKI_VAULT
 
     raw_dir = _WIKI_VAULT / "raw"
@@ -731,12 +756,15 @@ if _AUTH_DISABLED:
     async def _auth_status():
         return {"initialized": True, "requires_password_change": False, "auth_disabled": True}
 
+    _DEFAULT_PERMISSIONS = {"can_save_chat_history": True, "can_upload_files": True}
+
     @_auth_stub.post("/auth/login")
     async def _auth_login():
         return {
             "access_token": "zopedia-local",
             "refresh_token": "zopedia-local-refresh",
             "must_change_password": False,
+            "permissions": _DEFAULT_PERMISSIONS,
         }
 
     @_auth_stub.post("/auth/refresh")
@@ -745,6 +773,7 @@ if _AUTH_DISABLED:
             "access_token": "zopedia-local",
             "refresh_token": "zopedia-local-refresh",
             "must_change_password": False,
+            "permissions": _DEFAULT_PERMISSIONS,
         }
 
     @_auth_stub.post("/auth/change-password")
@@ -753,6 +782,7 @@ if _AUTH_DISABLED:
             "access_token": "zopedia-local",
             "refresh_token": "zopedia-local-refresh",
             "must_change_password": False,
+            "permissions": _DEFAULT_PERMISSIONS,
         }
 
     @_auth_stub.get("/auth/api-keys")
@@ -795,6 +825,13 @@ if _AUTH_DISABLED:
 
     @_auth_stub.delete("/auth/users/{username}")
     async def _auth_delete_user(username: str):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User management requires authentication to be enabled.",
+        )
+
+    @_auth_stub.patch("/auth/users/{username}/permissions")
+    async def _auth_update_permissions(username: str):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User management requires authentication to be enabled.",

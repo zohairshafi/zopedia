@@ -19,6 +19,7 @@ from .storage import (
     delete_user,
     ensure_default_admin,
     get_user_and_secret,
+    get_user_permissions,
     is_initialized,
     list_all_users,
     list_api_keys,
@@ -26,6 +27,7 @@ from .storage import (
     revoke_api_key,
     revoke_user_refresh_tokens,
     update_password,
+    update_user_permissions,
 )
 
 router = APIRouter()
@@ -53,6 +55,7 @@ class TokenResponse(BaseModel):
     access_token: str
     refresh_token: str
     must_change_password: bool
+    permissions: dict = {}
 
 
 # ── Endpoints ───────────────────────────────────────────────────────
@@ -87,6 +90,7 @@ async def auth_login(body: LoginRequest):
         access_token=access_token,
         refresh_token=refresh_token,
         must_change_password=must_change,
+        permissions=get_user_permissions(body.username),
     )
 
 
@@ -108,6 +112,7 @@ async def auth_refresh(body: dict):
         access_token=access_token,
         refresh_token=refresh_token,
         must_change_password=False,
+        permissions=get_user_permissions(username),
     )
 
 
@@ -136,6 +141,7 @@ async def auth_change_password(
         access_token=access_token,
         refresh_token=refresh_token,
         must_change_password=False,
+        permissions=get_user_permissions(current_subject),
     )
 
 
@@ -221,6 +227,44 @@ async def admin_reset_password(
     update_password(username, new_password)
     revoke_user_refresh_tokens(username)
     return {"status": "ok", "username": username, "password": new_password}
+
+
+class PermissionsUpdateRequest(BaseModel):
+    can_save_chat_history: bool | None = None
+    can_upload_files: bool | None = None
+
+
+@router.patch("/auth/users/{username}/permissions")
+async def admin_update_permissions(
+    username: str,
+    body: PermissionsUpdateRequest,
+    current_subject: str = Depends(get_current_subject),
+):
+    """Update a user's permissions (admin only). Accepts partial updates —
+    only the fields provided are changed."""
+    if current_subject != "zopedia":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admin can update permissions.",
+        )
+
+    record = get_user_and_secret(username)
+    if record is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"User '{username}' not found.",
+        )
+
+    # Merge with existing permissions
+    current_perms = get_user_permissions(username)
+    if body.can_save_chat_history is not None:
+        current_perms["can_save_chat_history"] = body.can_save_chat_history
+    if body.can_upload_files is not None:
+        current_perms["can_upload_files"] = body.can_upload_files
+
+    update_user_permissions(username, current_perms)
+    revoke_user_refresh_tokens(username)
+    return {"status": "ok", "username": username, "permissions": current_perms}
 
 
 @router.delete("/auth/users/{username}")
