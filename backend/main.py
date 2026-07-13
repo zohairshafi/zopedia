@@ -440,17 +440,6 @@ from pydantic import BaseModel as _BaseModel
 _chat_history_router = _APIRouter()
 
 
-def _require_can_save_chat_history(username: str) -> None:
-    """Raise 403 if the user doesn't have permission to save chat history."""
-    from auth.storage import user_can_save_chat_history
-
-    if not user_can_save_chat_history(username):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You don't have permission to save chat history.",
-        )
-
-
 class _ChatHistoryThread(_BaseModel):
     thread_id: str
     title: Optional[str] = None
@@ -486,7 +475,6 @@ async def _chat_history_save_thread(body: _ChatHistoryThread, request: Request):
     from chat_history_store import upsert_thread
 
     current_subject = await _require_valid_subject(request)
-    _require_can_save_chat_history(current_subject)
     logger.info(
         "chat_history: save_thread for %s thread_id=%s title=%r msgs=%d",
         current_subject, body.thread_id, body.title, len(body.messages),
@@ -509,7 +497,6 @@ async def _chat_history_patch_thread(thread_id: str, request: Request):
     from chat_history_store import patch_thread_title
 
     current_subject = await _require_valid_subject(request)
-    _require_can_save_chat_history(current_subject)
     body = await request.json()
     title = (body.get("title") or "").strip()
     if not title:
@@ -533,7 +520,6 @@ async def _chat_history_append_messages(thread_id: str, body: _ChatHistoryAppend
     from chat_history_store import append_thread_messages
 
     current_subject = await _require_valid_subject(request)
-    _require_can_save_chat_history(current_subject)
     logger.info(
         "chat_history: append_messages for %s thread_id=%s title=%r msgs=%d",
         current_subject, thread_id, body.title, len(body.messages),
@@ -554,7 +540,6 @@ async def _chat_history_delete_thread(thread_id: str, request: Request):
     from chat_history_store import delete_thread
 
     current_subject = await _require_valid_subject(request)
-    _require_can_save_chat_history(current_subject)
     deleted = delete_thread(thread_id, current_subject)
     if not deleted:
         raise HTTPException(status_code=404, detail="Thread not found")
@@ -571,7 +556,6 @@ async def _chat_history_delete_message(thread_id: str, message_id: str, request:
     from chat_history_store import delete_message
 
     current_subject = await _require_valid_subject(request)
-    _require_can_save_chat_history(current_subject)
     delete_message(message_id, thread_id, current_subject)
     return {"status": "ok"}
 

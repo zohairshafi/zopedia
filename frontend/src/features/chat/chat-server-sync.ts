@@ -1,10 +1,6 @@
-import { authFetch, getAuthToken as getAuthTokenSync, getPermissions } from "@/features/auth";
+import { authFetch, getAuthToken as getAuthTokenSync } from "@/features/auth";
 import { db } from "./db";
 import type { MessageRecord, ThreadRecord } from "./types";
-
-function canSyncToServer(): boolean {
-  return getPermissions().can_save_chat_history;
-}
 
 const DEBOUNCE_MS = 2000;
 const MAX_MESSAGE_CONTENT_BYTES = 40_000; // chunk messages exceeding ~40KB serialized
@@ -164,7 +160,6 @@ export async function saveThreadToServer(
   messages: Array<{ id: string; role: string; content: any; reasoning_content?: string; parent_id?: string | null; created_at?: string }>,
   createdAt?: number,
 ): Promise<boolean> {
-  if (!canSyncToServer()) return false;
   try {
     const body: Record<string, unknown> = { thread_id: threadId, title, messages };
     if (createdAt) body.created_at = new Date(createdAt).toISOString();
@@ -226,7 +221,6 @@ async function appendMessagesToServer(
 }
 
 async function syncThreadToServer(threadId: string): Promise<void> {
-  if (!canSyncToServer()) return;
   // Incrementally sync a thread: send only unsynced messages via append.
   const thread = await db.threads.get(threadId);
   if (!thread) return;
@@ -329,7 +323,6 @@ async function syncThreadToServer(threadId: string): Promise<void> {
 }
 
 export async function updateThreadTitleOnServer(threadId: string, title: string): Promise<void> {
-  if (!canSyncToServer()) return;
   try {
     const res = await authFetch(`/api/chat/threads/${encodeURIComponent(threadId)}`, {
       method: "PATCH",
@@ -344,7 +337,6 @@ export async function updateThreadTitleOnServer(threadId: string, title: string)
 }
 
 export async function deleteThreadFromServer(threadId: string): Promise<void> {
-  if (!canSyncToServer()) return;
   recentlyDeletedThreadIds.add(threadId);
   try {
     await authFetch(`/api/chat/threads/${encodeURIComponent(threadId)}`, { method: "DELETE" });
@@ -354,7 +346,6 @@ export async function deleteThreadFromServer(threadId: string): Promise<void> {
 }
 
 export async function deleteMessageFromServer(threadId: string, messageId: string): Promise<boolean> {
-  if (!canSyncToServer()) return false;
   // Delete a single message from the server. Returns success so the caller
   // can surface failures. Uses the dedicated per-message endpoint (not the
   // full upsert) to avoid the DELETE-all-then-INSERT race that would wipe
