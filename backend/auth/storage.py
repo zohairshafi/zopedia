@@ -312,7 +312,8 @@ def list_all_users() -> list[dict]:
 
 
 def get_user_permissions(username: str) -> dict:
-    """Return the permissions dict for a user, or empty dict if not found."""
+    """Return the permissions dict for a user, or empty dict if not found.
+    The default admin account always has is_admin forced to True."""
     conn = get_connection()
     try:
         cur = conn.execute(
@@ -320,12 +321,15 @@ def get_user_permissions(username: str) -> dict:
             (username,),
         )
         row = cur.fetchone()
-        if not row:
-            return {}
-        try:
-            return json.loads(row["permissions"])
-        except (json.JSONDecodeError, TypeError):
-            return {}
+        perms: dict = {}
+        if row:
+            try:
+                perms = json.loads(row["permissions"])
+            except (json.JSONDecodeError, TypeError):
+                pass
+        if username == DEFAULT_ADMIN_USERNAME:
+            perms["is_admin"] = True
+        return perms
     finally:
         conn.close()
 
