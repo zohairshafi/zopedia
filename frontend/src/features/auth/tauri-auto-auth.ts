@@ -13,6 +13,7 @@ import { refreshSession } from "./api";
 type DesktopAuthResponse = {
   access_token: string;
   refresh_token: string;
+  permissions?: { can_save_chat_history?: boolean; can_upload_files?: boolean };
 };
 
 // Concurrency guard: multiple route guards can call tauriAutoAuth simultaneously.
@@ -68,7 +69,12 @@ async function doTauriAutoAuth(): Promise<boolean> {
   try {
     const { invoke } = await import("@tauri-apps/api/core");
     const tokens = await invoke<DesktopAuthResponse>("desktop_auth");
-    storeAuthTokens(tokens.access_token, tokens.refresh_token, false);
+    storeAuthTokens(
+      tokens.access_token,
+      tokens.refresh_token,
+      false,
+      tokens.permissions as { can_save_chat_history: boolean; can_upload_files: boolean } | undefined,
+    );
     clearTauriAuthFailure();
     return true;
   } catch (error) {

@@ -57,7 +57,12 @@ export function ProfileTab() {
 
       const data = await res.json();
       if (data.access_token && data.refresh_token) {
-        storeAuthTokens(data.access_token, data.refresh_token, false);
+        storeAuthTokens(
+          data.access_token,
+          data.refresh_token,
+          false,
+          data.permissions as { can_save_chat_history: boolean; can_upload_files: boolean } | undefined,
+        );
       }
 
       toast.success("Password changed successfully.");
