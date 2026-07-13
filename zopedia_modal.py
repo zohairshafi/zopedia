@@ -19,7 +19,30 @@ Prerequisites:
     modal volume put zopedia-wiki-data backend/wiki_data/ /app/wiki_data/
 """
 
+import subprocess
+import sys
+from pathlib import Path
+
 import modal
+
+# ── Build frontend locally before deploying ──────────────────────────
+# The image copies pre-built frontend/dist, so rebuild it first to ensure
+# the deployed UI matches the current source code.
+_PROJECT_ROOT = Path(__file__).resolve().parent
+_FRONTEND_DIR = _PROJECT_ROOT / "frontend"
+_DIST_DIR = _FRONTEND_DIR / "dist"
+
+if not (_DIST_DIR / "index.html").exists() or "--skip-frontend-build" not in sys.argv:
+    print("Building frontend...")
+    subprocess.run(
+        ["npm", "run", "build"],
+        cwd=str(_FRONTEND_DIR),
+        check=True,
+        timeout=120,
+    )
+    print("Frontend build complete.")
+else:
+    print("Skipping frontend build (--skip-frontend-build flag detected).")
 
 # ── Image ──────────────────────────────────────────────────────────
 # python:3.12-slim is the lightest image that can run Zopedia.
