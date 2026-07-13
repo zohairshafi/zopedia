@@ -650,7 +650,7 @@ export function AppSidebar() {
             <CollapsibleContent>
               <SidebarGroupContent>
                 <SidebarMenu>
-                  {isServerMode() && isAdmin && (
+                  {isAdmin && (
                   <SidebarMenuItem>
                     <SidebarMenuButton
                       onClick={() => {
@@ -688,7 +688,7 @@ export function AppSidebar() {
           </SidebarGroup>
         </Collapsible>
 
-        {isServerMode() && isAdmin && (
+        {isAdmin && (
           <>
         {/* Advanced Settings */}
         <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen} asChild>
