@@ -31,7 +31,8 @@ import {
 import { useAnimatedThemeToggle } from "@/components/ui/animated-theme-toggler";
 import { cn } from "@/lib/utils";
 import { isNativeIOS } from "@/lib/mode";
-import { authFetch, getPermissions, logout } from "@/features/auth";
+import { authFetch, getAuthToken, getPermissions, logout } from "@/features/auth";
+import { decodeJwtSubject } from "@/features/profile/utils/jwt-subject";
 import { db } from "@/features/chat/db";
 import {
   Book03Icon,
@@ -308,6 +309,7 @@ export function AppSidebar() {
   const [wikiDataOpen, setWikiDataOpen] = useState(false);
   const [wikiFilesOpen, setWikiFilesOpen] = useState(false);
   const [isRunningRebuildIndex, setIsRunningRebuildIndex] = useState(false);
+  const isAdmin = decodeJwtSubject(getAuthToken()) === "zopedia";
   const [wikiUploadOpen, setWikiUploadOpen] = useState(false);
   const [scheduledMaintenanceOpen, setScheduledMaintenanceOpen] = useState(false);
 
@@ -648,7 +650,7 @@ export function AppSidebar() {
             <CollapsibleContent>
               <SidebarGroupContent>
                 <SidebarMenu>
-                  {isServerMode() && (
+                  {isServerMode() && isAdmin && (
                   <SidebarMenuItem>
                     <SidebarMenuButton
                       onClick={() => {
@@ -686,7 +688,7 @@ export function AppSidebar() {
           </SidebarGroup>
         </Collapsible>
 
-        {isServerMode() && (
+        {isServerMode() && isAdmin && (
           <>
         {/* Advanced Settings */}
         <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen} asChild>

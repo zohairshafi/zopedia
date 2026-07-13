@@ -44,6 +44,7 @@ type TokenResponse = {
   access_token: string;
   refresh_token: string;
   must_change_password: boolean;
+  permissions?: { can_save_chat_history?: boolean; can_upload_files?: boolean };
 };
 
 async function loginWithPassword(
@@ -234,6 +235,7 @@ export function AuthForm({ mode }: AuthFormProps): ReactElement | null {
             bootstrapToken.access_token,
             bootstrapToken.refresh_token,
             bootstrapToken.must_change_password,
+            bootstrapToken.permissions as { can_save_chat_history: boolean; can_upload_files: boolean } | undefined,
           );
           setMustChangePassword(bootstrapToken.must_change_password);
           accessToken = bootstrapToken.access_token;
@@ -274,6 +276,7 @@ export function AuthForm({ mode }: AuthFormProps): ReactElement | null {
         token.access_token,
         token.refresh_token,
         token.must_change_password,
+        token.permissions as { can_save_chat_history: boolean; can_upload_files: boolean } | undefined,
       );
       navigate({ to: getPostAuthRoute() });
     } catch (err: unknown) {
