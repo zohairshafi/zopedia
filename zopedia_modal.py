@@ -32,8 +32,12 @@ _PROJECT_ROOT = Path(__file__).resolve().parent
 _FRONTEND_DIR = _PROJECT_ROOT / "frontend"
 _DIST_DIR = _FRONTEND_DIR / "dist"
 
-if not (_DIST_DIR / "index.html").exists() or "--skip-frontend-build" not in sys.argv:
-    print("Building frontend...")
+# Only build locally — the Modal container doesn't have the frontend source.
+if _FRONTEND_DIR.is_dir() and ("--skip-frontend-build" not in sys.argv):
+    if not (_DIST_DIR / "index.html").exists():
+        print("Building frontend (dist missing)...")
+    else:
+        print("Rebuilding frontend...")
     subprocess.run(
         ["npm", "run", "build"],
         cwd=str(_FRONTEND_DIR),
@@ -41,8 +45,8 @@ if not (_DIST_DIR / "index.html").exists() or "--skip-frontend-build" not in sys
         timeout=120,
     )
     print("Frontend build complete.")
-else:
-    print("Skipping frontend build (--skip-frontend-build flag detected).")
+elif not _FRONTEND_DIR.is_dir():
+    print("Running on Modal — skipping local frontend build.")
 
 # ── Image ──────────────────────────────────────────────────────────
 # python:3.12-slim is the lightest image that can run Zopedia.
