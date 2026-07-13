@@ -31,8 +31,7 @@ import {
 import { useAnimatedThemeToggle } from "@/components/ui/animated-theme-toggler";
 import { cn } from "@/lib/utils";
 import { isNativeIOS } from "@/lib/mode";
-import { authFetch, getAuthToken, getPermissions, logout } from "@/features/auth";
-import { decodeJwtSubject } from "@/features/profile/utils/jwt-subject";
+import { authFetch, getPermissions, logout } from "@/features/auth";
 import { db } from "@/features/chat/db";
 import {
   Book03Icon,
@@ -309,7 +308,8 @@ export function AppSidebar() {
   const [wikiDataOpen, setWikiDataOpen] = useState(false);
   const [wikiFilesOpen, setWikiFilesOpen] = useState(false);
   const [isRunningRebuildIndex, setIsRunningRebuildIndex] = useState(false);
-  const isAdmin = decodeJwtSubject(getAuthToken()) === "zopedia";
+  const permissions = getPermissions();
+  const isAdmin = permissions.is_admin;
   const [wikiUploadOpen, setWikiUploadOpen] = useState(false);
   const [scheduledMaintenanceOpen, setScheduledMaintenanceOpen] = useState(false);
 

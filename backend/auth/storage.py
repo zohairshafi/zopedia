@@ -363,6 +363,16 @@ def user_can_upload_files(username: str) -> bool:
     return bool(perms.get("can_upload_files", True))
 
 
+def is_admin_user(username: str) -> bool:
+    """Check if a user has admin privileges.
+    The default admin account ('zopedia') is always an admin regardless
+    of stored permissions — it cannot be demoted."""
+    if username == DEFAULT_ADMIN_USERNAME:
+        return True
+    perms = get_user_permissions(username)
+    return bool(perms.get("is_admin", False))
+
+
 def is_initialized() -> bool:
     """Check if auth is ready for login (at least one user exists in DB)."""
     conn = get_connection()

@@ -24,6 +24,7 @@ interface UserEntry {
   permissions?: {
     can_save_chat_history?: boolean;
     can_upload_files?: boolean;
+    is_admin?: boolean;
   };
 }
 
@@ -56,7 +57,7 @@ export function UsersTab() {
 
   async function handleTogglePermission(
     targetUsername: string,
-    key: "can_save_chat_history" | "can_upload_files",
+    key: "can_save_chat_history" | "can_upload_files" | "is_admin",
     currentValue: boolean,
   ) {
     setTogglingPerm(`${targetUsername}:${key}`);
@@ -253,6 +254,7 @@ export function UsersTab() {
                 <tr className="border-b text-left text-xs text-muted-foreground">
                   <th className="py-2 pr-4 font-medium">Username</th>
                   <th className="py-2 pr-4 font-medium">Status</th>
+                  <th className="py-2 pr-2 font-medium text-center">Admin</th>
                   <th className="py-2 pr-2 font-medium text-center">Save History</th>
                   <th className="py-2 pr-2 font-medium text-center">Upload Files</th>
                   <th className="py-2 pr-4 font-medium" />
@@ -271,6 +273,22 @@ export function UsersTab() {
                     </td>
                     <td className="py-2 pr-4 text-xs text-muted-foreground">
                       {u.must_change_password ? "Password change required" : "Active"}
+                    </td>
+                    <td className="py-2 pr-2 text-center">
+                      <input
+                        type="checkbox"
+                        checked={u.permissions?.is_admin ?? false}
+                        disabled={togglingPerm !== null || u.username === "zopedia"}
+                        onChange={() =>
+                          handleTogglePermission(
+                            u.username,
+                            "is_admin",
+                            u.permissions?.is_admin ?? false,
+                          )
+                        }
+                        className="size-4 accent-primary cursor-pointer disabled:opacity-40"
+                        title={u.username === "zopedia" ? "Default admin cannot be demoted" : "Toggle admin privileges"}
+                      />
                     </td>
                     <td className="py-2 pr-2 text-center">
                       <input

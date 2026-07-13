@@ -14,11 +14,13 @@ const PERMISSIONS_KEY = "unsloth_auth_permissions";
 export interface UserPermissions {
   can_save_chat_history: boolean;
   can_upload_files: boolean;
+  is_admin: boolean;
 }
 
 const DEFAULT_PERMISSIONS: UserPermissions = {
   can_save_chat_history: true,
   can_upload_files: true,
+  is_admin: false,
 };
 
 type PostAuthRoute = "/change-password" | "/chat";
@@ -85,6 +87,7 @@ export function getPermissions(): UserPermissions {
     return {
       can_save_chat_history: parsed.can_save_chat_history ?? true,
       can_upload_files: parsed.can_upload_files ?? true,
+      is_admin: parsed.is_admin ?? false,
     };
   } catch {
     return { ...DEFAULT_PERMISSIONS };

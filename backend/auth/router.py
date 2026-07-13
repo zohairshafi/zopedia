@@ -20,6 +20,7 @@ from .storage import (
     ensure_default_admin,
     get_user_and_secret,
     get_user_permissions,
+    is_admin_user,
     is_initialized,
     list_all_users,
     list_api_keys,
@@ -152,7 +153,7 @@ async def auth_register(
 ):
     """Register a new user. Requires admin authentication."""
     # Only the default admin can create new users
-    if current_subject != "zopedia":
+    if not is_admin_user(current_subject):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only admin can register new users.",
@@ -187,7 +188,7 @@ async def admin_list_users(
     current_subject: str = Depends(get_current_subject),
 ):
     """List all users (admin only)."""
-    if current_subject != "zopedia":
+    if not is_admin_user(current_subject):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only admin can list users.",
@@ -204,7 +205,7 @@ async def admin_reset_password(
 ):
     """Reset a user's password (admin only).  If *new_password* is empty
     a 4-word diceware passphrase is generated and returned."""
-    if current_subject != "zopedia":
+    if not is_admin_user(current_subject):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only admin can reset passwords.",
@@ -242,7 +243,7 @@ async def admin_update_permissions(
 ):
     """Update a user's permissions (admin only). Accepts partial updates —
     only the fields provided are changed."""
-    if current_subject != "zopedia":
+    if not is_admin_user(current_subject):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only admin can update permissions.",
@@ -273,7 +274,7 @@ async def admin_delete_user(
     current_subject: str = Depends(get_current_subject),
 ):
     """Delete a user (admin only).  Cannot delete the admin account."""
-    if current_subject != "zopedia":
+    if not is_admin_user(current_subject):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only admin can delete users.",

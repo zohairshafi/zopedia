@@ -25,8 +25,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { motion, useReducedMotion } from "motion/react";
 import { isServerMode } from "@/lib/mode";
-import { getAuthToken } from "@/features/auth";
-import { decodeJwtSubject } from "@/features/profile/utils/jwt-subject";
+import { getPermissions } from "@/features/auth";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useSettingsDialogStore, type SettingsTab } from "./stores/settings-dialog-store";
 import { AboutTab } from "./tabs/about-tab";
@@ -53,18 +52,6 @@ const TABS: TabDef[] = [
   { id: "about", label: "About", icon: SparklesIcon },
 ];
 
-// API Keys and Users are server-admin functions — hidden in client builds.
-// In server mode, the Users tab is further gated to the admin user ("zopedia").
-const VISIBLE_TABS = (() => {
-  if (!isServerMode()) {
-    return TABS.filter((t) => t.id !== "api-keys" && t.id !== "users");
-  }
-  const subject = decodeJwtSubject(getAuthToken());
-  if (subject !== "zopedia") {
-    return TABS.filter((t) => t.id !== "users");
-  }
-  return TABS;
-})();
 
 function renderTab(tab: SettingsTab) {
   switch (tab) {
@@ -93,6 +80,17 @@ export function SettingsDialog() {
   const reduced = useReducedMotion();
   const isMobile = useIsMobile();
   const tabBarRef = useRef<HTMLDivElement>(null);
+
+  // Compute visible tabs at render time so permission changes take effect.
+  const visibleTabs = (() => {
+    if (!isServerMode()) {
+      return TABS.filter((t) => t.id !== "api-keys" && t.id !== "users");
+    }
+    if (!getPermissions().is_admin) {
+      return TABS.filter((t) => t.id !== "users");
+    }
+    return TABS;
+  })();
 
   // On mobile, scroll the active tab into view when it changes
   useEffect(() => {
@@ -165,7 +163,7 @@ export function SettingsDialog() {
                 className="flex items-center gap-1 overflow-x-auto flex-1 min-w-0"
                 style={{ WebkitOverflowScrolling: "touch" }}
               >
-                {VISIBLE_TABS.map((tab) => (
+                {visibleTabs.map((tab) => (
                   <TabButton key={tab.id} tab={tab} />
                 ))}
               </div>
@@ -205,7 +203,7 @@ export function SettingsDialog() {
           <div className="flex h-full min-h-0">
             <aside className="font-heading flex w-[200px] shrink-0 flex-col border-r border-border bg-muted/20 p-2">
               <nav className="flex flex-col gap-0.5">
-                {VISIBLE_TABS.map((tab) => (
+                {visibleTabs.map((tab) => (
                   <TabButton key={tab.id} tab={tab} />
                 ))}
               </nav>
