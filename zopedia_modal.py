@@ -29,12 +29,23 @@ ZK_DATA = "/app/wiki_data"
 image = (
     modal.Image.from_registry("python:3.12-slim")
     .run_commands(
+        # Install Node.js 22.x for frontend build
+        "apt-get update && apt-get install -y curl gnupg && "
+        "curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && "
+        "apt-get install -y nodejs && "
+        "apt-get clean && rm -rf /var/lib/apt/lists/*",
+        # Install Python deps
         "pip install --no-cache-dir fastapi uvicorn pydantic httpx watchdog "
         'ddgs networkx "markitdown[all]" openai pyjwt diceware asyncpg',
     )
+    # Copy frontend source FIRST, build it, then backend can reference the dist/
+    .add_local_dir("frontend", "/app/frontend", copy=True,
+                   ignore=["node_modules", "dist", "dist-client", "ios"])
+    .run_commands(
+        "cd /app/frontend && npm install && npm run build",
+    )
     .add_local_dir("backend", "/app", copy=True, ignore=["wiki_data"])
     .add_local_dir("graphify/graphify", "/app/graphify", copy=True)
-    .add_local_dir("frontend/dist", "/app/frontend/dist", copy=True)
     .env({
         "ZOPEDIA_FRONTEND_DIR": "/app/frontend/dist",
         "ZOPEDIA_HOME": ZK_DATA,
