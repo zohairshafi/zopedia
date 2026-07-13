@@ -53,13 +53,13 @@ export function storeAuthTokens(
   accessToken: string,
   refreshToken: string,
   mustChangePassword = false,
-  permissions?: UserPermissions,
+  permissions?: Partial<UserPermissions>,
 ): void {
   if (!canUseStorage()) return;
   localStorage.setItem(AUTH_TOKEN_KEY, accessToken);
   localStorage.setItem(AUTH_REFRESH_TOKEN_KEY, refreshToken);
   localStorage.setItem(AUTH_MUST_CHANGE_PASSWORD_KEY, String(mustChangePassword));
-  if (permissions) storePermissions(permissions);
+  if (permissions) storePermissions(permissions as UserPermissions);
   window.dispatchEvent(new CustomEvent("auth-tokens-updated"));
 }
 
@@ -74,7 +74,12 @@ export function clearAuthTokens(): void {
 export function storePermissions(permissions: UserPermissions): void {
   if (!canUseStorage()) return;
   try {
-    localStorage.setItem(PERMISSIONS_KEY, JSON.stringify(permissions));
+    // Merge with existing so partial updates (e.g. from token refresh that
+    // only carries can_save_chat_history + can_upload_files) don't wipe
+    // other fields like is_admin.
+    const existing = getPermissions();
+    const merged = { ...existing, ...permissions };
+    localStorage.setItem(PERMISSIONS_KEY, JSON.stringify(merged));
   } catch { /* storage full */ }
 }
 
