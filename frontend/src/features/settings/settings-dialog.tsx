@@ -83,13 +83,13 @@ export function SettingsDialog() {
 
   // Compute visible tabs at render time so permission changes take effect.
   const visibleTabs = (() => {
-    if (!isServerMode()) {
-      return TABS.filter((t) => t.id !== "api-keys" && t.id !== "users");
-    }
+    // API Keys tab is server-only (requires direct server access).
+    const tabs = isServerMode() ? TABS : TABS.filter((t) => t.id !== "api-keys");
+    // Users tab requires admin — works in both server and client mode.
     if (!getPermissions().is_admin) {
-      return TABS.filter((t) => t.id !== "users");
+      return tabs.filter((t) => t.id !== "users");
     }
-    return TABS;
+    return tabs;
   })();
 
   // On mobile, scroll the active tab into view when it changes

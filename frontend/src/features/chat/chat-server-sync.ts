@@ -483,6 +483,11 @@ export function debouncedSaveThreadToServer(threadId: string): void {
     setTimeout(async () => {
       debounceTimers.delete(threadId);
       await syncThreadToServer(threadId);
+      // Refresh the local thread list so the ordering converges with the
+      // server (which now has an updated updated_at for this thread).
+      syncThreadListFromServer().catch((err) => {
+        console.error("[sync] thread list refresh after save failed:", err);
+      });
     }, DEBOUNCE_MS)
   );
 }
