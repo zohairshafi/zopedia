@@ -546,10 +546,17 @@ let _pendingPrefsSave: ReturnType<typeof setTimeout> | null = null;
 export async function fetchUserPreferences(): Promise<Record<string, unknown>> {
   try {
     const res = await authFetch("/api/chat/preferences", { cache: "no-store" });
-    if (!res.ok) return {};
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      console.error("[prefs] GET /api/chat/preferences failed", res.status, body);
+      return {};
+    }
     const data = await res.json();
-    return data.preferences ?? {};
-  } catch {
+    const prefs = data.preferences ?? {};
+    console.info("[prefs] loaded from server", { keys: Object.keys(prefs) });
+    return prefs;
+  } catch (e) {
+    console.error("[prefs] GET /api/chat/preferences threw", e);
     return {};
   }
 }
@@ -559,13 +566,19 @@ export function saveUserPreferencesToServer(prefs: Record<string, unknown>): voi
   _pendingPrefsSave = setTimeout(async () => {
     _pendingPrefsSave = null;
     try {
-      await authFetch("/api/chat/preferences", {
+      const res = await authFetch("/api/chat/preferences", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ preferences: prefs }),
       });
-    } catch {
-      // Silently fail — localStorage is still the local source of truth
+      if (!res.ok) {
+        const body = await res.text().catch(() => "");
+        console.error("[prefs] PUT /api/chat/preferences failed", res.status, body);
+      } else {
+        console.info("[prefs] saved to server", { keys: Object.keys(prefs) });
+      }
+    } catch (e) {
+      console.error("[prefs] PUT /api/chat/preferences threw", e);
     }
   }, PREFERENCES_DEBOUNCE_MS);
 }

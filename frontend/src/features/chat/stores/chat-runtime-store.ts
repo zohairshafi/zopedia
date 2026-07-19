@@ -507,8 +507,8 @@ function _debouncedSyncToServer(prefs: Record<string, unknown>): void {
         "../chat-server-sync"
       );
       saveUserPreferencesToServer(prefs);
-    } catch {
-      // ignore — localStorage still has the value
+    } catch (e) {
+      console.error("[prefs] debounced sync to server failed", e);
     }
   }, 3000);
 }
@@ -536,11 +536,19 @@ export async function loadPreferencesFromServer(): Promise<void> {
     // Cancel any pending save triggered by the initial localStorage load —
     // the server value is fresher and we don't want to overwrite it.
     if (_prefsSaveTimer) { clearTimeout(_prefsSaveTimer); _prefsSaveTimer = null; }
-    // Merge: server prefs overwrite local settings but preserve checkpoint
+    // Merge: server prefs overwrite local settings but preserve checkpoint.
+    // Skip empty server values so a stale server snapshot (e.g. systemPrompt:""
+    // saved before the user set one) can't wipe a non-empty value the user
+    // just set locally — that was the "system prompt not persisting" bug.
     const store = useChatRuntimeStore.getState();
-    const merged = { ...store.params, ...serverPrefs, checkpoint: store.params.checkpoint };
+    const sanitized: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(serverPrefs)) {
+      if (v === "" || v === null || v === undefined) continue;
+      sanitized[k] = v;
+    }
+    const merged = { ...store.params, ...sanitized, checkpoint: store.params.checkpoint };
     store.setParams(merged);
-  } catch {
-    // Server unreachable — keep localStorage values
+  } catch (e) {
+    console.error("[prefs] loadPreferencesFromServer failed", e);
   }
 }
