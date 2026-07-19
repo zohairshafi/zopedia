@@ -634,20 +634,22 @@ async def upload_file(request: Request):
         ".mp3", ".wav", ".zip",
     }
 
-    logger.info("Upload: received %d form fields: %s", len(form), list(form.keys()))
+    # Count actual file parts received (len(form) only counts unique keys, so
+    # 10 files under "files" would misleadingly show as "1 form field").
+    received_files = [
+        v for fn in form for v in form.getlist(fn)
+        if hasattr(v, "filename") and hasattr(v, "read")
+    ]
+    logger.info("Upload: received %d file(s) across fields %s", len(received_files), list(form.keys()))
 
+    # Use getlist() so multiple files under the same field name (e.g. several
+    # "files" entries sent by the frontend) are all processed. form[field_name]
+    # returns only the FIRST value for a repeated key — that was why selecting
+    # multiple files only ever uploaded one of them.
     for field_name in form:
-        value = form[field_name]
-        # Collect uploadable files: single file, list of files, or skip
-        items: list = []
-        if hasattr(value, "filename") and hasattr(value, "read"):
-            items = [value]
-        elif isinstance(value, list):
-            items = [v for v in value if hasattr(v, "filename") and hasattr(v, "read")]
-        else:
-            continue
-
-        for file in items:
+        for file in form.getlist(field_name):
+            if not (hasattr(file, "filename") and hasattr(file, "read")):
+                continue
             try:
                 safe_name = file.filename or f"uploaded-{field_name}"
                 safe_name = safe_name.replace("/", "_").replace("\\", "_").strip()
