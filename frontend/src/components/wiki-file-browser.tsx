@@ -16,6 +16,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { authFetch } from "@/features/auth";
 import { apiUrl } from "@/lib/api-base";
+import { cn } from "@/lib/utils";
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -23,7 +24,21 @@ interface WikiFile {
   name: string;
   relative_path: string;
   size: number;
+  modified?: number;
   preview: string;
+}
+
+type WikiSortMode = "name" | "recent";
+
+function sortFiles(files: WikiFile[], mode: WikiSortMode): WikiFile[] {
+  const arr = [...files];
+  if (mode === "recent") {
+    // Most recently modified first; fall back to 0 if mtime is missing.
+    arr.sort((a, b) => (b.modified ?? 0) - (a.modified ?? 0));
+  } else {
+    arr.sort((a, b) => a.name.localeCompare(b.name));
+  }
+  return arr;
 }
 
 interface WikiDirectory {
@@ -101,6 +116,7 @@ export function WikiFileBrowser({ open, onOpenChange }: WikiFileBrowserProps) {
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [sort, setSort] = useState<WikiSortMode>("name");
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -209,17 +225,46 @@ export function WikiFileBrowser({ open, onOpenChange }: WikiFileBrowserProps) {
 
             {filteredData && (
               <div className="space-y-1">
-                {!isSearching && Object.keys(filteredData.directories).length > 0 && (
-                  <button
-                    type="button"
-                    className="text-xs text-muted-foreground hover:text-foreground mb-2"
-                    onClick={expandAll}
-                  >
-                    {expanded.size >= Object.keys(filteredData.directories).length
-                      ? "Collapse all"
-                      : "Expand all"}
-                  </button>
-                )}
+                <div className="flex items-center justify-between px-2 pb-2">
+                  <div className="flex items-center gap-1 text-xs">
+                    <span className="text-muted-foreground mr-1">Sort</span>
+                    <button
+                      type="button"
+                      onClick={() => setSort("name")}
+                      className={cn(
+                        "px-2 py-0.5 rounded transition-colors",
+                        sort === "name"
+                          ? "bg-muted text-foreground font-medium"
+                          : "text-muted-foreground hover:text-foreground",
+                      )}
+                    >
+                      Name
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSort("recent")}
+                      className={cn(
+                        "px-2 py-0.5 rounded transition-colors",
+                        sort === "recent"
+                          ? "bg-muted text-foreground font-medium"
+                          : "text-muted-foreground hover:text-foreground",
+                      )}
+                    >
+                      Recent
+                    </button>
+                  </div>
+                  {!isSearching && Object.keys(filteredData.directories).length > 0 && (
+                    <button
+                      type="button"
+                      className="text-xs text-muted-foreground hover:text-foreground"
+                      onClick={expandAll}
+                    >
+                      {expanded.size >= Object.keys(filteredData.directories).length
+                        ? "Collapse all"
+                        : "Expand all"}
+                    </button>
+                  )}
+                </div>
 
                 {sortDirectories(Object.entries(filteredData.directories)).map(([dirName, dir]) => {
                   const isOpen = isSearching || expanded.has(dirName);
@@ -242,7 +287,7 @@ export function WikiFileBrowser({ open, onOpenChange }: WikiFileBrowserProps) {
                       </button>
                       {isOpen && (
                         <div className="ml-6 border-l border-border pl-3 space-y-0.5">
-                          {dir.files.map((file) => (
+                          {sortFiles(dir.files, sort).map((file) => (
                             <FileRow key={file.relative_path} file={file} />
                           ))}
                           {dir.files.length === 0 && (
@@ -258,7 +303,7 @@ export function WikiFileBrowser({ open, onOpenChange }: WikiFileBrowserProps) {
                   <div className="pt-2">
                     <p className="text-xs font-medium text-muted-foreground px-2 py-1">Root</p>
                     <div className="space-y-0.5">
-                      {filteredData.root_files.map((file) => (
+                      {sortFiles(filteredData.root_files, sort).map((file) => (
                         <FileRow key={file.relative_path} file={file} />
                       ))}
                     </div>

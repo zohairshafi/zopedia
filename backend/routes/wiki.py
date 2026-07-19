@@ -1132,6 +1132,7 @@ async def list_wiki_files():
                             "name": f.name,
                             "relative_path": str(f.relative_to(wiki_pages)),
                             "size": stat.st_size,
+                            "modified": stat.st_mtime,
                             "preview": preview,
                         })
                     except Exception:
@@ -1154,6 +1155,7 @@ async def list_wiki_files():
                         "name": entry.name,
                         "relative_path": entry.name,
                         "size": stat.st_size,
+                        "modified": stat.st_mtime,
                         "preview": preview,
                     })
                 except Exception:
