@@ -1321,6 +1321,25 @@ ${messagesHtml}
     return;
   }
 
+  // iOS (Capacitor WKWebView): the <a download> attribute is ignored, so the
+  // blob-download fallback below silently does nothing. Use the Web Share API
+  // instead, which surfaces the native Share sheet (Save to Files / AirDrop).
+  // iPad reports as "MacIntel" since iOS 13, so also key off touch support.
+  const isIOS =
+    /\b(iPhone|iPod)\b/i.test(navigator.userAgent) ||
+    (navigator.platform === "MacIntel" && (navigator.maxTouchPoints ?? 0) > 1);
+  const shareFile = new File([html], filename, { type: "text/html" });
+  if (isIOS && typeof navigator.canShare === "function" && navigator.canShare({ files: [shareFile] })) {
+    try {
+      await navigator.share({ files: [shareFile], title: filename });
+      return;
+    } catch (err) {
+      // AbortError = user dismissed the share sheet — treat as success (no-op).
+      if (err instanceof DOMException && err.name === "AbortError") return;
+      // Otherwise fall through to the blob download below.
+    }
+  }
+
   // Browser: use blob URL + <a download> (works in all modern browsers).
   const blob = new Blob([html], { type: "text/html" });
   const url = URL.createObjectURL(blob);

@@ -3,12 +3,14 @@
 
 import { cn } from "@/lib/utils";
 import { code } from "@streamdown/code";
-import { math } from "@streamdown/math";
+import { createMathPlugin } from "@streamdown/math";
 import { mermaid } from "@streamdown/mermaid";
 import { memo, type ReactElement } from "react";
 import { Streamdown } from "streamdown";
 import "katex/dist/katex.min.css";
+import { preprocessLaTeX } from "@/lib/latex";
 
+const math = createMathPlugin({ singleDollarTextMath: true });
 const MARKDOWN_PLUGINS = { code, math, mermaid } as const;
 
 type MarkdownPreviewProps = {
@@ -40,7 +42,7 @@ function MarkdownPreviewImpl({
         controls={false}
         className={markdownClassName}
       >
-        {markdown.trim() ? markdown : "_Empty note_"}
+        {preprocessLaTeX(markdown.trim() ? markdown : "_Empty note_")}
       </Streamdown>
     </div>
   );
