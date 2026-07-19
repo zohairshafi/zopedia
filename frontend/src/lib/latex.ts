@@ -14,6 +14,13 @@
 const CURRENCY_REGEX =
   /(?<![\\$])\$(?!\$)(?=\d+(?:,\d{3})*(?:\.\d+)?[KMBkmb]?(?:\s|$|[^a-zA-Z\d]))/g;
 
+// remark-math v6 only supports $...$ and $$...$$ delimiters. \[...\] and \(...\)
+// are valid LaTeX but unsupported here, so they'd otherwise be mangled by
+// Markdown escape processing (\[ -> [, \\ -> \). We normalize them to $/$$
+// before the Markdown parser runs, which also protects the inner content.
+const DISPLAY_BRACKET_RE = /\\\[([\s\S]*?)\\\]/g;
+const INLINE_BRACKET_RE = /\\\(([\s\S]*?)\\\)/g;
+
 /**
  * Find regions inside code blocks (``` ... ``` and ` ... `) so we can skip them.
  * Returns sorted array of [start, end] index pairs.
@@ -84,14 +91,30 @@ function isInCodeBlock(
  * - Currency inside code blocks/spans is untouched
  */
 export function preprocessLaTeX(content: string): string {
-  if (!content.includes("$")) return content;
+  let out = content;
 
-  const codeRegions = findCodeBlockRegions(content);
+  // 1. Escape currency $ signs (e.g. $5 -> \$5) so they're not parsed as math.
+  if (out.includes("$")) {
+    const codeRegions = findCodeBlockRegions(out);
+    out = out.replace(CURRENCY_REGEX, (match, offset) =>
+      isInCodeBlock(offset, codeRegions) ? match : "\\" + match,
+    );
+  }
 
-  return content.replace(CURRENCY_REGEX, (match, offset) => {
-    if (isInCodeBlock(offset, codeRegions)) {
-      return match;
-    }
-    return "\\" + match;
-  });
+  // 2. Normalize LaTeX bracket delimiters to $ / $$. Skip code blocks.
+  // Recompute code regions per pass since earlier passes change offsets.
+  if (out.includes("\\[")) {
+    const codeRegions = findCodeBlockRegions(out);
+    out = out.replace(DISPLAY_BRACKET_RE, (match, offset) =>
+      isInCodeBlock(offset, codeRegions) ? match : `$$${match.slice(2, -2)}$$`,
+    );
+  }
+  if (out.includes("\\(")) {
+    const codeRegions = findCodeBlockRegions(out);
+    out = out.replace(INLINE_BRACKET_RE, (match, offset) =>
+      isInCodeBlock(offset, codeRegions) ? match : `$${match.slice(2, -2)}$`,
+    );
+  }
+
+  return out;
 }
