@@ -21,6 +21,13 @@ const CURRENCY_REGEX =
 const DISPLAY_BRACKET_RE = /\\\[([\s\S]*?)\\\]/g;
 const INLINE_BRACKET_RE = /\\\(([\s\S]*?)\\\)/g;
 
+// Some models (e.g. DeepSeek) emit display math as a bare "[ \begin{env} ...
+// \end{env} ]" block instead of \[...\] or $$...$$. A LaTeX environment
+// (\begin{...}...\end{...}) is unambiguously math, so wrap those blocks in
+// $$...$$. Line-delimited ($$\n ... \n$$) so remark-math's flow parser accepts
+// the multi-line content; the surrounding bare [ ] are consumed.
+const DISPLAY_ENV_BRACKET_RE = /(^|\n)([ \t]*)\[\s*(\\begin\{[a-zA-Z*]+\}[\s\S]*?\\end\{[a-zA-Z*]+\})\s*\]/g;
+
 /**
  * Find regions inside code blocks (``` ... ``` and ` ... `) so we can skip them.
  * Returns sorted array of [start, end] index pairs.
@@ -114,6 +121,18 @@ export function preprocessLaTeX(content: string): string {
     out = out.replace(INLINE_BRACKET_RE, (match, offset) =>
       isInCodeBlock(offset, codeRegions) ? match : `$${match.slice(2, -2)}$`,
     );
+  }
+
+  // 3. Wrap bare "[ \begin{env} ... \end{env} ]" display-math blocks (some
+  //    models emit these instead of \[...\]). \begin{} is unambiguous math.
+  if (out.includes("\\begin{")) {
+    const codeRegions = findCodeBlockRegions(out);
+    out = out.replace(DISPLAY_ENV_BRACKET_RE, (match, lead, indent, body, offset) => {
+      const bracketOffset = offset + lead.length + indent.length;
+      return isInCodeBlock(bracketOffset, codeRegions)
+        ? match
+        : `${lead}${indent}$$\n${body}\n$$\n`;
+    });
   }
 
   return out;
