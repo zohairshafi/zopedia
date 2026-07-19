@@ -72,10 +72,58 @@ function renderTab(tab: SettingsTab) {
   }
 }
 
+// Module-level so its identity is stable across renders — this is what lets
+// the motion `layoutId` pill slide between tabs instead of re-mounting.
+function TabButton({
+  tab,
+  isMobile,
+  reduced,
+}: {
+  tab: TabDef;
+  isMobile: boolean;
+  reduced: boolean | null;
+}) {
+  const active = useSettingsDialogStore((s) => s.activeTab === tab.id);
+  const setActiveTab = useSettingsDialogStore((s) => s.setActiveTab);
+  return (
+    <button
+      key={tab.id}
+      type="button"
+      data-tab={tab.id}
+      onClick={() => setActiveTab(tab.id)}
+      className={cn(
+        "relative flex items-center gap-2.5 rounded-[8px] px-2.5 text-sm font-medium transition-colors shrink-0",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background",
+        isMobile ? "h-[44px]" : "h-[30px]",
+        active
+          ? "text-black dark:text-white"
+          : "text-[#383835] dark:text-[#c7c7c4] hover:bg-[#ececec] dark:hover:bg-[#2e3035] hover:text-black dark:hover:text-white",
+      )}
+    >
+      {active && (
+        <motion.span
+          layoutId={isMobile ? "settings-active-pill-mobile" : "settings-active-pill"}
+          className="absolute inset-0 rounded-[8px] bg-[#ececec] dark:bg-[#2e3035]"
+          transition={
+            reduced
+              ? { duration: 0 }
+              : { type: "spring", stiffness: 500, damping: 35, mass: 0.5 }
+          }
+        />
+      )}
+      <HugeiconsIcon
+        icon={tab.icon}
+        strokeWidth={1.5}
+        className="relative z-10 size-[18px] shrink-0"
+      />
+      <span className="relative z-10 whitespace-nowrap">{tab.label}</span>
+    </button>
+  );
+}
+
 export function SettingsDialog() {
   const open = useSettingsDialogStore((s) => s.open);
   const activeTab = useSettingsDialogStore((s) => s.activeTab);
-  const setActiveTab = useSettingsDialogStore((s) => s.setActiveTab);
   const closeDialog = useSettingsDialogStore((s) => s.closeDialog);
   const reduced = useReducedMotion();
   const isMobile = useIsMobile();
@@ -100,44 +148,6 @@ export function SettingsDialog() {
     ) as HTMLElement | null;
     activeBtn?.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
   }, [activeTab, isMobile]);
-
-  const TabButton = ({ tab }: { tab: TabDef }) => {
-    const active = activeTab === tab.id;
-    return (
-      <button
-        key={tab.id}
-        type="button"
-        data-tab={tab.id}
-        onClick={() => setActiveTab(tab.id)}
-        className={cn(
-          "relative flex items-center gap-2.5 rounded-[8px] px-2.5 text-sm font-medium transition-colors shrink-0",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background",
-          isMobile ? "h-[44px]" : "h-[30px]",
-          active
-            ? "text-black dark:text-white"
-            : "text-[#383835] dark:text-[#c7c7c4] hover:bg-[#ececec] dark:hover:bg-[#2e3035] hover:text-black dark:hover:text-white",
-        )}
-      >
-        {active && (
-          <motion.span
-            layoutId={isMobile ? "settings-active-pill-mobile" : "settings-active-pill"}
-            className="absolute inset-0 rounded-[8px] bg-[#ececec] dark:bg-[#2e3035]"
-            transition={
-              reduced
-                ? { duration: 0 }
-                : { type: "spring", stiffness: 500, damping: 35, mass: 0.5 }
-            }
-          />
-        )}
-        <HugeiconsIcon
-          icon={tab.icon}
-          strokeWidth={1.5}
-          className="relative z-10 size-[18px] shrink-0"
-        />
-        <span className="relative z-10 whitespace-nowrap">{tab.label}</span>
-      </button>
-    );
-  };
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && closeDialog()}>
@@ -164,7 +174,7 @@ export function SettingsDialog() {
                 style={{ WebkitOverflowScrolling: "touch" }}
               >
                 {visibleTabs.map((tab) => (
-                  <TabButton key={tab.id} tab={tab} />
+                  <TabButton key={tab.id} tab={tab} isMobile={isMobile} reduced={reduced} />
                 ))}
               </div>
               <button
@@ -204,7 +214,7 @@ export function SettingsDialog() {
             <aside className="font-heading flex w-[200px] shrink-0 flex-col border-r border-border bg-muted/20 p-2">
               <nav className="flex flex-col gap-0.5">
                 {visibleTabs.map((tab) => (
-                  <TabButton key={tab.id} tab={tab} />
+                  <TabButton key={tab.id} tab={tab} isMobile={isMobile} reduced={reduced} />
                 ))}
               </nav>
             </aside>

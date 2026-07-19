@@ -2,7 +2,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { authFetch } from "@/features/auth";
 import { apiUrl } from "@/lib/api-base";
-import { Eye, EyeOff, Trash2, RefreshCw } from "lucide-react";
+import { Eye, EyeOff, Trash2, RefreshCw, Search } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { SettingsSection } from "../components/settings-section";
@@ -55,6 +55,9 @@ export function UsersTab() {
   // ── Permissions ──────────────────────────────────────────────────
   const [togglingPerm, setTogglingPerm] = useState<string | null>(null);
 
+  // ── Search filter ────────────────────────────────────────────────
+  const [search, setSearch] = useState("");
+
   async function handleTogglePermission(
     targetUsername: string,
     key: "can_save_chat_history" | "can_upload_files" | "is_admin",
@@ -105,6 +108,10 @@ export function UsersTab() {
   useEffect(() => {
     void fetchUsers();
   }, [fetchUsers]);
+
+  const filteredUsers = users.filter((u) =>
+    u.username.toLowerCase().includes(search.trim().toLowerCase()),
+  );
 
   // ── Create user ──────────────────────────────────────────────────
 
@@ -241,27 +248,40 @@ export function UsersTab() {
 
       {/* ── Existing users ──────────────────────────────────────── */}
       <SettingsSection title="Existing users">
+        {!listLoading && !listError && users.length > 0 && (
+          <div className="relative mb-3 max-w-[240px]">
+            <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search users…"
+              className="h-8 pl-7 text-sm"
+            />
+          </div>
+        )}
         {listLoading ? (
           <p className="text-xs text-muted-foreground py-2">Loading…</p>
         ) : listError ? (
           <p className="text-xs text-destructive py-2">{listError}</p>
-        ) : users.length === 0 ? (
-          <p className="text-xs text-muted-foreground py-2">No users found.</p>
+        ) : filteredUsers.length === 0 ? (
+          <p className="text-xs text-muted-foreground py-2">
+            {search.trim() ? "No users match your search." : "No users found."}
+          </p>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="max-h-[360px] overflow-auto rounded-md">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b text-left text-xs text-muted-foreground">
-                  <th className="py-2 pr-4 font-medium">Username</th>
-                  <th className="py-2 pr-4 font-medium">Status</th>
-                  <th className="py-2 pr-2 font-medium text-center">Admin</th>
-                  <th className="py-2 pr-2 font-medium text-center">Save History</th>
-                  <th className="py-2 pr-2 font-medium text-center">Upload Files</th>
-                  <th className="py-2 pr-4 font-medium" />
+                <tr className="text-left text-xs text-muted-foreground">
+                  <th className="sticky top-0 z-10 border-b border-border bg-background py-2 pr-4 font-medium">Username</th>
+                  <th className="sticky top-0 z-10 border-b border-border bg-background py-2 pr-4 font-medium">Status</th>
+                  <th className="sticky top-0 z-10 border-b border-border bg-background py-2 pr-2 text-center font-medium">Admin</th>
+                  <th className="sticky top-0 z-10 border-b border-border bg-background py-2 pr-2 text-center font-medium">Save History</th>
+                  <th className="sticky top-0 z-10 border-b border-border bg-background py-2 pr-2 text-center font-medium">Upload Files</th>
+                  <th className="sticky top-0 z-10 border-b border-border bg-background py-2 pr-4 font-medium" />
                 </tr>
               </thead>
               <tbody>
-                {users.map((u) => (
+                {filteredUsers.map((u) => (
                   <tr key={u.username} className="border-b border-border/50 last:border-0">
                     <td className="py-2 pr-4">
                       <span className="font-medium">{u.username}</span>
