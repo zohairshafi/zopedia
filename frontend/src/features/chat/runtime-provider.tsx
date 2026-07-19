@@ -715,21 +715,15 @@ function ThreadNewChatSwitch({
 }: { nonce: string }): ReactElement | null {
   const aui = useAui();
   const isLoading = useAuiState(({ threads }) => threads.isLoading);
-  const firedRef = useRef(false);
-
-  console.log("[ThreadNewChatSwitch] rendering, nonce:", nonce, "isLoading:", isLoading);
+  // Track the last nonce we handled so a new nonce can re-trigger.
+  // Previously this was a boolean `firedRef` — once set to true, a second
+  // "New Chat" click would be silently ignored because the ref never reset.
+  const lastNonceRef = useRef("");
 
   useEffect(() => {
-    if (isLoading) {
-      console.log("[ThreadNewChatSwitch] skipping — isLoading is true");
-      return;
-    }
-    if (firedRef.current) {
-      console.log("[ThreadNewChatSwitch] skipping — already fired for this nonce");
-      return;
-    }
-    firedRef.current = true;
-    console.log("[ThreadNewChatSwitch] calling switchToNewThread()");
+    if (isLoading) return;
+    if (lastNonceRef.current === nonce) return;
+    lastNonceRef.current = nonce;
     void aui.threads().switchToNewThread();
     useChatRuntimeStore.getState().setActiveThreadId(null);
   }, [aui, isLoading, nonce]);
