@@ -56,8 +56,9 @@ ZK_DATA = "/app/wiki_data"
 image = (
     modal.Image.from_registry("python:3.12-slim")
     .run_commands(
-        "pip install --no-cache-dir fastapi uvicorn pydantic httpx watchdog "
-        'ddgs networkx "markitdown[all]" openai pyjwt diceware asyncpg',
+        "pip install --no-cache-dir fastapi uvicorn pydantic python-multipart httpx watchdog "
+        'ddgs networkx "markitdown[all]" openai pyjwt diceware asyncpg '
+        'structlog pyyaml pymupdf4llm huggingface_hub',
     )
     .add_local_dir("backend", "/app", copy=True, ignore=["wiki_data"])
     .add_local_dir("graphify/graphify", "/app/graphify", copy=True)
@@ -82,7 +83,7 @@ app = modal.App("zopedia", image=image)
 @app.function(
     volumes={ZK_DATA: wiki_volume} if wiki_volume else {},
     secrets=[modal.Secret.from_name("zopedia-env")],
-    cpu=1,
+    cpu=4,
     scaledown_window=300,
     timeout=7200,
 )
