@@ -74,6 +74,7 @@ def _open_window(port: int) -> None:
     import webview
     import AppKit
     from PyObjCTools import AppHelper
+    import updater as _updater_mod
 
     # Native save dialog for blob: URL downloads (chat export, etc.)
     webview.settings["ALLOW_DOWNLOADS"] = True
@@ -184,13 +185,20 @@ def _open_window(port: int) -> None:
     def set_native_theme(is_dark: bool) -> None:
         AppHelper.callAfter(_apply_titlebar_theme, is_dark)
 
-    window.expose(open_url, set_native_theme, save_blob)
+    # ── Download DMG and open in Finder (auto-updates) ───────────
+    def download_and_open_dmg(url: str) -> str:
+        import json
+        result = _updater_mod.open_dmg_download(url)
+        return json.dumps(result)
+
+    window.expose(open_url, set_native_theme, save_blob, download_and_open_dmg)
 
     def _on_loaded():
         # Mark as desktop so the frontend syncs the titlebar theme and uses
         # the native save dialog. (The auto-updater hook polls
         # /api/update-status and silently no-ops — no local backend.)
         window.evaluate_js("window.__ZOPEDIA_DESKTOP__ = true;")
+        window.evaluate_js(f"window.__ZOPEDIA_VERSION__ = '{_updater_mod._get_current_version()}';")
 
         ns_app = AppKit.NSApplication.sharedApplication()
         appearance = ns_app.effectiveAppearance()

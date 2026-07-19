@@ -196,15 +196,29 @@ function DesktopUpdateLayer() {
     );
   }
 
+  const showCheckButton = update.status === "idle" || update.status === "checking";
+
   return (
-    <UpdateBanner
-      status={update.status}
-      info={update.info}
-      dismissed={update.dismissed}
-      isExternalServer={false}
-      onInstall={update.installUpdate}
-      onDismiss={update.dismiss}
-    />
+    <>
+      <UpdateBanner
+        status={update.status}
+        info={update.info}
+        dismissed={update.dismissed}
+        isExternalServer={false}
+        onInstall={update.installUpdate}
+        onDismiss={update.dismiss}
+      />
+      {showCheckButton && !update.dismissed && (
+        <button
+          type="button"
+          onClick={() => { void update.checkUpdate(); }}
+          disabled={update.status === "checking"}
+          className="fixed bottom-4 right-4 z-50 rounded-md px-3 py-1.5 text-xs text-muted-foreground/50 transition-colors hover:bg-muted/30 hover:text-foreground disabled:opacity-30"
+        >
+          {update.status === "checking" ? "Checking for updates…" : "Check for updates"}
+        </button>
+      )}
+    </>
   );
 }
 
