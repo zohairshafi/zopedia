@@ -188,6 +188,10 @@ def get_connection() -> sqlite3.Connection:
             "UPDATE auth_user SET permissions = ? WHERE permissions = '{}'",
             ('{"can_save_chat_history": true, "can_upload_files": true}',),
         )
+    if "display_name" not in columns:
+        conn.execute(
+            "ALTER TABLE auth_user ADD COLUMN display_name TEXT"
+        )
     refresh_columns = {
         row["name"] for row in conn.execute("PRAGMA table_info(refresh_tokens)")
     }
@@ -375,6 +379,37 @@ def is_admin_user(username: str) -> bool:
         return True
     perms = get_user_permissions(username)
     return bool(perms.get("is_admin", False))
+
+
+def get_user_display_name(username: str) -> Optional[str]:
+    """Return the stored display name for a user, or None if unset."""
+    conn = get_connection()
+    try:
+        cur = conn.execute(
+            "SELECT display_name FROM auth_user WHERE username = ?",
+            (username,),
+        )
+        row = cur.fetchone()
+        if row is None:
+            return None
+        name = row["display_name"]
+        return name if name else None
+    finally:
+        conn.close()
+
+
+def set_user_display_name(username: str, display_name: str) -> bool:
+    """Persist a user's display name. Returns True if the user was found."""
+    conn = get_connection()
+    try:
+        cur = conn.execute(
+            "UPDATE auth_user SET display_name = ? WHERE username = ?",
+            (display_name, username),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        conn.close()
 
 
 def is_initialized() -> bool:

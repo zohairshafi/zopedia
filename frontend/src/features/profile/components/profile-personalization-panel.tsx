@@ -10,7 +10,7 @@ import { Camera } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { decodeJwtSubject } from "../utils/jwt-subject";
 import { resizeImageFileToDataUrl } from "../utils/resize-image-file";
-import { getProfileStorageKey, useUserProfileStore } from "../stores/user-profile-store";
+import { getProfileStorageKey, saveProfileNameToServer, useUserProfileStore } from "../stores/user-profile-store";
 import { UserAvatar } from "./user-avatar";
 
 function readPersistedProfile(): { displayName: string; avatarDataUrl: string | null } | null {
@@ -77,6 +77,7 @@ export function ProfilePersonalizationPanel() {
     if (trimmed !== displayName) {
       persistProfile({ displayName: trimmed });
       setDisplayName(trimmed);
+      saveProfileNameToServer(trimmed);
       toastSuccess("Profile name saved");
     }
   };

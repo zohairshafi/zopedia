@@ -19,6 +19,7 @@ from .storage import (
     delete_user,
     ensure_default_admin,
     get_user_and_secret,
+    get_user_display_name,
     get_user_permissions,
     is_admin_user,
     is_initialized,
@@ -27,6 +28,7 @@ from .storage import (
     requires_password_change,
     revoke_api_key,
     revoke_user_refresh_tokens,
+    set_user_display_name,
     update_password,
     update_user_permissions,
 )
@@ -144,6 +146,37 @@ async def auth_change_password(
         must_change_password=False,
         permissions=get_user_permissions(current_subject),
     )
+
+
+# ── Profile (self-service) ──────────────────────────────────────────
+
+
+class UpdateProfileRequest(BaseModel):
+    display_name: str = Field(..., max_length=128)
+
+
+@router.get("/auth/profile")
+async def get_profile(current_subject: str = Depends(get_current_subject)):
+    """Return the current user's profile (display name)."""
+    return {
+        "username": current_subject,
+        "display_name": get_user_display_name(current_subject),
+    }
+
+
+@router.put("/auth/profile")
+async def update_profile(
+    body: UpdateProfileRequest,
+    current_subject: str = Depends(get_current_subject),
+):
+    """Update the current user's display name."""
+    display_name = body.display_name.strip()
+    if not set_user_display_name(current_subject, display_name):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found.",
+        )
+    return {"username": current_subject, "display_name": display_name}
 
 
 @router.post("/auth/register")

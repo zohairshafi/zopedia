@@ -771,6 +771,17 @@ if _AUTH_DISABLED:
             "permissions": _DEFAULT_PERMISSIONS,
         }
 
+    # Auth-disabled mode has no real user identity, so the display name lives
+    # in the client's localStorage. These stubs return success so the UI's
+    # profile sync doesn't 404.
+    @_auth_stub.get("/auth/profile")
+    async def _auth_get_profile():
+        return {"username": "local-user", "display_name": None}
+
+    @_auth_stub.put("/auth/profile")
+    async def _auth_put_profile():
+        return {"username": "local-user", "display_name": None}
+
     @_auth_stub.get("/auth/api-keys")
     async def _auth_list_api_keys():
         return {"api_keys": []}
