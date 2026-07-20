@@ -28,6 +28,15 @@ const INLINE_BRACKET_RE = /\\\(([\s\S]*?)\\\)/g;
 // the multi-line content; the surrounding bare [ ] are consumed.
 const DISPLAY_ENV_BRACKET_RE = /(^|\n)([ \t]*)\[\s*(\\begin\{[a-zA-Z*]+\}[\s\S]*?\\end\{[a-zA-Z*]+\})\s*\]/g;
 
+// Catch-all for the same models' bare "[ ... ]" display math that does NOT use
+// a \begin{} env — e.g. "[ d(\mathbf{p}) = \sqrt{\sum ...} ]". We match a "["
+// at the start of a line, balanced (via the closing-]-at-end-of-line anchor)
+// to a "]" at the end of a line, and only wrap when the content looks like
+// math (a LaTeX command \w or a superscript ^). This keeps prose brackets
+// ("[ see notes ]") untouched. "4-space indent = code block" is avoided by
+// emitting $$ at column 0.
+const BARE_DISPLAY_LINE_RE = /^([ \t]*)\[([\s\S]*?)\][ \t]*$/gm;
+
 /**
  * Find regions inside code blocks (``` ... ``` and ` ... `) so we can skip them.
  * Returns sorted array of [start, end] index pairs.
@@ -132,6 +141,19 @@ export function preprocessLaTeX(content: string): string {
       return isInCodeBlock(bracketOffset, codeRegions)
         ? match
         : `${lead}${indent}$$\n${body}\n$$\n`;
+    });
+  }
+
+  // 4. Wrap bare "[ ... ]" display math on its own line(s) WITHOUT a \begin{}
+  //    env (e.g. "[ d(\mathbf{p}) = \sqrt{\sum ...} ]"). Only fires when the
+  //    content looks like math (\command or ^), so prose brackets are left
+  //    alone. Runs after the \begin{} pass so env blocks are already handled.
+  if (out.includes("[")) {
+    const codeRegions = findCodeBlockRegions(out);
+    out = out.replace(BARE_DISPLAY_LINE_RE, (match, _indent, body, offset) => {
+      if (isInCodeBlock(offset, codeRegions)) return match;
+      if (!/\\\w|\^/.test(body)) return match; // not math-looking
+      return `$$\n${body.trim()}\n$$`;
     });
   }
 
