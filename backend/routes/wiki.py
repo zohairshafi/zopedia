@@ -599,6 +599,113 @@ async def wiki_delete_apply(payload: WikiDeleteApplyRequest, current_subject: st
     return _to_wiki_delete_response(report)
 
 
+# ── PDF Extract (ephemeral — for chat attachments) ─────────────────
+# When a user drops a PDF on the chat and picks "Use in this conversation",
+# we extract text server-side (pymupdf4llm, pypdf fallback) and return it
+# for injection into the message. Ephemeral — nothing is written to raw/.
+# Cap extracted text so a huge PDF doesn't blow up the chat context.
+PDF_EXTRACT_MAX_CHARS = 100_000
+
+
+@router.post("/extract-pdf")
+async def extract_pdf_text(
+    request: Request,
+    current_subject: str = Depends(_require_valid_subject_dep),
+):
+    """Extract text from an attached PDF, server-side. Ephemeral only."""
+    import importlib
+    import tempfile
+
+    form = await request.form()
+    upload = None
+    for field_name in form:
+        for value in form.getlist(field_name):
+            if hasattr(value, "filename") and hasattr(value, "read"):
+                upload = value
+                break
+        if upload is not None:
+            break
+    if upload is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="No PDF file provided."
+        )
+
+    name = (upload.filename or "document.pdf").replace("/", "_").replace("\\", "_").strip()
+    if not name.lower().endswith(".pdf"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Only PDF files are supported."
+        )
+
+    content = await upload.read()
+    if not content:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty PDF.")
+
+    tmp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+            tmp.write(content)
+            tmp_path = Path(tmp.name)
+
+        attempts: list[str] = []
+        text = ""
+
+        # Primary: pymupdf4llm (mirrors engine.py's _read_pdf_text_for_retry).
+        # write_images=False keeps this text-only (no extracted image blobs).
+        try:
+            import pymupdf4llm
+
+            extracted = pymupdf4llm.to_markdown(
+                str(tmp_path), write_images=False, show_progress=False, use_ocr=False,
+            )
+            if extracted and extracted.strip():
+                text = extracted
+            else:
+                attempts.append("pymupdf4llm returned empty content")
+        except Exception as exc:
+            attempts.append(f"pymupdf4llm failed: {exc}")
+
+        # Fallback: pypdf.
+        if not text:
+            try:
+                pypdf_module = importlib.import_module("pypdf")
+                reader = pypdf_module.PdfReader(str(tmp_path))
+                chunks: list[str] = []
+                for page in reader.pages:
+                    page_text = page.extract_text()
+                    if page_text and page_text.strip():
+                        chunks.append(page_text)
+                joined = "\n".join(chunks).strip()
+                if joined:
+                    text = joined
+                else:
+                    attempts.append("pypdf returned empty content")
+            except Exception as exc:
+                attempts.append(f"pypdf failed: {exc}")
+
+        if not text:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"No extractable text found in PDF. Attempts: {'; '.join(attempts)}",
+            )
+
+        truncated = False
+        if len(text) > PDF_EXTRACT_MAX_CHARS:
+            text = text[:PDF_EXTRACT_MAX_CHARS]
+            truncated = True
+
+        logger.info(
+            "extract-pdf: %s -> %d chars%s",
+            name, len(text), " (truncated)" if truncated else "",
+        )
+        return {"name": name, "text": text, "truncated": truncated}
+    finally:
+        if tmp_path is not None:
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+
+
 # ── Wiki Ingest ────────────────────────────────────────────────────
 
 @router.post("/wiki/ingest", response_model=WikiIngestResponse)

@@ -22,9 +22,10 @@ import {
 } from "@assistant-ui/react";
 import { createAssistantStream } from "assistant-stream";
 import mammoth from "mammoth";
-import { type ReactElement, type ReactNode, useEffect, useMemo, useRef } from "react";
-import { extractText, getDocumentProxy } from "unpdf";
+import { type ReactElement, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { authFetch } from "@/features/auth";
+import { toast } from "sonner";
+import { PdfChooserDialog, type PdfChoice } from "@/components/pdf-chooser-dialog";
 import { createOpenAIStreamAdapter } from "./api/chat-adapter";
 import { db, resetAndReload } from "./db";
 import { useChatRuntimeStore, loadPreferencesFromServer } from "./stores/chat-runtime-store";
@@ -112,28 +113,83 @@ class VisionImageAdapter implements AttachmentAdapter {
 
 class PDFAttachmentAdapter implements AttachmentAdapter {
   accept = "application/pdf";
+  private requestChoice: (file: File) => Promise<PdfChoice | null>;
 
-  add({ file }: { file: File }): Promise<PendingAttachment> {
-    return Promise.resolve({
+  constructor(opts: { requestChoice: (file: File) => Promise<PdfChoice | null> }) {
+    this.requestChoice = opts.requestChoice;
+  }
+
+  async add({ file }: { file: File }): Promise<PendingAttachment> {
+    const choice = await this.requestChoice(file);
+
+    if (choice !== "conversation") {
+      // "ingest" → upload to wiki raw/ then abort the attachment.
+      // null → user dismissed the chooser; cancel without attaching.
+      if (choice === "ingest") {
+        const formData = new FormData();
+        formData.append("files", file);
+        try {
+          const res = await authFetch("/api/upload", { method: "POST", body: formData });
+          const data = await res.json().catch(() => null);
+          if (data?.uploaded?.length > 0) {
+            toast.success(`Ingested "${file.name}"`, {
+              description: "It will appear in the wiki once processed.",
+            });
+          }
+          if (data?.failed?.length > 0) {
+            toast.error(`Failed to ingest "${file.name}"`, {
+              description: data.failed
+                .map((f: { filename?: string; reason?: string }) => f.reason ?? f.filename)
+                .join(", "),
+            });
+          }
+        } catch (e) {
+          toast.error(`Failed to ingest "${file.name}"`, {
+            description: e instanceof Error ? e.message : String(e),
+          });
+        }
+      }
+      // Abort the attachment. Throwing is the standard "adapter rejects this
+      // file" contract — assistant-ui drops it without adding a chip.
+      throw new Error(
+        choice === "ingest"
+          ? "PDF ingested into wiki — not attached to message."
+          : "PDF attachment cancelled.",
+      );
+    }
+
+    // conversation: attach as-is; text is extracted server-side on send.
+    return {
       id: crypto.randomUUID(),
       type: "document",
       name: file.name,
       contentType: file.type,
       file,
       status: { type: "requires-action", reason: "composer-send" },
-    });
+    };
   }
 
   async send(attachment: PendingAttachment): Promise<CompleteAttachment> {
-    const buffer = new Uint8Array(await attachment.file.arrayBuffer());
-    const pdf = await getDocumentProxy(buffer);
-    const { text } = await extractText(pdf, { mergePages: true });
+    // Server-side text extraction (pymupdf). Ephemeral — nothing stored.
+    const formData = new FormData();
+    formData.append("file", attachment.file);
+    const res = await authFetch("/api/inference/extract-pdf", {
+      method: "POST",
+      body: formData,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => null);
+      throw new Error(err?.detail ?? `PDF extract failed (${res.status})`);
+    }
+    const data = await res.json();
+    const text: string = typeof data.text === "string" ? data.text : "";
+    const suffix = data.truncated ? "\n\n[...truncated by the server]" : "";
     return {
       id: attachment.id,
       type: "document",
       name: attachment.name,
       contentType: attachment.contentType,
-      content: [{ type: "text", text: `[PDF: ${attachment.name}]\n${text}` }],
+      content: [{ type: "text", text: `[PDF: ${attachment.name}]\n${text}${suffix}` }],
       status: { type: "complete" },
     };
   }
@@ -647,16 +703,35 @@ function ThreadHistoryProvider({
         : undefined,
     [],
   );
+  const [pendingPdf, setPendingPdf] = useState<File | null>(null);
+  const pdfChoiceResolverRef = useRef<((choice: PdfChoice | null) => void) | null>(null);
+
+  const requestPdfChoice = useCallback(
+    (file: File): Promise<PdfChoice | null> =>
+      new Promise((resolve) => {
+        pdfChoiceResolverRef.current = resolve;
+        setPendingPdf(file);
+      }),
+    [],
+  );
+
+  const resolvePdfChoice = useCallback((choice: PdfChoice | null) => {
+    setPendingPdf(null);
+    const resolver = pdfChoiceResolverRef.current;
+    pdfChoiceResolverRef.current = null;
+    resolver?.(choice);
+  }, []);
+
   const attachments = useMemo(
     () =>
       new CompositeAttachmentAdapter([
         new VisionImageAdapter(),
         new TextAttachmentAdapter(),
         new HtmlAttachmentAdapter(),
-        new PDFAttachmentAdapter(),
+        new PDFAttachmentAdapter({ requestChoice: requestPdfChoice }),
         new DocxAttachmentAdapter(),
       ]),
-    [],
+    [requestPdfChoice],
   );
   const adapters = useMemo(
     () => ({ history, dictation, attachments }),
@@ -665,6 +740,11 @@ function ThreadHistoryProvider({
 
   return (
     <RuntimeAdapterProvider adapters={adapters}>
+      <PdfChooserDialog
+        file={pendingPdf}
+        onChoose={resolvePdfChoice}
+        onClose={() => resolvePdfChoice(null)}
+      />
       {children}
     </RuntimeAdapterProvider>
   );
