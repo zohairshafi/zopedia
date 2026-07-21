@@ -41,6 +41,21 @@ _excludes = [
     "tkinter",
 ]
 
+
+def _read_version() -> str:
+    """Read __version__ from packaging/__version__.py for the About box."""
+    try:
+        for line in (_PROJECT / "packaging" / "__version__.py").read_text().splitlines():
+            line = line.strip()
+            if line.startswith("__version__"):
+                return line.split("=", 1)[1].strip().strip('"').strip("'")
+    except Exception:
+        pass
+    return "0.0.0"
+
+
+_app_version = _read_version()
+
 a = Analysis(
     [str(_PROJECT / "packaging" / "launcher_client.py")],
     pathex=[str(_PROJECT / "packaging")],
@@ -91,8 +106,8 @@ if sys.platform == "darwin":
         info_plist={
             "CFBundleName": "Zopedia Client",
             "CFBundleDisplayName": "Zopedia Client",
-            "CFBundleVersion": "1.0.0",
-            "CFBundleShortVersionString": "1.0.0",
+            "CFBundleVersion": _app_version,
+            "CFBundleShortVersionString": _app_version,
             "NSHighResolutionCapable": True,
             "LSBackgroundOnly": False,
             "NSRequiresAquaSystemAppearance": False,
