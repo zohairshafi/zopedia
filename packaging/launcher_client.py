@@ -94,8 +94,11 @@ def _open_window(port: int) -> None:
                 color.setFill()
                 AppKit.NSBezierPath.fillRect_(self.bounds())
 
+    import updater as _updater_mod
+    _app_version = _updater_mod._get_current_version()
+
     window = webview.create_window(
-        title="Zopedia Client",
+        title=f"Zopedia Client v{_app_version}",
         url=f"http://127.0.0.1:{port}/",
         width=1280,
         height=800,
