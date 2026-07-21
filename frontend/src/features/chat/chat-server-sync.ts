@@ -1,8 +1,9 @@
 import { authFetch, getAuthToken as getAuthTokenSync } from "@/features/auth";
 import { db } from "./db";
 import type { MessageRecord, ThreadRecord } from "./types";
+import { toast } from "sonner";
 
-const DEBOUNCE_MS = 2000;
+const DEBOUNCE_MS = 800;
 const MAX_MESSAGE_CONTENT_BYTES = 40_000; // chunk messages exceeding ~40KB serialized
 const debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
@@ -17,6 +18,23 @@ const syncedMessageIds = new Set<string>();
 // the sidebar. Cleared on reload; the server is the source of truth
 // across sessions.
 const recentlyDeletedThreadIds = new Set<string>();
+
+// Surface message-sync failures loudly (visible toast) instead of only
+// console.error — the pywebview console is hidden, so silent failures
+// would otherwise look like "messages vanished after reopen". Throttled
+// to once per minute so a persistent failure (e.g. expired token) does
+// not spam on every debounced retry.
+let _lastSyncFailToastAt = 0;
+function notifySyncFailure(reason: string): void {
+  console.error("[sync] chat history sync failed:", reason);
+  const now = Date.now();
+  if (now - _lastSyncFailToastAt < 60_000) return;
+  _lastSyncFailToastAt = now;
+  toast.error("Chat history sync failed", {
+    description: `${reason}. Recent messages may not be saved to the server.`,
+    duration: 8000,
+  });
+}
 
 function flushPendingSaves() {
   for (const [threadId, timer] of debounceTimers) {
@@ -210,12 +228,15 @@ async function appendMessagesToServer(
       keepalive: useKeepalive,
     });
     console.log("[sync] appendMessagesToServer:", res.status, { threadId, msgCount: messages.length });
-    if (!res.ok) return [];
+    if (!res.ok) {
+      notifySyncFailure(`server returned ${res.status} for message append`);
+      return [];
+    }
     const data = await res.json().catch(() => null);
     // Server now returns the actual inserted_ids — trust that, not our send list.
     return Array.isArray(data?.inserted_ids) ? data.inserted_ids : [];
   } catch (err) {
-    console.error("[sync] appendMessagesToServer failed:", err);
+    notifySyncFailure(err instanceof Error ? err.message : String(err));
     return [];
   }
 }
