@@ -29,13 +29,14 @@ const INLINE_BRACKET_RE = /\\\(([\s\S]*?)\\\)/g;
 const DISPLAY_ENV_BRACKET_RE = /(^|\n)([ \t]*)\[\s*(\\begin\{[a-zA-Z*]+\}[\s\S]*?\\end\{[a-zA-Z*]+\})\s*\]/g;
 
 // Catch-all for the same models' bare "[ ... ]" display math that does NOT use
-// a \begin{} env — e.g. "[ d(\mathbf{p}) = \sqrt{\sum ...} ]". We match a "["
-// at the start of a line, balanced (via the closing-]-at-end-of-line anchor)
-// to a "]" at the end of a line, and only wrap when the content looks like
-// math (a LaTeX command \w or a superscript ^). This keeps prose brackets
-// ("[ see notes ]") untouched. "4-space indent = code block" is avoided by
-// emitting $$ at column 0.
-const BARE_DISPLAY_LINE_RE = /^([ \t]*)\[([\s\S]*?)\][ \t]*$/gm;
+// a \begin{} env — e.g. "[ d(\mathbf{p}) = \sqrt{\sum ...} ]". We allow an
+// arbitrary non-bracket prefix before the "[" (real LLM output usually labels
+// it: "**p**: [...]", "Set p = [...]", "- [...]"), balanced to a "]" at the
+// end of the line, and only wrap when the content looks like math (a LaTeX
+// command \w or a superscript ^). The closing-]-at-EOL anchor + the math-body
+// gate are what exclude prose brackets and markdown links [a](b); the prefix
+// is kept on its own line so remark-math still sees $$...$$ as a flow block.
+const BARE_DISPLAY_LINE_RE = /^([^\n[\]]*?)\[([\s\S]*?)\][ \t]*$/gm;
 
 /**
  * Find regions inside code blocks (``` ... ``` and ` ... `) so we can skip them.
@@ -150,10 +151,15 @@ export function preprocessLaTeX(content: string): string {
   //    alone. Runs after the \begin{} pass so env blocks are already handled.
   if (out.includes("[")) {
     const codeRegions = findCodeBlockRegions(out);
-    out = out.replace(BARE_DISPLAY_LINE_RE, (match, _indent, body, offset) => {
+    out = out.replace(BARE_DISPLAY_LINE_RE, (match, prefix, body, offset) => {
       if (isInCodeBlock(offset, codeRegions)) return match;
       if (!/\\\w|\^/.test(body)) return match; // not math-looking
-      return `$$\n${body.trim()}\n$$`;
+      // Keep any prefix (e.g. "**p**:", "Set p =", "- ") on its own line so the
+      // $$...$$ stays a remark-math flow block at column 0.
+      const prefixTrimmed = prefix.replace(/\s+$/, "");
+      return prefixTrimmed
+        ? `${prefixTrimmed}\n$$\n${body.trim()}\n$$`
+        : `$$\n${body.trim()}\n$$`;
     });
   }
 
