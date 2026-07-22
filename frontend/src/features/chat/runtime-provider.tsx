@@ -592,6 +592,7 @@ function ThreadHistoryProvider({
   const history = useMemo<ThreadHistoryAdapter>(
     () => ({
       async load() {
+        try {
         const { remoteId } = aui.threadListItem().getState();
         if (!remoteId) {
           return { messages: [] };
@@ -662,6 +663,13 @@ function ThreadHistoryProvider({
           };
         }
         return ExportedMessageRepository.fromArray(msgs.map(toThreadMessage));
+        } catch (err) {
+          console.error("[history] load failed:", err);
+          toast.error("Failed to load messages", {
+            description: err instanceof Error ? err.message : String(err),
+          });
+          return { messages: [] };
+        }
       },
 
       async append({ parentId, message }: ExportedMessageRepositoryItem) {
