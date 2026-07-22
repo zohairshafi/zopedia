@@ -606,9 +606,12 @@ function ThreadHistoryProvider({
           ? []
           : await db.messages.where("threadId").equals(remoteId).toArray();
 
-        // Sync from server if local is empty or stale (server has more messages)
+        // Sync from server if local is empty or thread was previously synced.
+        // We can't rely on messageCount alone — it can be stale (set before the
+        // latest append completed). Always re-fetch for synced threads so messages
+        // from other clients (or the server web app) aren't missed.
         const thread = await db.threads.get(remoteId);
-        if (msgs.length === 0 || ((thread?.messageCount ?? 0) > msgs.length)) {
+        if (msgs.length === 0 || thread?.syncedFromServer) {
           await syncThreadMessagesFromServer(remoteId);
           const postSyncCount = await db.messages.count();
           msgs = postSyncCount === 0

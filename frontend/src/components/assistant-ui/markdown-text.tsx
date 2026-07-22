@@ -11,13 +11,12 @@ import { INTERNAL, useMessagePartText } from "@assistant-ui/react";
 import { Copy02Icon, Tick02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { createCodePlugin } from "./code-plugin";
+import { createMathPlugin } from "@streamdown/math";
 import { mermaid } from "@streamdown/mermaid";
 import { DownloadIcon, Maximize2Icon, Minimize2Icon, ChevronDownIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Block, type BlockProps, Streamdown } from "streamdown";
 import type { BundledTheme } from "shiki";
-import remarkMath from "remark-math";
-import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
 import { AudioPlayer } from "./audio-player";
 import { unslothDarkTheme, unslothLightTheme } from "./code-themes";
@@ -28,8 +27,7 @@ const SHIKI_THEMES = [
   unslothDarkTheme,
 ] as unknown as [BundledTheme, BundledTheme];
 
-const remarkMathPlugins = [[remarkMath, { singleDollarTextMath: true }]] as any;
-const rehypeKatexPlugins = [[rehypeKatex, { errorColor: "var(--color-muted-foreground)" }]] as any;
+const math = createMathPlugin({ singleDollarTextMath: true });
 const code = createCodePlugin({
   themes: SHIKI_THEMES,
 });
@@ -477,9 +475,7 @@ const MarkdownTextImpl = () => {
       <Streamdown
         mode="streaming"
         isAnimating={status.type === "running"}
-        plugins={{ code, mermaid }}
-        remarkPlugins={remarkMathPlugins}
-        rehypePlugins={rehypeKatexPlugins}
+        plugins={{ code, math, mermaid }}
         components={STREAMDOWN_COMPONENTS}
         controls={{
           code: false,
