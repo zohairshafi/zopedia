@@ -570,7 +570,7 @@ export function ChatPage(): ReactElement {
       v = { mode: "compare", pairId: search.compare };
     } else if (search.thread) {
       v = { mode: "single", threadId: search.thread };
-    } else if (activeThreadId && !activeThreadId.startsWith("__LOCALID_")) {
+    } else if (activeThreadId) {
       v = { mode: "single", threadId: activeThreadId };
     } else {
       v = { mode: "single", newThreadNonce: search.new || fallbackNonce.current };

@@ -163,5 +163,17 @@ export function preprocessLaTeX(content: string): string {
     });
   }
 
+  // 5. Clean up stray backslashes on their own line. These are remnants of
+  //    \[...\] where the opening/closing backslash ended up on a different
+  //    line than its bracket (e.g. "\\\n\[ ... \]\n\\" after markdown
+  //    splitting). A lone backslash has no legitimate meaning outside math
+  //    mode, so it's safe to remove.
+  if (out.includes("\\")) {
+    const codeRegions = findCodeBlockRegions(out);
+    out = out.replace(/^\\[ \t]*$/gm, (match, offset) =>
+      isInCodeBlock(offset, codeRegions) ? match : "",
+    );
+  }
+
   return out;
 }
