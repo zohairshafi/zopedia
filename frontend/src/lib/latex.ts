@@ -168,11 +168,12 @@ export function preprocessLaTeX(content: string): string {
   //    prose, e.g. "Result: [ X = [4, -2i, 0, 2i] ] Notice...". The bracket-
   //    balanced regex handles one level of nesting. Gated on math content
   //    AND minimum length so short citations like [1] are left alone.
+  //    Excludes [...] preceded by a word char or } — those are LaTeX optional
+  //    arguments like \includegraphics[width=...] or \frac{1}{2}[...].
   if (out.includes("[")) {
     const codeRegions = findCodeBlockRegions(out);
-    // Match [...], allowing one level of nested [...], not preceded by \,
-    // not followed by ( (markdown links).
-    const INLINE_BARE_RE = /(^|[^\n\\\[])(\[(?:[^\[\]]|\[[^\[\]]*\])+\])(?!\()/gm;
+    // Lead: must not be preceded by \, word char, or } (LaTeX command args)
+    const INLINE_BARE_RE = /(^|[^\n\\\[\w\}])(\[(?:[^\[\]]|\[[^\[\]]*\])+\])(?!\()/gm;
     out = out.replace(INLINE_BARE_RE, (match, lead, bracketBody, offset) => {
       // offset is for the full match; bracketBody starts after `lead`
       const bracketOffset = offset + lead.length;
