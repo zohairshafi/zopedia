@@ -360,10 +360,16 @@ function cloneAttachments(
 }
 
 function toThreadMessage(m: MessageRecord): ThreadMessage {
-  const content =
-    Array.isArray(m.content) && m.content.length > 0
-      ? cloneContent(m.content)
-      : [{ type: "text" as const, text: "" }];
+  const raw: unknown = m.content;
+  let content: ThreadMessage["content"];
+  if (Array.isArray(raw) && raw.length > 0) {
+    content = cloneContent(raw);
+  } else if (typeof raw === "string" && (raw as string).trim()) {
+    // Handle legacy string content (assistant-ui allows string or array)
+    content = [{ type: "text" as const, text: raw as string }];
+  } else {
+    content = [{ type: "text" as const, text: "" }];
+  }
 
   if (m.role === "user") {
     return {
@@ -675,22 +681,31 @@ function ThreadHistoryProvider({
           existing?.createdAt ??
           message.createdAt?.getTime?.() ??
           Date.now();
-        await db.messages.put({
-          id: message.id,
-          threadId: remoteId,
-          parentId: parentId ?? null,
-          role: message.role,
-          content,
-          ...(attachments.length > 0 && { attachments }),
-          ...(custom && Object.keys(custom).length > 0 && { metadata: custom }),
-          createdAt,
-        });
+        try {
+          await db.messages.put({
+            id: message.id,
+            threadId: remoteId,
+            parentId: parentId ?? null,
+            role: message.role,
+            content,
+            ...(attachments.length > 0 && { attachments }),
+            ...(custom && Object.keys(custom).length > 0 && { metadata: custom }),
+            createdAt,
+          });
 
-        // Bump thread to top of recents
-        await db.threads.update(remoteId, { createdAt: Date.now() });
+          // Bump thread to top of recents + update message count
+          const newCount = existing ? (thread?.messageCount ?? 0) : (thread?.messageCount ?? 0) + 1;
+          await db.threads.update(remoteId, { createdAt: Date.now(), messageCount: newCount });
 
-        // Debounced server sync
-        debouncedSaveThreadToServer(remoteId);
+          // Debounced server sync
+          debouncedSaveThreadToServer(remoteId);
+        } catch (err) {
+          console.error("[history] append failed:", err);
+          toast.error("Failed to save message", {
+            description: err instanceof Error ? err.message : String(err),
+          });
+          throw err; // Re-throw so assistant-ui knows the append failed
+        }
       },
     }),
     [aui],

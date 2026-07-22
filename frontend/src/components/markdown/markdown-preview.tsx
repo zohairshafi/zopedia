@@ -3,15 +3,17 @@
 
 import { cn } from "@/lib/utils";
 import { code } from "@streamdown/code";
-import { createMathPlugin } from "@streamdown/math";
 import { mermaid } from "@streamdown/mermaid";
 import { memo, type ReactElement } from "react";
 import { Streamdown } from "streamdown";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
 import { preprocessLaTeX } from "@/lib/latex";
 
-const math = createMathPlugin({ singleDollarTextMath: true });
-const MARKDOWN_PLUGINS = { code, math, mermaid } as const;
+const remarkMathPlugins = [[remarkMath, { singleDollarTextMath: true }]] as any;
+const rehypeKatexPlugins = [[rehypeKatex, { errorColor: "var(--color-muted-foreground)" }]] as any;
+const MARKDOWN_PLUGINS = { code, mermaid } as const;
 
 type MarkdownPreviewProps = {
   markdown: string;
@@ -39,6 +41,8 @@ function MarkdownPreviewImpl({
       <Streamdown
         mode="static"
         plugins={MARKDOWN_PLUGINS}
+        remarkPlugins={remarkMathPlugins}
+        rehypePlugins={rehypeKatexPlugins}
         controls={false}
         className={markdownClassName}
       >
