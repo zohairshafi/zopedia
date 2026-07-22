@@ -153,7 +153,7 @@ export function preprocessLaTeX(content: string): string {
     const codeRegions = findCodeBlockRegions(out);
     out = out.replace(BARE_DISPLAY_LINE_RE, (match, prefix, body, offset) => {
       if (isInCodeBlock(offset, codeRegions)) return match;
-      if (!/\\\w|\^/.test(body)) return match; // not math-looking
+      if (!/\\\w|\^|\d/.test(body)) return match; // not math-looking
       // Keep any prefix (e.g. "**p**:", "Set p =", "- ") on its own line so the
       // $$...$$ stays a remark-math flow block at column 0.
       const prefixTrimmed = prefix.replace(/\s+$/, "");
@@ -163,7 +163,29 @@ export function preprocessLaTeX(content: string): string {
     });
   }
 
-  // 5. Clean up stray backslashes on their own line. These are remnants of
+  // 5. Handle inline bare "[ ... ]" math placed mid-sentence (not on its own
+  //    line). These are display-math blocks that the LLM placed inline with
+  //    prose, e.g. "Result: [ X = [4, -2i, 0, 2i] ] Notice...". The bracket-
+  //    balanced regex handles one level of nesting. Gated on math content
+  //    AND minimum length so short citations like [1] are left alone.
+  if (out.includes("[")) {
+    const codeRegions = findCodeBlockRegions(out);
+    // Match [...], allowing one level of nested [...], not preceded by \,
+    // not followed by ( (markdown links).
+    const INLINE_BARE_RE = /(^|[^\n\\\[])(\[(?:[^\[\]]|\[[^\[\]]*\])+\])(?!\()/gm;
+    out = out.replace(INLINE_BARE_RE, (match, lead, bracketBody, offset) => {
+      // offset is for the full match; bracketBody starts after `lead`
+      const bracketOffset = offset + lead.length;
+      if (isInCodeBlock(bracketOffset, codeRegions)) return match;
+      // Extract body inside brackets
+      const inner = bracketBody.slice(1, -1).trim();
+      if (inner.length < 5) return match;
+      if (!/\\\w|\^|\d/.test(inner)) return match;
+      return `${lead}$${inner}$`;
+    });
+  }
+
+  // 6. Clean up stray backslashes on their own line. These are remnants of
   //    \[...\] where the opening/closing backslash ended up on a different
   //    line than its bracket (e.g. "\\\n\[ ... \]\n\\" after markdown
   //    splitting). A lone backslash has no legitimate meaning outside math

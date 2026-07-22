@@ -341,6 +341,8 @@ async function syncThreadToServer(threadId: string): Promise<void> {
       syncedMessageIds.add(m.id);
     }
   }
+  console.info("[sync] thread %s: sent %d msgs, confirmed %d, total synced %d",
+    threadId, toSend.length, confirmedSendIds.length, syncedMessageIds.size);
 }
 
 export async function updateThreadTitleOnServer(threadId: string, title: string): Promise<void> {
