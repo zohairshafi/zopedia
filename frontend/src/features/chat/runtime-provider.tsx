@@ -648,12 +648,25 @@ function ThreadHistoryProvider({
         // Fall back to fromArray for fully legacy threads.
         const hasParentIds = msgs.some((m) => "parentId" in m);
         if (hasParentIds) {
+          // Validate that every parentId reference resolves to a message
+          // that's actually in the loaded set.  Orphan references (e.g. from
+          // messages whose parent was deleted) crash assistant-ui's
+          // MessageRepository with "Parent message not found".
+          const allIds = new Set(msgs.map((m) => m.id));
           let previousId: string | null = null;
           return {
             messages: msgs.map((m) => {
-              const parentId = "parentId" in m
-                ? (m.parentId ?? null)
-                : previousId;
+              let parentId: string | null;
+              if ("parentId" in m) {
+                parentId = m.parentId && allIds.has(m.parentId) ? m.parentId : null;
+              } else {
+                parentId = previousId;
+              }
+              // If the stored parent is missing, chain to the previous
+              // message so the conversation still loads as a linear thread.
+              if (parentId === null && previousId !== null) {
+                parentId = previousId;
+              }
               previousId = m.id;
               return {
                 parentId,
