@@ -83,7 +83,7 @@ app = modal.App("zopedia", image=image)
 @app.function(
     volumes={ZK_DATA: wiki_volume} if wiki_volume else {},
     secrets=[modal.Secret.from_name("zopedia-env")],
-    cpu=4,
+    cpu=2,
     scaledown_window=300,
     timeout=7200,
 )
