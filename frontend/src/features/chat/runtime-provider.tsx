@@ -657,19 +657,21 @@ function ThreadHistoryProvider({
           // that's actually in the loaded set.  Orphan references (e.g. from
           // messages whose parent was deleted) crash assistant-ui's
           // MessageRepository with "Parent message not found".
+          // Messages with an explicit parentId (even null) keep their stored
+          // value — null means "root sibling" which preserves legit branches
+          // (research regenerations, retries). Only legacy messages WITHOUT
+          // a parentId field are chained linearly via previousId.
           const allIds = new Set(msgs.map((m) => m.id));
           let previousId: string | null = null;
           return {
             messages: msgs.map((m) => {
               let parentId: string | null;
               if ("parentId" in m) {
+                // Stored parentId: use it if valid, otherwise treat as root.
+                // Don't chain to previousId — that would flatten branches.
                 parentId = m.parentId && allIds.has(m.parentId) ? m.parentId : null;
               } else {
-                parentId = previousId;
-              }
-              // If the stored parent is missing, chain to the previous
-              // message so the conversation still loads as a linear thread.
-              if (parentId === null && previousId !== null) {
+                // Legacy message (no parentId field): infer linear order.
                 parentId = previousId;
               }
               previousId = m.id;
