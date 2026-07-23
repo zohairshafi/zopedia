@@ -17,6 +17,10 @@ export interface ThreadRecord {
   createdAt: number;
   messageCount?: number;
   syncedFromServer?: boolean;
+  /** Locally-deleted message ids. Downsync skips re-inserting these so a
+   *  message deleted on one client doesn't reappear when the (fire-and-forget)
+   *  server DELETE hasn't landed yet. Pruned once the id is gone server-side. */
+  deletedMessageIds?: string[];
   /** The auth subject under which this thread was last synced from the server.
    *  Used by syncThreadListFromServer to scope its cleanup — threads synced
    *  under a different subject are left untouched to avoid wrongful deletion

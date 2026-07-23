@@ -26,17 +26,16 @@ const INLINE_BRACKET_RE = /\\\(([\s\S]*?)\\\)/g;
 // (\begin{...}...\end{...}) is unambiguously math, so wrap those blocks in
 // $$...$$. Line-delimited ($$\n ... \n$$) so remark-math's flow parser accepts
 // the multi-line content; the surrounding bare [ ] are consumed.
+//
+// NOTE: we intentionally do NOT try to wrap bare "[ ... ]" math that lacks a
+// \begin{} env. Bare brackets are also valid markdown (links, citations,
+// numbered references, LaTeX optional args) and no content gate reliably
+// separates math from prose — every such heuristic we tried either corrupted
+// prose (e.g. "[Smith 2023]") or re-entered math already wrapped by the
+// \[...\]/\(...\) passes (e.g. "\[ x \in [0,100] \]"). The \[...\] and \(...\)
+// delimiters below cover standard LLM math output; rare bare-bracket math
+// renders as plain text, which is far less harmful than corrupted prose.
 const DISPLAY_ENV_BRACKET_RE = /(^|\n)([ \t]*)\[\s*(\\begin\{[a-zA-Z*]+\}[\s\S]*?\\end\{[a-zA-Z*]+\})\s*\]/g;
-
-// Catch-all for the same models' bare "[ ... ]" display math that does NOT use
-// a \begin{} env — e.g. "[ d(\mathbf{p}) = \sqrt{\sum ...} ]". We allow an
-// arbitrary non-bracket prefix before the "[" (real LLM output usually labels
-// it: "**p**: [...]", "Set p = [...]", "- [...]"), balanced to a "]" at the
-// end of the line, and only wrap when the content looks like math (a LaTeX
-// command \w or a superscript ^). The closing-]-at-EOL anchor + the math-body
-// gate are what exclude prose brackets and markdown links [a](b); the prefix
-// is kept on its own line so remark-math still sees $$...$$ as a flow block.
-const BARE_DISPLAY_LINE_RE = /^([^\n[\]]*?)\[([\s\S]*?)\][ \t]*$/gm;
 
 /**
  * Find regions inside code blocks (``` ... ``` and ` ... `) so we can skip them.
@@ -145,48 +144,7 @@ export function preprocessLaTeX(content: string): string {
     });
   }
 
-  // 4. Wrap bare "[ ... ]" display math on its own line(s) WITHOUT a \begin{}
-  //    env (e.g. "[ d(\mathbf{p}) = \sqrt{\sum ...} ]"). Only fires when the
-  //    content looks like math (\command or ^), so prose brackets are left
-  //    alone. Runs after the \begin{} pass so env blocks are already handled.
-  if (out.includes("[")) {
-    const codeRegions = findCodeBlockRegions(out);
-    out = out.replace(BARE_DISPLAY_LINE_RE, (match, prefix, body, offset) => {
-      if (isInCodeBlock(offset, codeRegions)) return match;
-      if (!/\\\w|\^|\d/.test(body)) return match; // not math-looking
-      // Keep any prefix (e.g. "**p**:", "Set p =", "- ") on its own line so the
-      // $$...$$ stays a remark-math flow block at column 0.
-      const prefixTrimmed = prefix.replace(/\s+$/, "");
-      return prefixTrimmed
-        ? `${prefixTrimmed}\n$$\n${body.trim()}\n$$`
-        : `$$\n${body.trim()}\n$$`;
-    });
-  }
-
-  // 5. Handle inline bare "[ ... ]" math placed mid-sentence (not on its own
-  //    line). These are display-math blocks that the LLM placed inline with
-  //    prose, e.g. "Result: [ X = [4, -2i, 0, 2i] ] Notice...". The bracket-
-  //    balanced regex handles one level of nesting. Gated on math content
-  //    AND minimum length so short citations like [1] are left alone.
-  //    Excludes [...] preceded by a word char or } — those are LaTeX optional
-  //    arguments like \includegraphics[width=...] or \frac{1}{2}[...].
-  if (out.includes("[")) {
-    const codeRegions = findCodeBlockRegions(out);
-    // Lead: must not be preceded by \, word char, or } (LaTeX command args)
-    const INLINE_BARE_RE = /(^|[^\n\\\[\w\}])(\[(?:[^\[\]]|\[[^\[\]]*\])+\])(?!\()/gm;
-    out = out.replace(INLINE_BARE_RE, (match, lead, bracketBody, offset) => {
-      // offset is for the full match; bracketBody starts after `lead`
-      const bracketOffset = offset + lead.length;
-      if (isInCodeBlock(bracketOffset, codeRegions)) return match;
-      // Extract body inside brackets
-      const inner = bracketBody.slice(1, -1).trim();
-      if (inner.length < 5) return match;
-      if (!/\\\w|\^|\d/.test(inner)) return match;
-      return `${lead}$${inner}$`;
-    });
-  }
-
-  // 6. Clean up stray backslashes on their own line. These are remnants of
+  // 4. Clean up stray backslashes on their own line. These are remnants of
   //    \[...\] where the opening/closing backslash ended up on a different
   //    line than its bracket (e.g. "\\\n\[ ... \]\n\\" after markdown
   //    splitting). A lone backslash has no legitimate meaning outside math

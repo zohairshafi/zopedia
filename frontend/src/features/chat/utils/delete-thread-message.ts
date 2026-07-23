@@ -115,13 +115,37 @@ export async function deleteThreadMessage(args: {
   const next = repo.export();
   if (remoteId) {
     await syncExportedRepositoryToDexie(remoteId, next);
+
+    // Record a tombstone BEFORE the server delete so a reload (or a downsync)
+    // can't resurrect this message if the fire-and-forget server DELETE hasn't
+    // landed yet. Read-modify-write the array on the thread row.
+    const t = await db.threads.get(remoteId);
+    if (t) {
+      const tomb = Array.from(new Set([...(t.deletedMessageIds ?? []), messageId]));
+      await db.threads.update(remoteId, { deletedMessageIds: tomb });
+    }
+  }
+  // Update the UI immediately (don't block on the network delete).
+  thread.import(next);
+
+  if (remoteId) {
     // Propagate the deletion to the server via the dedicated per-message
     // delete endpoint — NOT a full upsert. The upsert path (DELETE-all +
     // INSERT-remaining) would wipe any messages appended concurrently by
     // another browser; the single-message delete removes only this id.
-    deleteMessageFromServer(remoteId, messageId).catch((err) => {
-      console.error("[delete] deleteMessageFromServer failed:", err);
-    });
+    // On confirmed success, clear the tombstone so it can't linger.
+    deleteMessageFromServer(remoteId, messageId)
+      .then(async (ok) => {
+        if (!ok) return;
+        const after = await db.threads.get(remoteId);
+        if (after?.deletedMessageIds?.length) {
+          await db.threads.update(remoteId, {
+            deletedMessageIds: after.deletedMessageIds.filter((id) => id !== messageId),
+          });
+        }
+      })
+      .catch((err) => {
+        console.error("[delete] deleteMessageFromServer failed:", err);
+      });
   }
-  thread.import(next);
 }

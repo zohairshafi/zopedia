@@ -613,7 +613,12 @@ function ThreadHistoryProvider({
         // from other clients (or the server web app) aren't missed.
         const thread = await db.threads.get(remoteId);
         if (msgs.length === 0 || thread?.syncedFromServer) {
-          await syncThreadMessagesFromServer(remoteId);
+          // Time-bound the server fetch so a stalled connection can't pin the
+          // thread in its loading state indefinitely; on timeout we fall
+          // through to the locally-cached messages. Swallow the abort.
+          await syncThreadMessagesFromServer(remoteId, {
+            signal: AbortSignal.timeout(4000),
+          }).catch(() => {});
           const postSyncCount = await db.messages.count();
           msgs = postSyncCount === 0
             ? []

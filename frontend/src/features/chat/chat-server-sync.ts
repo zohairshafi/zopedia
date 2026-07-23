@@ -162,9 +162,15 @@ async function fetchServerThreads(): Promise<{ threads: Array<{ id: string; titl
   }
 }
 
-async function fetchServerThread(threadId: string): Promise<{ thread: any; messages: any[] } | null> {
+async function fetchServerThread(
+  threadId: string,
+  opts?: { signal?: AbortSignal },
+): Promise<{ thread: any; messages: any[] } | null> {
   try {
-    const res = await authFetch(`/api/chat/threads/${encodeURIComponent(threadId)}`, { cache: "no-store" });
+    const res = await authFetch(`/api/chat/threads/${encodeURIComponent(threadId)}`, {
+      cache: "no-store",
+      ...(opts?.signal ? { signal: opts.signal } : {}),
+    });
     if (!res.ok) return null;
     return await res.json();
   } catch {
@@ -376,7 +382,7 @@ export async function deleteMessageFromServer(threadId: string, messageId: strin
   try {
     const res = await authFetch(
       `/api/chat/threads/${encodeURIComponent(threadId)}/messages/${encodeURIComponent(messageId)}`,
-      { method: "DELETE" },
+      { method: "DELETE", keepalive: true },
     );
     return res.ok;
   } catch (err) {
@@ -469,9 +475,18 @@ function parseStoredContent(content: unknown): unknown {
   }
 }
 
-export async function syncThreadMessagesFromServer(threadId: string): Promise<void> {
-  const result = await fetchServerThread(threadId);
+export async function syncThreadMessagesFromServer(
+  threadId: string,
+  opts?: { signal?: AbortSignal },
+): Promise<void> {
+  const result = await fetchServerThread(threadId, opts);
   if (!result?.messages?.length) return;
+
+  // Tombstones: locally-deleted message ids that must NOT be resurrected by a
+  // downsync. The server DELETE may not have landed yet (fire-and-forget), so
+  // without this the deleted message would reappear on every reload.
+  const thread = await db.threads.get(threadId);
+  const tombstones = new Set(thread?.deletedMessageIds ?? []);
 
   const msgCount = await db.messages.count();
   const existingIds = new Set(
@@ -479,7 +494,10 @@ export async function syncThreadMessagesFromServer(threadId: string): Promise<vo
       ? []
       : (await db.messages.where("threadId").equals(threadId).toArray()).map((m) => m.id),
   );
+  const serverIds = new Set<string>();
   for (const msg of result.messages) {
+    serverIds.add(msg.id);
+    if (tombstones.has(msg.id)) continue; // don't resurrect a locally-deleted message
     if (!existingIds.has(msg.id)) {
       await db.messages.put({
         id: msg.id,
@@ -494,6 +512,15 @@ export async function syncThreadMessagesFromServer(threadId: string): Promise<vo
     }
     // Mark server-fetched messages as synced so we don't re-send them
     syncedMessageIds.add(msg.id);
+  }
+
+  // Prune tombstones whose ids are gone from the server (the remote delete
+  // eventually succeeded) so the list can't grow unbounded.
+  if (thread?.deletedMessageIds?.length) {
+    const remaining = thread.deletedMessageIds.filter((id) => serverIds.has(id));
+    if (remaining.length !== thread.deletedMessageIds.length) {
+      await db.threads.update(threadId, { deletedMessageIds: remaining });
+    }
   }
 }
 
