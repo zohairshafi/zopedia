@@ -16,7 +16,7 @@ import { Settings05Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Tooltip, TooltipContent } from "@/components/ui/tooltip";
 import { Tooltip as TooltipPrimitive } from "radix-ui";
-import { PencilIcon } from "lucide-react";
+import { PencilIcon, ArrowUpIcon } from "lucide-react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import {
   type ReactElement,
@@ -975,6 +975,24 @@ export function ChatPage(): ReactElement {
               </TooltipPrimitive.Trigger>
               <TooltipContent side="bottom" sideOffset={6}>
                 {autoTitle ? "Auto-title on" : "Auto-title off"}
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipPrimitive.Trigger asChild>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const vp = document.querySelector(".aui-thread-viewport");
+                    if (vp) vp.scrollTo({ top: 0, behavior: "smooth" });
+                  }}
+                  className="flex h-[34px] w-[34px] items-center justify-center rounded-[8px] text-[#383835] dark:text-[#c7c7c4] transition-colors hover:bg-[#ececec] dark:hover:bg-[#2e3035] hover:text-black dark:hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  aria-label="Scroll to top"
+                >
+                  <ArrowUpIcon className="size-4" />
+                </button>
+              </TooltipPrimitive.Trigger>
+              <TooltipContent side="bottom" sideOffset={6}>
+                Scroll to top
               </TooltipContent>
             </Tooltip>
             {!settingsOpen && (
