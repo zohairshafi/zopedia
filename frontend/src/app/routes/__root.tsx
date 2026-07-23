@@ -22,6 +22,7 @@ import { LoadingScreen } from "@/components/loading-screen";
 import { clearClientAuthLoading, clientAuthLoadingStore } from "../auth-guards";
 import { disconnectFromServer } from "@/features/connect";
 import { useServerHealthPoll, serverHealthStore, checkHealthNow } from "@/hooks/use-server-health";
+import { useIosScrollToTop } from "@/hooks/use-ios-scroll-to-top";
 // The healthUrl helper is re-implemented locally to avoid importing a module-internal
 // function. It reads the server URL directly from localStorage so the initial health
 // check and the periodic poll both use the same URL construction.
@@ -115,6 +116,7 @@ function RootLayout() {
   const isChatRoute = pathname.startsWith("/chat");
   const { pinned, setPinned, togglePinned } = useSidebarPin();
   const navigate = useNavigate();
+  useIosScrollToTop();
 
   // Client mode: while requireAuth() is waiting for the server to respond
   // (e.g. cold Modal startup), show a loading screen.
