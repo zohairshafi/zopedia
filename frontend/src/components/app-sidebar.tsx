@@ -934,32 +934,26 @@ export function AppSidebar() {
         onAfterShutdown={undefined}
       />
     )}
-    {isServerMode() && (
-      <WikiBehaviourDialog
-        open={wikiBehaviourOpen}
-        onOpenChange={setWikiBehaviourOpen}
-      />
-    )}
+    <WikiBehaviourDialog
+      open={wikiBehaviourOpen}
+      onOpenChange={setWikiBehaviourOpen}
+    />
     <WikiUploadDialog
       open={wikiUploadOpen}
       onOpenChange={setWikiUploadOpen}
     />
-    {isServerMode() && (
-      <WikiDataDialog
-        open={wikiDataOpen}
-        onOpenChange={setWikiDataOpen}
-      />
-    )}
+    <WikiDataDialog
+      open={wikiDataOpen}
+      onOpenChange={setWikiDataOpen}
+    />
     <WikiFileBrowser
       open={wikiFilesOpen}
       onOpenChange={setWikiFilesOpen}
     />
-    {isServerMode() && (
-      <ScheduledMaintenanceDialog
-        open={scheduledMaintenanceOpen}
-        onOpenChange={setScheduledMaintenanceOpen}
-      />
-    )}
+    <ScheduledMaintenanceDialog
+      open={scheduledMaintenanceOpen}
+      onOpenChange={setScheduledMaintenanceOpen}
+    />
     </>
   );
 }
