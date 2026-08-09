@@ -17,7 +17,7 @@ import { isClientMode, SERVER_URL_KEY } from "@/lib/mode";
 // that hits the local server) doesn't produce false positives.
 // ---------------------------------------------------------------------------
 
-const POLL_INTERVAL_MS = 15_000;
+const POLL_INTERVAL_MS = 300_000;
 const REQUEST_TIMEOUT_MS = 5_000;
 const FAILURES_BEFORE_UNREACHABLE = 2;
 
@@ -137,7 +137,7 @@ const FAST_POLL_MS = 5_000;
  * Start periodic server health checks. Only active in client mode —
  * in server/desktop mode this is a no-op (the backend is co-located).
  *
- * When the server is reachable we poll every POLL_INTERVAL_MS (15 s).
+ * When the server is reachable we poll every POLL_INTERVAL_MS (5 min).
  * Once it's marked unreachable we switch to FAST_POLL_MS (5 s) so the
  * banner disappears quickly after connectivity returns.
  */
