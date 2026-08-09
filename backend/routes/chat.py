@@ -66,6 +66,12 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# Background tasks spawned during a streaming request that must outlive the
+# request (e.g. continuing a disconnected generation and persisting it).  A
+# bare asyncio.create_task() can be garbage-collected once the handler returns,
+# cancelling the task; keeping a strong reference here prevents that.
+_background_tasks: set[asyncio.Task] = set()
+
 _LLM_TIMEOUT_SECONDS = int(os.getenv("ZOPEDIA_LLM_TIMEOUT_SECONDS", "300"))
 _LLM_MODEL = os.getenv("ZOPEDIA_LLM_MODEL", "").strip()
 _WIKI_TOOL_RETRIEVAL = os.getenv("ZOPEDIA_WIKI_TOOL_RETRIEVAL", "true").strip().lower() in {"1", "true", "yes", "on"}
@@ -441,6 +447,10 @@ async def openai_chat_completions(request: Request):
     enabled_tools: list[str] = body.get("enabled_tools") or []
     reasoning_effort = body.get("reasoning_effort")  # "low" | "medium" | "high" | "max"
     enable_thinking = body.get("enable_thinking")     # bool | None
+    # Thread id + expected assistant message id, used to persist a completed
+    # generation server-side when the client disconnects mid-stream.
+    session_id = body.get("session_id") or None
+    assistant_message_id = body.get("assistant_message_id") or None
 
     # Build thinking param for upstream API.  When reasoning_effort is
     # set the frontend wants effort-based reasoning; otherwise a simple
@@ -615,56 +625,150 @@ async def openai_chat_completions(request: Request):
 
         if stream:
             # ── Streaming with tool visibility ──────────────────────
-            async def event_generator():
+            # The generation runs in a background task so it survives a client
+            # disconnect (minimize, backgrounded iOS app, network blip).  If the
+            # client goes away before the stream completes, the background task
+            # finishes the generation and persists the assistant message to the
+            # thread so it can be presented later via the existing thread sync.
+            persist_username = None
+            if session_id:
+                try:
+                    _require_subj = getattr(request.app.state, "require_valid_subject", None)
+                    if _require_subj is not None:
+                        persist_username = await _require_subj(request)
+                except Exception:
+                    persist_username = None  # never fail the stream over persistence
+
+            queue: asyncio.Queue = asyncio.Queue()  # unbounded
+            client_gone = {"gone": False}
+            consumer_done = asyncio.Event()
+
+            async def _run_generation():
                 chunk_id = f"chatcmpl-{int(time.time())}"
                 created = int(time.time())
-
-                # Phase 1: tool resolution with progress events
+                acc_text: list[str] = []
+                acc_reasoning: list[str] = []
+                succeeded = False
                 try:
-                    async for evt in _resolve_tool_calls_stream(messages, wiki_tools, resolved_model, thinking=thinking):
-                        etype = evt["type"]
-                        if etype == "tool_status":
-                            yield f"data: {json.dumps({'type': 'tool_status', 'content': evt['text']})}\n\n"
-                        elif etype == "tool_start":
-                            yield f"data: {json.dumps({'type': 'tool_start', 'tool_name': evt['tool_name'], 'tool_call_id': evt['tool_call_id'], 'arguments': evt.get('arguments', {})})}\n\n"
-                        elif etype == "tool_end":
-                            yield f"data: {json.dumps({'type': 'tool_end', 'tool_name': evt['tool_name'], 'tool_call_id': evt['tool_call_id'], 'result': evt.get('result', '')})}\n\n"
+                    # Phase 1: tool resolution with progress events
+                    try:
+                        async for evt in _resolve_tool_calls_stream(messages, wiki_tools, resolved_model, thinking=thinking):
+                            etype = evt["type"]
+                            if etype == "tool_status":
+                                _payload = json.dumps({'type': 'tool_status', 'content': evt['text']})
+                            elif etype == "tool_start":
+                                _payload = json.dumps({'type': 'tool_start', 'tool_name': evt['tool_name'], 'tool_call_id': evt['tool_call_id'], 'arguments': evt.get('arguments', {})})
+                            elif etype == "tool_end":
+                                _payload = json.dumps({'type': 'tool_end', 'tool_name': evt['tool_name'], 'tool_call_id': evt['tool_call_id'], 'result': evt.get('result', '')})
+                            else:
+                                continue
+                            if not client_gone["gone"]:
+                                await queue.put(f"data: {_payload}\n\n")
 
-                    # Pop any non-tool-call assistant message (narration/planning text).
-                    if messages and messages[-1].get("role") == "assistant" and messages[-1].get("content") and not messages[-1].get("tool_calls"):
-                        messages.pop()
-                    # Add instruction to break the model out of tool-calling mode and force synthesis.
-                    # Marked so we can remove it after streaming — it should not persist into the next turn.
-                    messages.append({"role": "user", "content": CHAT_SYNTHESIS_PROMPT, "_ephemeral": True})
+                        # Pop any non-tool-call assistant message (narration/planning text).
+                        if messages and messages[-1].get("role") == "assistant" and messages[-1].get("content") and not messages[-1].get("tool_calls"):
+                            messages.pop()
+                        # Add instruction to break the model out of tool-calling mode and force synthesis.
+                        # Marked so we can remove it after streaming — it should not persist into the next turn.
+                        messages.append({"role": "user", "content": CHAT_SYNTHESIS_PROMPT, "_ephemeral": True})
+                    except Exception as exc:
+                        logger.warning("Tool-calling retrieval failed, falling back: %s", exc)
+                        if not client_gone["gone"]:
+                            await queue.put(f"data: {json.dumps({'type': 'tool_status', 'content': f'Error: {exc}'})}\n\n")
+                        if query:
+                            fallback_msgs, _ = _inject_rag_context(messages, query)
+                            messages.clear()
+                            messages.extend(fallback_msgs)
+
+                    # Phase 2: always stream the final answer from the API.
+                    # This ensures proper token-by-token output with full CoT visibility
+                    # and prevents hallucinated/narration text from being treated as the answer.
+                    async for event in chat_completions_stream(messages, model=resolved_model, temperature=temperature, max_tokens=max_tokens, tools=None, tool_choice=None, thinking=thinking):
+                        if event["type"] == "reasoning":
+                            acc_reasoning.append(event["content"])
+                            if not client_gone["gone"]:
+                                await queue.put(f"data: {json.dumps({'id': chunk_id, 'object': 'chat.completion.chunk', 'created': created, 'model': resolved_model, 'choices': [{'index': 0, 'delta': {'reasoning_content': event['content']}, 'finish_reason': None}]})}\n\n")
+                        elif event["type"] == "text":
+                            acc_text.append(event["content"])
+                            if not client_gone["gone"]:
+                                await queue.put(f"data: {json.dumps({'id': chunk_id, 'object': 'chat.completion.chunk', 'created': created, 'model': resolved_model, 'choices': [{'index': 0, 'delta': {'content': event['content']}, 'finish_reason': None}]})}\n\n")
+                        elif event["type"] == "error":
+                            succeeded = False
+                            if not client_gone["gone"]:
+                                await queue.put(f"data: {json.dumps({'error': event['message']})}\n\n")
+                        elif event["type"] == "usage":
+                            if not client_gone["gone"]:
+                                await queue.put(f"data: {json.dumps({'id': chunk_id, 'object': 'chat.completion.chunk', 'created': created, 'model': resolved_model, 'choices': [], 'usage': event['usage']})}\n\n")
+                    # Remove ephemeral synthesis instruction so it doesn't leak into next turn.
+                    # chat_completions_stream appended the assistant answer to messages, so
+                    # messages[-1] is the answer, NOT the ephemeral prompt.  Search backwards.
+                    for i in range(len(messages) - 1, -1, -1):
+                        if messages[i].get("_ephemeral"):
+                            messages.pop(i)
+                            break
+
+                    if "".join(acc_text).strip():
+                        succeeded = True
+                except asyncio.CancelledError:
+                    raise
                 except Exception as exc:
-                    logger.warning("Tool-calling retrieval failed, falling back: %s", exc)
-                    yield f"data: {json.dumps({'type': 'tool_status', 'content': f'Error: {exc}'})}\n\n"
-                    if query:
-                        fallback_msgs, _ = _inject_rag_context(messages, query)
-                        messages.clear()
-                        messages.extend(fallback_msgs)
+                    logger.warning("Streaming generation failed: %s", exc)
+                    if not client_gone["gone"]:
+                        await queue.put(f"data: {json.dumps({'error': str(exc)})}\n\n")
 
-                # Phase 2: always stream the final answer from the API.
-                # This ensures proper token-by-token output with full CoT visibility
-                # and prevents hallucinated/narration text from being treated as the answer.
-                async for event in chat_completions_stream(messages, model=resolved_model, temperature=temperature, max_tokens=max_tokens, tools=None, tool_choice=None, thinking=thinking):
-                    if event["type"] == "reasoning":
-                        yield f"data: {json.dumps({'id': chunk_id, 'object': 'chat.completion.chunk', 'created': created, 'model': resolved_model, 'choices': [{'index': 0, 'delta': {'reasoning_content': event['content']}, 'finish_reason': None}]})}\n\n"
-                    elif event["type"] == "text":
-                        yield f"data: {json.dumps({'id': chunk_id, 'object': 'chat.completion.chunk', 'created': created, 'model': resolved_model, 'choices': [{'index': 0, 'delta': {'content': event['content']}, 'finish_reason': None}]})}\n\n"
-                    elif event["type"] == "error":
-                        yield f"data: {json.dumps({'error': event['message']})}\n\n"
-                    elif event["type"] == "usage":
-                        yield f"data: {json.dumps({'id': chunk_id, 'object': 'chat.completion.chunk', 'created': created, 'model': resolved_model, 'choices': [], 'usage': event['usage']})}\n\n"
-                # Remove ephemeral synthesis instruction so it doesn't leak into next turn.
-                # chat_completions_stream appended the assistant answer to messages, so
-                # messages[-1] is the answer, NOT the ephemeral prompt.  Search backwards.
-                for i in range(len(messages) - 1, -1, -1):
-                    if messages[i].get("_ephemeral"):
-                        messages.pop(i)
-                        break
+                await queue.put("data: [DONE]\n\n")
+                # Wait for the consumer to finish consuming or to disconnect.
+                await consumer_done.wait()
 
-                yield "data: [DONE]\n\n"
+                if client_gone["gone"] and succeeded and persist_username and session_id:
+                    full_text = "".join(acc_text).strip()
+                    full_reasoning = "".join(acc_reasoning).strip()
+                    try:
+                        from chat_history_store import append_thread_messages
+                        _now = datetime.now(timezone.utc).isoformat()
+                        msg_id = assistant_message_id or f"{session_id}-gen-{int(time.time())}"
+                        append_thread_messages(
+                            thread_id=session_id,
+                            username=persist_username,
+                            title=None,
+                            updated_at=_now,
+                            messages=[{
+                                "id": msg_id,
+                                "role": "assistant",
+                                "content": [{"type": "text", "text": full_text}],
+                                "reasoning_content": full_reasoning or None,
+                                "parent_id": None,
+                                "created_at": _now,
+                            }],
+                        )
+                        logger.info(
+                            "chat: persisted completed generation for thread %s (client disconnected)",
+                            session_id,
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            "chat: failed to persist disconnected generation for %s: %s",
+                            session_id, exc,
+                        )
+
+            task = asyncio.create_task(_run_generation())
+            _background_tasks.add(task)
+            task.add_done_callback(_background_tasks.discard)
+
+            async def event_generator():
+                try:
+                    while True:
+                        chunk = await queue.get()
+                        yield chunk
+                        if chunk == "data: [DONE]\n\n":
+                            break
+                except asyncio.CancelledError:
+                    # Client disconnected mid-stream — the background task keeps
+                    # running and will persist the completed generation.
+                    client_gone["gone"] = True
+                    raise
+                finally:
+                    consumer_done.set()
 
             return StreamingResponse(event_generator(), media_type="text/event-stream")
         else:
