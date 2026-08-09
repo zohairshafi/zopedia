@@ -696,8 +696,23 @@ function ThreadHistoryProvider({
         const { remoteId } = await aui.threadListItem().initialize();
         // Keep single-chat runtime state in sync once a new chat is first
         // persisted. Compare panes intentionally do not write global activeThreadId.
+        //
+        // IMPORTANT: skip __LOCALID_ ids (assistant-ui's new-chat ids).  The
+        // append handler fires on the FIRST message of a brand-new chat while
+        // the view is still in newThreadNonce mode.  If we set activeThreadId
+        // to the newly-initialized __LOCALID_ id, ChatPage re-derives the view
+        // as {mode:"single", threadId:"__LOCALID_x"}, which changes the
+        // SingleContent key ("single" → "__LOCALID_x") and REMOUNTS the whole
+        // runtime — aborting the in-flight stream, so the first response never
+        // renders (and the user has to hit Regenerate).  Sidebar navigation to
+        // existing __LOCALID_ threads is unaffected: it routes via the view's
+        // search.thread / activeThreadId branch, not this append handler.
         const thread = await db.threads.get(remoteId);
-        if (thread?.modelType === "base" && !thread.pairId) {
+        if (
+          thread?.modelType === "base" &&
+          !thread.pairId &&
+          !remoteId.startsWith("__LOCALID_")
+        ) {
           const store = useChatRuntimeStore.getState();
           if (store.activeThreadId !== remoteId) {
             store.setActiveThreadId(remoteId);
