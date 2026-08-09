@@ -85,6 +85,23 @@ export function isContextLimitError(message: string): boolean {
   );
 }
 
+/**
+ * Detect a lost connection / interrupted stream (as opposed to a genuine
+ * generation error).  These occur when the client minimizes, is backgrounded
+ * on iOS, or has a network blip mid-stream.  The backend keeps generating and
+ * persists the result, so we should NOT surface a fatal "Generation failed".
+ */
+export function isConnectionError(err: unknown): boolean {
+  if (err instanceof TypeError) {
+    // fetch() rejects with TypeError on network failure.
+    return true;
+  }
+  const msg = err instanceof Error ? err.message : String(err);
+  return /failed to fetch|network request failed|fetch failed|load failed|the internet connection appears to be offline|terminated|underlying connection was closed|aborted/i.test(
+    msg,
+  );
+}
+
 /** Parse "Title: ...\nURL: ...\nSnippet: ..." blocks into source content parts. */
 function parseSourcesFromResult(raw: string): { type: "source"; sourceType: "url"; id: string; url: string; title: string; metadata?: { description: string } }[] {
   if (!raw) return [];
@@ -663,12 +680,16 @@ async function autoLoadSmallestModel(): Promise<{
 
 export function createOpenAIStreamAdapter(): ChatModelAdapter {
   return {
-    async *run({ messages, abortSignal, unstable_threadId }) {
+    async *run({ messages, abortSignal, unstable_threadId, unstable_assistantMessageId }) {
       let runtime = useChatRuntimeStore.getState();
       // Capture the thread ID once at the start so it stays stable even if
       // the user switches chats while waiting for model load / auto-load.
       const resolvedThreadId =
         (unstable_threadId ?? runtime.activeThreadId) || undefined;
+      // assistant-ui's id for the assistant message being generated.  We forward
+      // it to the server so a disconnected generation can be persisted with the
+      // SAME id the client uses — INSERT OR IGNORE then dedups on reconnect.
+      const assistantMessageId = unstable_assistantMessageId ?? undefined;
 
       // Wait for in-progress model load to finish before inferring
       if (runtime.modelLoading) {
@@ -888,6 +909,7 @@ export function createOpenAIStreamAdapter(): ChatModelAdapter {
                     return mins >= 9999 ? 9999 : mins * 60;
                   })(),
                   session_id: resolvedThreadId,
+                  ...(assistantMessageId ? { assistant_message_id: assistantMessageId } : {}),
                 }
               : {}),
           },
@@ -1089,6 +1111,21 @@ export function createOpenAIStreamAdapter(): ChatModelAdapter {
         settleFirstTokenErr(err instanceof Error ? err : new Error("Generation failed"));
         if (!abortSignal.aborted) {
           const msg = err instanceof Error ? err.message : String(err);
+          if (isConnectionError(err)) {
+            // Lost connection mid-stream (minimize, iOS background, network
+            // blip).  The backend keeps generating and persists the result to
+            // the thread; it will appear here when the user returns.  Do not
+            // show a fatal error.  The friendly thrown message becomes the
+            // inline message status so the partial bubble reads as a notice.
+            toast.info("Finishing response in the background", {
+              description:
+                "The connection was lost — the full response will appear in this chat when you're back online.",
+              duration: 6000,
+            });
+            throw new Error(
+              "Connection lost — finishing the response in the background. It will appear here when you're back online.",
+            );
+          }
           if (isContextLimitError(msg)) {
             // llama-server was launched with --no-context-shift, so it
             // returns a hard error instead of silently dropping old

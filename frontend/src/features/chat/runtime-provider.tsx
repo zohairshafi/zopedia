@@ -37,6 +37,7 @@ import {
   updateThreadTitleOnServer,
   deleteThreadFromBoth,
   maybeMigrateLocalToServer,
+  registerOnForeground,
 } from "./chat-server-sync";
 
 const DEFAULT_SUGGESTIONS = [
@@ -400,6 +401,72 @@ function toThreadMessage(m: MessageRecord): ThreadMessage {
   };
 }
 
+/**
+ * Build an ExportedMessageRepository from Dexie records — the same sort +
+ * parentId reconstruction `history.load()` uses.  Shared so the reconnect
+ * reload shows exactly what a fresh load would.
+ */
+function buildRepositoryFromRecords(
+  msgs: MessageRecord[],
+): ExportedMessageRepository {
+  const roleOrder: Record<string, number> = {
+    system: 0,
+    user: 1,
+    assistant: 2,
+  };
+  const sorted = [...msgs].sort((a, b) => {
+    if (a.createdAt !== b.createdAt) return a.createdAt - b.createdAt;
+    const aOrder = roleOrder[a.role] ?? 99;
+    const bOrder = roleOrder[b.role] ?? 99;
+    if (aOrder !== bOrder) return aOrder - bOrder;
+    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+  });
+  const hasParentIds = sorted.some((m) => "parentId" in m);
+  if (hasParentIds) {
+    // Validate that every parentId reference resolves to a message in the set.
+    // Orphan references crash assistant-ui's MessageRepository.  Messages with
+    // an explicit parentId (even null) keep it — null means "root sibling"
+    // (preserves branches).  Legacy messages without parentId chain linearly.
+    const allIds = new Set(sorted.map((m) => m.id));
+    let previousId: string | null = null;
+    return {
+      messages: sorted.map((m) => {
+        let parentId: string | null;
+        if ("parentId" in m) {
+          parentId = m.parentId && allIds.has(m.parentId) ? m.parentId : null;
+        } else {
+          parentId = previousId;
+        }
+        previousId = m.id;
+        return {
+          parentId,
+          message: toThreadMessage(m),
+        };
+      }),
+    } as unknown as ExportedMessageRepository;
+  }
+  return ExportedMessageRepository.fromArray(sorted.map(toThreadMessage));
+}
+
+/**
+ * Re-sync the active thread from the server and, if new messages arrived
+ * (e.g. a generation the backend completed while we were disconnected),
+ * re-import the thread so the completed message replaces the stale partial.
+ */
+export async function refreshThreadFromServer(
+  aui: ReturnType<typeof useAui>,
+  remoteId: string,
+): Promise<void> {
+  const inserted = await syncThreadMessagesFromServer(remoteId);
+  if (inserted <= 0) return; // nothing new — leave the in-memory view as-is
+  try {
+    const msgs = await db.messages.where("threadId").equals(remoteId).toArray();
+    aui.thread().import(buildRepositoryFromRecords(msgs));
+  } catch (err) {
+    console.error("[history] reconnect reload failed:", err);
+  }
+}
+
 function createDexieAdapter(
   modelType: ModelType,
   pairId?: string,
@@ -718,6 +785,17 @@ function ThreadHistoryProvider({
             store.setActiveThreadId(remoteId);
           }
         }
+
+        // Skip persisting FAILED/CANCELLED assistant messages.  On a lost
+        // connection the backend keeps generating and persists the completed
+        // assistant message itself (same id — INSERT OR IGNORE dedups), and the
+        // thread sync inserts it when the user returns.  Persisting the partial
+        // error bubble here would create a duplicate / stale error message.
+        const statusType = (message.status as { type?: string } | undefined)?.type;
+        if (message.role === "assistant" && statusType === "incomplete") {
+          return;
+        }
+
         const content = cloneContent(message.content);
         const attachments =
           message.role === "user" ? cloneAttachments(message.attachments) : [];
@@ -952,6 +1030,17 @@ export function ChatRuntimeProvider({
     void maybeMigrateLocalToServer();
     void loadPreferencesFromServer();
   }, []);
+
+  // When the app returns to the foreground (minimize → restore, iOS background
+  // → return, network blip), re-sync the active thread and reload it if the
+  // server completed a generation while we were disconnected.
+  useEffect(() => {
+    return registerOnForeground(() => {
+      const remoteId = aui.threadListItem().getState().remoteId;
+      if (!remoteId) return;
+      void refreshThreadFromServer(aui, remoteId);
+    });
+  }, [aui]);
 
   return (
     <AssistantRuntimeProvider runtime={runtime} aui={aui}>

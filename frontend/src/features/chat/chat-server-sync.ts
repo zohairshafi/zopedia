@@ -129,9 +129,25 @@ function chunkLargeContent(content: unknown): unknown[] {
   return parts;
 }
 
+// Called when the app returns to the foreground.  Registered by ChatRuntimeProvider
+// (which has aui access) so the active thread can re-sync + reload — picking up a
+// generation the backend completed while the client was disconnected/minimized.
+let _onForeground: (() => void) | null = null;
+
+export function registerOnForeground(fn: () => void): () => void {
+  _onForeground = fn;
+  return () => {
+    if (_onForeground === fn) _onForeground = null;
+  };
+}
+
 if (typeof document !== "undefined") {
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "hidden") flushPendingSaves();
+    if (document.visibilityState === "hidden") {
+      flushPendingSaves();
+    } else if (document.visibilityState === "visible") {
+      _onForeground?.();
+    }
   });
 }
 
@@ -478,9 +494,9 @@ function parseStoredContent(content: unknown): unknown {
 export async function syncThreadMessagesFromServer(
   threadId: string,
   opts?: { signal?: AbortSignal },
-): Promise<void> {
+): Promise<number> {
   const result = await fetchServerThread(threadId, opts);
-  if (!result?.messages?.length) return;
+  if (!result?.messages?.length) return 0;
 
   // Tombstones: locally-deleted message ids that must NOT be resurrected by a
   // downsync. The server DELETE may not have landed yet (fire-and-forget), so
@@ -495,6 +511,7 @@ export async function syncThreadMessagesFromServer(
       : (await db.messages.where("threadId").equals(threadId).toArray()).map((m) => m.id),
   );
   const serverIds = new Set<string>();
+  let insertedCount = 0;
   for (const msg of result.messages) {
     serverIds.add(msg.id);
     if (tombstones.has(msg.id)) continue; // don't resurrect a locally-deleted message
@@ -509,6 +526,7 @@ export async function syncThreadMessagesFromServer(
         parentId: msg.parent_id ?? null,
         createdAt: new Date(msg.created_at).getTime(),
       });
+      insertedCount += 1;
     }
     // Mark server-fetched messages as synced so we don't re-send them
     syncedMessageIds.add(msg.id);
@@ -522,6 +540,7 @@ export async function syncThreadMessagesFromServer(
       await db.threads.update(threadId, { deletedMessageIds: remaining });
     }
   }
+  return insertedCount;
 }
 
 export function debouncedSaveThreadToServer(threadId: string): void {
