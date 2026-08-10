@@ -83,11 +83,11 @@ app = modal.App("zopedia", image=image)
 @app.function(
     volumes={ZK_DATA: wiki_volume} if wiki_volume else {},
     secrets=[modal.Secret.from_name("zopedia-env")],
-    cpu=2,
-    scaledown_window=300,
+    cpu=1,
+    scaledown_window=3600,
     timeout=7200,
 )
-@modal.concurrent(max_inputs=100)
+@modal.concurrent(max_inputs=10)
 @modal.asgi_app()
 def serve():
     import sys
