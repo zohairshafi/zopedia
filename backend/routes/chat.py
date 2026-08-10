@@ -72,6 +72,14 @@ router = APIRouter()
 # cancelling the task; keeping a strong reference here prevents that.
 _background_tasks: set[asyncio.Task] = set()
 
+# Cap on CONCURRENT disconnected generations.  Each one keeps generating on the
+# container (CPU + upstream tokens) for the full duration even though the client
+# is gone.  On a 2-CPU Modal container a few of these saturate everything (slow
+# health checks, pending requests).  When the cap is reached, a disconnected
+# generation stops early instead of running to completion.
+_active_bg_generations = 0
+_MAX_BG_GENERATIONS = 2
+
 _LLM_TIMEOUT_SECONDS = int(os.getenv("ZOPEDIA_LLM_TIMEOUT_SECONDS", "300"))
 _LLM_MODEL = os.getenv("ZOPEDIA_LLM_MODEL", "").strip()
 _WIKI_TOOL_RETRIEVAL = os.getenv("ZOPEDIA_WIKI_TOOL_RETRIEVAL", "true").strip().lower() in {"1", "true", "yes", "on"}
@@ -649,6 +657,7 @@ async def openai_chat_completions(request: Request):
                 acc_text: list[str] = []
                 acc_reasoning: list[str] = []
                 succeeded = False
+                registered_bg = False
                 try:
                     # Phase 1: tool resolution with progress events
                     try:
@@ -684,21 +693,36 @@ async def openai_chat_completions(request: Request):
                     # This ensures proper token-by-token output with full CoT visibility
                     # and prevents hallucinated/narration text from being treated as the answer.
                     async for event in chat_completions_stream(messages, model=resolved_model, temperature=temperature, max_tokens=max_tokens, tools=None, tool_choice=None, thinking=thinking):
-                        if event["type"] == "reasoning":
+                        etype = event["type"]
+                        if etype == "reasoning":
                             acc_reasoning.append(event["content"])
-                            if not client_gone["gone"]:
-                                await queue.put(f"data: {json.dumps({'id': chunk_id, 'object': 'chat.completion.chunk', 'created': created, 'model': resolved_model, 'choices': [{'index': 0, 'delta': {'reasoning_content': event['content']}, 'finish_reason': None}]})}\n\n")
-                        elif event["type"] == "text":
+                        elif etype == "text":
                             acc_text.append(event["content"])
-                            if not client_gone["gone"]:
-                                await queue.put(f"data: {json.dumps({'id': chunk_id, 'object': 'chat.completion.chunk', 'created': created, 'model': resolved_model, 'choices': [{'index': 0, 'delta': {'content': event['content']}, 'finish_reason': None}]})}\n\n")
-                        elif event["type"] == "error":
+                        elif etype == "error":
                             succeeded = False
-                            if not client_gone["gone"]:
-                                await queue.put(f"data: {json.dumps({'error': event['message']})}\n\n")
-                        elif event["type"] == "usage":
-                            if not client_gone["gone"]:
-                                await queue.put(f"data: {json.dumps({'id': chunk_id, 'object': 'chat.completion.chunk', 'created': created, 'model': resolved_model, 'choices': [], 'usage': event['usage']})}\n\n")
+
+                        # Once the client is gone we keep generating only to
+                        # persist the completed answer — but only if the container
+                        # isn't already busy with other disconnected generations
+                        # (each runs for the full generation duration on CPU).
+                        if client_gone["gone"]:
+                            if not registered_bg:
+                                registered_bg = True
+                                if _active_bg_generations >= _MAX_BG_GENERATIONS:
+                                    logger.warning(
+                                        "chat: stopping disconnected generation for %s — cap reached (%d)",
+                                        session_id, _MAX_BG_GENERATIONS,
+                                    )
+                                    break
+                                _active_bg_generations += 1
+                            continue  # don't queue to the (gone) client
+
+                        if etype == "reasoning":
+                            await queue.put(f"data: {json.dumps({'id': chunk_id, 'object': 'chat.completion.chunk', 'created': created, 'model': resolved_model, 'choices': [{'index': 0, 'delta': {'reasoning_content': event['content']}, 'finish_reason': None}]})}\n\n")
+                        elif etype == "text":
+                            await queue.put(f"data: {json.dumps({'id': chunk_id, 'object': 'chat.completion.chunk', 'created': created, 'model': resolved_model, 'choices': [{'index': 0, 'delta': {'content': event['content']}, 'finish_reason': None}]})}\n\n")
+                        elif etype == "usage":
+                            await queue.put(f"data: {json.dumps({'id': chunk_id, 'object': 'chat.completion.chunk', 'created': created, 'model': resolved_model, 'choices': [], 'usage': event['usage']})}\n\n")
                     # Remove ephemeral synthesis instruction so it doesn't leak into next turn.
                     # chat_completions_stream appended the assistant answer to messages, so
                     # messages[-1] is the answer, NOT the ephemeral prompt.  Search backwards.
@@ -715,6 +739,9 @@ async def openai_chat_completions(request: Request):
                     logger.warning("Streaming generation failed: %s", exc)
                     if not client_gone["gone"]:
                         await queue.put(f"data: {json.dumps({'error': str(exc)})}\n\n")
+                finally:
+                    if registered_bg:
+                        _active_bg_generations -= 1
 
                 await queue.put("data: [DONE]\n\n")
                 # Wait for the consumer to finish consuming or to disconnect.

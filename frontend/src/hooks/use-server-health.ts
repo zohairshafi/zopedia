@@ -18,8 +18,8 @@ import { isClientMode, SERVER_URL_KEY } from "@/lib/mode";
 // ---------------------------------------------------------------------------
 
 const POLL_INTERVAL_MS = 300_000;
-const REQUEST_TIMEOUT_MS = 5_000;
-const FAILURES_BEFORE_UNREACHABLE = 2;
+const REQUEST_TIMEOUT_MS = 12_000;
+const FAILURES_BEFORE_UNREACHABLE = 3;
 
 type Listener = () => void;
 let serverReachable = true;
