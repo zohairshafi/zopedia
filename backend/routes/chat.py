@@ -74,11 +74,10 @@ _background_tasks: set[asyncio.Task] = set()
 
 # Cap on CONCURRENT disconnected generations.  Each one keeps generating on the
 # container (CPU + upstream tokens) for the full duration even though the client
-# is gone.  On a 2-CPU Modal container a few of these saturate everything (slow
-# health checks, pending requests).  When the cap is reached, a disconnected
-# generation stops early instead of running to completion.
+# is gone.  A high ceiling keeps every disconnected generation completing; the
+# value is set high enough that it effectively never throttles normal usage.
 _active_bg_generations = 0
-_MAX_BG_GENERATIONS = 2
+_MAX_BG_GENERATIONS = 50
 
 _LLM_TIMEOUT_SECONDS = int(os.getenv("ZOPEDIA_LLM_TIMEOUT_SECONDS", "300"))
 _LLM_MODEL = os.getenv("ZOPEDIA_LLM_MODEL", "").strip()
