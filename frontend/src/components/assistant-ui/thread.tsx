@@ -63,6 +63,7 @@ import {
   CheckIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
+  CandlestickChartIcon,
   CopyIcon,
   DownloadIcon,
   GlobeIcon,
@@ -679,6 +680,33 @@ const DatabaseQueryToggle: FC = () => {
   );
 };
 
+const AlpacaDataToggle: FC = () => {
+  const useUpstream = useChatRuntimeStore((s) => s.useUpstream);
+  const alpacaQueryEnabled = useChatRuntimeStore((s) => s.alpacaQueryEnabled);
+  const setAlpacaQueryEnabled = useChatRuntimeStore((s) => s.setAlpacaQueryEnabled);
+  const disabled = !useUpstream;
+
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={() => setAlpacaQueryEnabled(!alpacaQueryEnabled)}
+      className={cn(
+        "flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-colors",
+        disabled
+          ? "cursor-not-allowed opacity-40"
+          : alpacaQueryEnabled
+            ? "bg-primary/10 text-primary hover:bg-primary/20"
+            : "bg-muted text-muted-foreground hover:bg-muted-foreground/15",
+      )}
+      aria-label={alpacaQueryEnabled ? "Disable Alpaca market data" : "Enable Alpaca market data"}
+    >
+      <CandlestickChartIcon className="size-3.5" />
+      <span>Alpaca</span>
+    </button>
+  );
+};
+
 
 
 const ExportHTMLButton: FC = () => {
@@ -987,6 +1015,7 @@ const ComposerAction: FC<{ disabled?: boolean }> = ({ disabled }) => {
         <PreserveThinkingToggle />
         <WebSearchToggle />
         <DatabaseQueryToggle />
+        <AlpacaDataToggle />
         <CompactChatButton />
         {getPermissions().can_save_chat_history && <WikiChatHistoryToggle />}
         <ExportHTMLButton />

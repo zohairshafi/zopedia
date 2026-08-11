@@ -112,7 +112,11 @@ function categoryForVariable(name: string): WikiVariableCategory {
   if (name.startsWith("ZOPEDIA_DB_") || name === "ZOPEDIA_DATABASE_URL") {
     return "Database";
   }
-  if (name.startsWith("ZOPEDIA_LLM_") || name.startsWith("ZOPEDIA_BRAVE_")) {
+  if (
+    name.startsWith("ZOPEDIA_LLM_") ||
+    name.startsWith("ZOPEDIA_BRAVE_") ||
+    name.startsWith("ZOPEDIA_ALPACA_")
+  ) {
     return "Upstream API";
   }
   if (name.startsWith("ZOPEDIA_WIKI_LLM_")) {

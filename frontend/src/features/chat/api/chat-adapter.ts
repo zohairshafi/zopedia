@@ -897,7 +897,9 @@ export function createOpenAIStreamAdapter(): ChatModelAdapter {
                   enabled_tools: [
                     "read_wiki_page",
                     "search_wiki",
-                    "alpaca_market_data",
+                    ...(useChatRuntimeStore.getState().alpacaQueryEnabled
+                      ? ["alpaca_market_data"]
+                      : []),
                     ...(toolsEnabled ? ["web_search"] : []),
                     ...(useChatRuntimeStore.getState().dbQueryEnabled
                       ? ["execute_sql_query", "describe_database_schema"]
