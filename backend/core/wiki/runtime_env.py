@@ -81,6 +81,18 @@ WIKI_ENV_SPECS: tuple[WikiEnvSpec, ...] = (
         description="Brave Search API key for web search. Sign up at https://brave.com/search/api/",
     ),
     WikiEnvSpec(
+        name="ZOPEDIA_ALPACA_API_KEY",
+        kind="string",
+        default="",
+        description="Alpaca Markets API key ID for live market data (quotes, bars, options). Sign up at https://alpaca.markets/",
+    ),
+    WikiEnvSpec(
+        name="ZOPEDIA_ALPACA_API_SECRET",
+        kind="string",
+        default="",
+        description="Alpaca Markets API secret key (paired with ZOPEDIA_ALPACA_API_KEY).",
+    ),
+    WikiEnvSpec(
         name="ZOPEDIA_AUTH_DISABLED",
         kind="bool",
         default="false",

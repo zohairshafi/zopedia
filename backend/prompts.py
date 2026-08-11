@@ -75,6 +75,7 @@ CHAT_WIKI_USAGE_PROMPT = (
     "- Analysis page paths contain timestamps. Use the full path exactly as it appears.\n"
     "- When citing a page, use the exact path from the tool call result, not a made-up name.\n"
     "- ALWAYS read atleast TWO godnode pages. These give you a breadth of knowledge that search will not.\n"
+    "- Always wrap any math inside '$$' so it can parse correctly.\n"
 )
 
 CHAT_WEB_SEARCH_GUIDELINE = (
@@ -186,6 +187,43 @@ TOOL_PARAM_WEB_QUERY_DESC = "Search query for the web."
 TOOL_PARAM_WIKI_QUERY_DESC = "Search query. Use keywords and phrases to find relevant wiki pages."
 TOOL_PARAM_TABLE_NAME_DESC = "Optional. The table to describe. Leave empty to list all tables."
 TOOL_PARAM_SQL_QUERY_DESC = "A read-only SQL SELECT query to execute."
+
+TOOL_DESC_ALPACA_MARKET_DATA = (
+    "Query live market data from Alpaca Markets. Use this for real-time or "
+    "historical stock prices, quotes, volumes, and options data. "
+    "Supported types: 'quote' (latest bid/ask for a stock), 'bars' (historical "
+    "OHLCV bars with volume), 'snapshot' (latest trade + daily bar + prev close "
+    "for a stock), 'options_chain' (options contracts for an underlying symbol "
+    "with latest trade, quote, Greeks, implied volatility, and open interest). "
+    "Symbols are plain tickers (e.g. 'AAPL', 'SPY'). "
+    "For options_chain you can filter by expiration_date (YYYY-MM-DD), strike_gte, "
+    "and strike_lte. Data reflects market hours and may be delayed depending on "
+    "the Alpaca subscription tier."
+)
+
+TOOL_PARAM_ALPACA_SYMBOL_DESC = (
+    "The ticker symbol to query (e.g. 'AAPL', 'SPY', 'TSLA'). For options_chain, "
+    "this is the underlying symbol."
+)
+TOOL_PARAM_ALPACA_TYPE_DESC = (
+    "What data to fetch: 'quote' (latest bid/ask), 'bars' (historical OHLCV + "
+    "volume), 'snapshot' (latest trade + daily bar + prev close + stats), or "
+    "'options_chain' (option contracts with quotes, Greeks, IV, open interest)."
+)
+TOOL_PARAM_ALPACA_TIMEFRAME_DESC = (
+    "Bar timeframe for 'bars' type: 1Min, 5Min, 15Min, 1Hour, 1Day, 1Week, or "
+    "1Month. Defaults to 1Day."
+)
+TOOL_PARAM_ALPACA_LIMIT_DESC = (
+    "Max number of results to return (default 10, max 1000). For options_chain "
+    "the effective cap is 25 per call — use filters to narrow."
+)
+TOOL_PARAM_ALPACA_EXPIRATION_DESC = (
+    "Optional. Options expiration date in YYYY-MM-DD, or a range like "
+    "'2026-08-15:2026-12-19'. For options_chain."
+)
+TOOL_PARAM_ALPACA_STRIKE_GTE_DESC = "Optional. Minimum strike price. For options_chain."
+TOOL_PARAM_ALPACA_STRIKE_LTE_DESC = "Optional. Maximum strike price. For options_chain."
 
 
 # ═══════════════════════════════════════════════════════════════════════

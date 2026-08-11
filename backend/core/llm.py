@@ -15,11 +15,19 @@ import httpx
 
 from prompts import (
     LLM_JSON_MODE_PROMPT,
+    TOOL_DESC_ALPACA_MARKET_DATA,
     TOOL_DESC_DESCRIBE_DATABASE_SCHEMA,
     TOOL_DESC_EXECUTE_SQL as _tool_desc_execute_sql,
     TOOL_DESC_READ_WIKI_PAGE,
     TOOL_DESC_SEARCH_WIKI,
     TOOL_DESC_WEB_SEARCH,
+    TOOL_PARAM_ALPACA_EXPIRATION_DESC,
+    TOOL_PARAM_ALPACA_LIMIT_DESC,
+    TOOL_PARAM_ALPACA_STRIKE_GTE_DESC,
+    TOOL_PARAM_ALPACA_STRIKE_LTE_DESC,
+    TOOL_PARAM_ALPACA_SYMBOL_DESC,
+    TOOL_PARAM_ALPACA_TIMEFRAME_DESC,
+    TOOL_PARAM_ALPACA_TYPE_DESC,
     TOOL_PARAM_PATH_DESC,
     TOOL_PARAM_SQL_QUERY_DESC,
     TOOL_PARAM_TABLE_NAME_DESC,
@@ -58,6 +66,8 @@ _LLM_MODEL = _env_str("ZOPEDIA_LLM_MODEL", "default")
 _LLM_TIMEOUT_SECONDS = _env_int("ZOPEDIA_LLM_TIMEOUT_SECONDS", 300)
 _WIKI_LLM_MAX_TOKENS = _env_int("ZOPEDIA_WIKI_LLM_MAX_TOKENS", 6000)
 _BRAVE_API_KEY = _env_str("ZOPEDIA_BRAVE_API_KEY")
+_ALPACA_API_KEY = _env_str("ZOPEDIA_ALPACA_API_KEY")
+_ALPACA_API_SECRET = _env_str("ZOPEDIA_ALPACA_API_SECRET")
 _DATABASE_URL = _env_str("ZOPEDIA_DATABASE_URL")
 _DB_MAX_ROWS = _env_int("ZOPEDIA_DB_MAX_ROWS", 100)
 _DB_TIMEOUT_SECONDS = _env_int("ZOPEDIA_DB_TIMEOUT_SECONDS", 10)
@@ -66,13 +76,15 @@ _DB_TIMEOUT_SECONDS = _env_int("ZOPEDIA_DB_TIMEOUT_SECONDS", 10)
 def refresh_llm_config():
     """Re-read LLM config from os.environ (for soft reload after Apply and Restart)."""
     global _LLM_BASE_URL, _LLM_API_KEY, _LLM_MODEL, _LLM_TIMEOUT_SECONDS, _WIKI_LLM_MAX_TOKENS
-    global _BRAVE_API_KEY, _DATABASE_URL, _DB_MAX_ROWS, _DB_TIMEOUT_SECONDS
+    global _BRAVE_API_KEY, _ALPACA_API_KEY, _ALPACA_API_SECRET, _DATABASE_URL, _DB_MAX_ROWS, _DB_TIMEOUT_SECONDS
     _LLM_BASE_URL = _env_str("ZOPEDIA_LLM_BASE_URL")
     _LLM_API_KEY = _env_str("ZOPEDIA_LLM_API_KEY")
     _LLM_MODEL = _env_str("ZOPEDIA_LLM_MODEL", "default")
     _LLM_TIMEOUT_SECONDS = _env_int("ZOPEDIA_LLM_TIMEOUT_SECONDS", 300)
     _WIKI_LLM_MAX_TOKENS = _env_int("ZOPEDIA_WIKI_LLM_MAX_TOKENS", 6000)
     _BRAVE_API_KEY = _env_str("ZOPEDIA_BRAVE_API_KEY")
+    _ALPACA_API_KEY = _env_str("ZOPEDIA_ALPACA_API_KEY")
+    _ALPACA_API_SECRET = _env_str("ZOPEDIA_ALPACA_API_SECRET")
     _DATABASE_URL = _env_str("ZOPEDIA_DATABASE_URL")
     _DB_MAX_ROWS = _env_int("ZOPEDIA_DB_MAX_ROWS", 100)
     _DB_TIMEOUT_SECONDS = _env_int("ZOPEDIA_DB_TIMEOUT_SECONDS", 10)
@@ -538,6 +550,53 @@ EXECUTE_SQL_TOOL = {
 
 DB_TOOLS = [DESCRIBE_DATABASE_SCHEMA_TOOL, EXECUTE_SQL_TOOL]
 
+# ── Alpaca Market Data tool ─────────────────────────────────────────
+
+ALPACA_MARKET_DATA_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "alpaca_market_data",
+        "description": TOOL_DESC_ALPACA_MARKET_DATA,
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "symbol": {
+                    "type": "string",
+                    "description": TOOL_PARAM_ALPACA_SYMBOL_DESC,
+                },
+                "type": {
+                    "type": "string",
+                    "enum": ["quote", "bars", "snapshot", "options_chain"],
+                    "description": TOOL_PARAM_ALPACA_TYPE_DESC,
+                },
+                "timeframe": {
+                    "type": "string",
+                    "description": TOOL_PARAM_ALPACA_TIMEFRAME_DESC,
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": TOOL_PARAM_ALPACA_LIMIT_DESC,
+                },
+                "expiration_date": {
+                    "type": "string",
+                    "description": TOOL_PARAM_ALPACA_EXPIRATION_DESC,
+                },
+                "strike_gte": {
+                    "type": "number",
+                    "description": TOOL_PARAM_ALPACA_STRIKE_GTE_DESC,
+                },
+                "strike_lte": {
+                    "type": "number",
+                    "description": TOOL_PARAM_ALPACA_STRIKE_LTE_DESC,
+                },
+            },
+            "required": ["symbol", "type"],
+        },
+    },
+}
+
+ALPACA_TOOLS = [ALPACA_MARKET_DATA_TOOL]
+
 
 async def execute_web_search(query: str, max_results: int = 5, timelimit: str = "m") -> str:
     """Search the web using the Brave Search API and return JSON results.
@@ -602,6 +661,160 @@ async def execute_web_search(query: str, max_results: int = 5, timelimit: str = 
         return json.dumps({"results": results, "query": query}, ensure_ascii=False)
     except Exception as exc:
         return json.dumps({"error": f"Web search failed: {exc}"})
+
+
+_ALPACA_DATA_BASE_URL = "https://data.alpaca.markets"
+
+
+def _alpaca_headers() -> dict[str, str]:
+    return {
+        "APCA-API-KEY-ID": _ALPACA_API_KEY,
+        "APCA-API-SECRET-KEY": _ALPACA_API_SECRET,
+    }
+
+
+def _alpaca_request(url: str, params: dict) -> dict | None:
+    """Sync helper (run via asyncio.to_thread) — returns parsed JSON or None."""
+    import httpx
+
+    with httpx.Client(timeout=10) as client:
+        resp = client.get(url, params=params, headers=_alpaca_headers())
+        if resp.status_code != 200:
+            logger.warning("Alpaca API returned %d: %.300s", resp.status_code, resp.text)
+            return None
+        return resp.json()
+
+
+async def execute_alpaca_market_data(
+    symbol: str,
+    data_type: str,
+    timeframe: str = "1Day",
+    limit: int = 10,
+    expiration_date: str | None = None,
+    strike_gte: float | None = None,
+    strike_lte: float | None = None,
+) -> str:
+    """Query live market data from the Alpaca Markets API.
+
+    Requires ZOPEDIA_ALPACA_API_KEY and ZOPEDIA_ALPACA_API_SECRET env vars.
+    data_type: 'quote' | 'bars' | 'snapshot' | 'options_chain'.
+    Returns a JSON string (never raises).
+    """
+    if not _ALPACA_API_KEY or not _ALPACA_API_SECRET:
+        return json.dumps({"error": "Alpaca API key not configured. Set ZOPEDIA_ALPACA_API_KEY and ZOPEDIA_ALPACA_API_SECRET."})
+
+    symbol = str(symbol or "").strip().upper()
+    if not symbol:
+        return json.dumps({"error": "Alpaca: symbol is required."})
+
+    try:
+        limit = max(1, min(int(limit or 10), 1000))
+    except (TypeError, ValueError):
+        limit = 10
+
+    try:
+        if data_type == "quote":
+            url = f"{_ALPACA_DATA_BASE_URL}/v2/stocks/{symbol}/quotes/latest"
+            data = await asyncio.to_thread(_alpaca_request, url, {})
+            if data is None:
+                return json.dumps({"error": f"Alpaca: no quote returned for {symbol} (invalid symbol or market data unavailable)."})
+            quote = data.get("quote") or data
+            return json.dumps({
+                "symbol": symbol,
+                "type": "quote",
+                "bid": quote.get("bid_price"),
+                "bid_size": quote.get("bid_size"),
+                "ask": quote.get("ask_price"),
+                "ask_size": quote.get("ask_size"),
+                "last": quote.get("t", {}).get("price") if isinstance(quote.get("t"), dict) else quote.get("last_price"),
+                "timestamp": quote.get("t"),
+            }, default=str)
+
+        if data_type == "bars":
+            url = f"{_ALPACA_DATA_BASE_URL}/v2/stocks/{symbol}/bars"
+            params = {"timeframe": str(timeframe or "1Day"), "limit": limit}
+            data = await asyncio.to_thread(_alpaca_request, url, params)
+            if data is None:
+                return json.dumps({"error": f"Alpaca: no bars returned for {symbol}."})
+            bars = data.get("bars", [])
+            return json.dumps({
+                "symbol": symbol,
+                "type": "bars",
+                "timeframe": params["timeframe"],
+                "bars": bars,  # each bar: o, h, l, c, v, n, t (OHLCV + trades + timestamp)
+                "count": len(bars),
+            }, default=str)
+
+        if data_type == "snapshot":
+            url = f"{_ALPACA_DATA_BASE_URL}/v2/stocks/{symbol}/snapshot"
+            data = await asyncio.to_thread(_alpaca_request, url, {})
+            if data is None:
+                return json.dumps({"error": f"Alpaca: no snapshot returned for {symbol}."})
+            latest_trade = data.get("latestTrade") or {}
+            latest_quote = data.get("latestQuote") or {}
+            daily_bar = data.get("dailyBar") or {}
+            prev = data.get("prevDailyBar") or {}
+            return json.dumps({
+                "symbol": symbol,
+                "type": "snapshot",
+                "last_price": latest_trade.get("p"),
+                "last_trade_time": latest_trade.get("t"),
+                "bid": latest_quote.get("bp"),
+                "ask": latest_quote.get("ap"),
+                "open": daily_bar.get("o"),
+                "high": daily_bar.get("h"),
+                "low": daily_bar.get("l"),
+                "close": daily_bar.get("c"),
+                "volume": daily_bar.get("v"),
+                "prev_close": prev.get("c"),
+                "change": round((daily_bar.get("c", 0) or 0) - (prev.get("c", 0) or 0), 4) if prev.get("c") is not None else None,
+            }, default=str)
+
+        if data_type == "options_chain":
+            url = f"{_ALPACA_DATA_BASE_URL}/v1beta1/options/snapshots"
+            # Options snapshots are large — keep the default cap low so the
+            # model gets a focused slice; surface next_page_token for more.
+            chain_limit = min(limit, 25)
+            params = {"underlying_symbol": symbol, "limit": chain_limit, "feed": "indicative"}
+            if expiration_date:
+                params["expiration_date"] = str(expiration_date)
+            if strike_gte is not None:
+                params["strike_price_gte"] = strike_gte
+            if strike_lte is not None:
+                params["strike_price_lte"] = strike_lte
+            data = await asyncio.to_thread(_alpaca_request, url, params)
+            if data is None:
+                return json.dumps({"error": f"Alpaca: no options snapshots returned for {symbol}."})
+            snapshots = data.get("snapshots") or {}
+            # snapshots is {option_symbol: {latestTrade, latestQuote, greeks, impliedVolatility, openInterest, ...}}
+            items = []
+            for opt_symbol, snap in snapshots.items():
+                quote = snap.get("latestQuote") or {}
+                trade = snap.get("latestTrade") or {}
+                greeks = snap.get("greeks") or {}
+                items.append({
+                    "option_symbol": opt_symbol,
+                    "bid": quote.get("bp"),
+                    "ask": quote.get("ap"),
+                    "last": trade.get("p"),
+                    "implied_volatility": snap.get("impliedVolatility"),
+                    "open_interest": snap.get("openInterest"),
+                    "delta": greeks.get("delta"),
+                    "gamma": greeks.get("gamma"),
+                    "theta": greeks.get("theta"),
+                    "vega": greeks.get("vega"),
+                })
+            return json.dumps({
+                "underlying": symbol,
+                "type": "options_chain",
+                "count": len(items),
+                "next_page_token": data.get("next_page_token"),
+                "options": items,
+            }, default=str)
+
+        return json.dumps({"error": f"Alpaca: unknown type '{data_type}'. Use quote, bars, snapshot, or options_chain."})
+    except Exception as exc:
+        return json.dumps({"error": f"Alpaca market data failed: {exc}"})
 
 
 async def execute_video_search(query: str, max_results: int = 5, timelimit: str = "m") -> str:

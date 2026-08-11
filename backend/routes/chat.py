@@ -26,10 +26,12 @@ from fastapi.responses import StreamingResponse
 from core.llm import (
     _base_url,
     _headers,
+    ALPACA_TOOLS,
     DB_TOOLS,
     WIKI_TOOLS,
     chat_completions_non_streaming,
     chat_completions_stream,
+    execute_alpaca_market_data,
     execute_web_search,
     execute_wiki_read,
     execute_wiki_search,
@@ -407,6 +409,48 @@ async def _resolve_tool_calls_stream(
                     "result": tool_result,
                 }
 
+            elif name == "alpaca_market_data":
+                symbol = str(args.get("symbol", ""))
+                data_type = str(args.get("type", ""))
+                yield {
+                    "type": "tool_start",
+                    "tool_name": "alpaca_market_data",
+                    "tool_call_id": tc_id,
+                    "arguments": {"symbol": symbol, "type": data_type},
+                }
+                yield {"type": "tool_status", "text": f"Fetching {data_type} data for {symbol}..."}
+                tool_result = await execute_alpaca_market_data(
+                    symbol,
+                    data_type,
+                    timeframe=str(args.get("timeframe") or "1Day"),
+                    limit=int(args.get("limit") or 10),
+                    expiration_date=(args.get("expiration_date") or None),
+                    strike_gte=(float(args["strike_gte"]) if args.get("strike_gte") is not None else None),
+                    strike_lte=(float(args["strike_lte"]) if args.get("strike_lte") is not None else None),
+                )
+                try:
+                    result_data = json.loads(tool_result)
+                    if "error" in result_data:
+                        yield {"type": "tool_status", "text": result_data["error"]}
+                    else:
+                        count = result_data.get("count")
+                        nxt = result_data.get("next_page_token")
+                        status = f"Got {data_type} data for {symbol}"
+                        if count is not None:
+                            status += f" ({count} items)"
+                        if nxt:
+                            status += " — more available, use filters or ask to continue"
+                        yield {"type": "tool_status", "text": status}
+                except Exception:
+                    pass
+                yield {
+                    "type": "tool_end",
+                    "tool_name": "alpaca_market_data",
+                    "tool_call_id": tc_id,
+                    "result": tool_result,
+                }
+                await asyncio.sleep(0.15)  # rate-limit back-to-back calls
+
             else:
                 tool_result = json.dumps({"error": f"Unknown tool: {name}"})
                 yield {
@@ -511,8 +555,20 @@ async def openai_chat_completions(request: Request):
         wiki_tools = [t for t in WIKI_TOOLS if t["function"]["name"] in enabled_set]
         if has_db:
             wiki_tools += [t for t in DB_TOOLS if t["function"]["name"] in enabled_set]
-        # Add any custom tools from the request (only those not already in WIKI_TOOLS or DB_TOOLS)
-        _known_tool_names = {t["function"]["name"] for t in WIKI_TOOLS} | {t["function"]["name"] for t in DB_TOOLS}
+        # Alpaca market data tool is always available when the API keys are
+        # configured (no frontend toggle — mirroring always-on wiki tools).
+        has_alpaca = (
+            bool(os.getenv("ZOPEDIA_ALPACA_API_KEY", "").strip())
+            and bool(os.getenv("ZOPEDIA_ALPACA_API_SECRET", "").strip())
+        )
+        if has_alpaca:
+            wiki_tools += ALPACA_TOOLS
+        # Add any custom tools from the request (only those not already known)
+        _known_tool_names = (
+            {t["function"]["name"] for t in WIKI_TOOLS}
+            | {t["function"]["name"] for t in DB_TOOLS}
+            | {t["function"]["name"] for t in ALPACA_TOOLS}
+        )
         wiki_tools += [t for t in tools if t.get("function", {}).get("name") not in _known_tool_names]
 
         has_wiki = "read_wiki_page" in enabled_set
