@@ -115,6 +115,11 @@ def llm_available() -> bool:
     return bool(_base_url() and _LLM_API_KEY)
 
 
+def alpaca_configured() -> bool:
+    """True when Alpaca API keys are configured (market data + news tools available)."""
+    return bool(_ALPACA_API_KEY and _ALPACA_API_SECRET)
+
+
 def _headers() -> dict[str, str]:
     return {"Authorization": f"Bearer {_LLM_API_KEY}"}
 

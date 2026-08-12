@@ -125,6 +125,99 @@ def _source_type(url: str) -> str:
     return "webpage"
 
 
+def _research_tools_with_alpaca() -> list[dict]:
+    """The research tool set. Includes the Alpaca market-data/news tools only
+    when their API keys are configured."""
+    from core.llm import (
+        ALPACA_TOOLS,
+        WIKI_READ_PAGE_TOOL,
+        WIKI_SEARCH_TOOL,
+        WIKI_WEB_SEARCH_TOOL,
+        alpaca_configured,
+    )
+
+    tools = [WIKI_READ_PAGE_TOOL, WIKI_SEARCH_TOOL, WIKI_WEB_SEARCH_TOOL]
+    if alpaca_configured():
+        tools += ALPACA_TOOLS
+    return tools
+
+
+def _alpaca_result_status(result_json: str, label: str) -> str | None:
+    """Human-readable status line for an Alpaca tool result (or None)."""
+    try:
+        data = json.loads(result_json)
+    except json.JSONDecodeError:
+        return None
+    if "error" in data:
+        return str(data["error"])
+    count = data.get("count")
+    status = f"Alpaca {label}: ok"
+    if count is not None:
+        status = f"Alpaca {label}: {count} items"
+    if data.get("next_page_token"):
+        status += " — more available"
+    return status
+
+
+async def _research_alpaca_tool(name: str, args: dict, tc_id: str, messages: list):
+    """Run an Alpaca tool during research. Yields research_tool_* events and
+    appends the tool result to messages. Only called for alpaca tool names."""
+    from core.llm import execute_alpaca_market_data, execute_alpaca_news
+
+    if name == "alpaca_market_data":
+        symbol = str(args.get("symbol", ""))
+        data_type = str(args.get("type", ""))
+        yield {
+            "type": "research_tool_start",
+            "tool_name": name,
+            "tool_call_id": tc_id,
+            "arguments": {"symbol": symbol, "type": data_type},
+        }
+        yield {"type": "research_tool_status", "text": f"Fetching {data_type} data for {symbol}..."}
+        result_json = await execute_alpaca_market_data(
+            symbol,
+            data_type,
+            timeframe=str(args.get("timeframe") or "1Day"),
+            limit=int(args.get("limit") or 10),
+            expiration_date=(args.get("expiration_date") or None),
+            strike_gte=(float(args["strike_gte"]) if args.get("strike_gte") is not None else None),
+            strike_lte=(float(args["strike_lte"]) if args.get("strike_lte") is not None else None),
+            option_type=(args.get("option_type") or None),
+            page_token=(args.get("page_token") or None),
+            start=(args.get("start") or None),
+            end=(args.get("end") or None),
+        )
+        label = "market data"
+    else:  # alpaca_news
+        yield {
+            "type": "research_tool_start",
+            "tool_name": name,
+            "tool_call_id": tc_id,
+            "arguments": {"symbols": args.get("symbols")},
+        }
+        yield {"type": "research_tool_status", "text": "Fetching Alpaca news..."}
+        result_json = await execute_alpaca_news(
+            symbols=(args.get("symbols") or None),
+            start=(args.get("start") or None),
+            end=(args.get("end") or None),
+            limit=int(args.get("limit") or 10),
+            include_content=bool(args.get("include_content", False)),
+            page_token=(args.get("page_token") or None),
+        )
+        label = "news"
+
+    status = _alpaca_result_status(result_json, label)
+    if status:
+        yield {"type": "research_tool_status", "text": status}
+    yield {
+        "type": "research_tool_end",
+        "tool_name": name,
+        "tool_call_id": tc_id,
+        "result": result_json,
+    }
+    messages.append({"role": "tool", "tool_call_id": tc_id, "content": result_json})
+
+
 # ---------------------------------------------------------------------------
 # Orchestrator
 # ---------------------------------------------------------------------------
@@ -150,9 +243,6 @@ class ResearchOrchestrator:
             execute_web_search,
             execute_wiki_read,
             execute_wiki_search,
-            WIKI_READ_PAGE_TOOL,
-            WIKI_SEARCH_TOOL,
-            WIKI_WEB_SEARCH_TOOL,
         )
 
         wiki_dir = str(self._wiki_pages_dir)
@@ -185,7 +275,7 @@ class ResearchOrchestrator:
             {"role": "user", "content": research_survey_user_prompt(topic)},
         ]
 
-        tools: list[dict[str, Any]] = [WIKI_READ_PAGE_TOOL, WIKI_SEARCH_TOOL, WIKI_WEB_SEARCH_TOOL]
+        tools: list[dict[str, Any]] = _research_tools_with_alpaca()
         cumulative_read_chars = 0
 
         for turn in range(1, max_turns + 1):
@@ -329,6 +419,10 @@ class ResearchOrchestrator:
                         "tool_call_id": tc_id,
                         "content": result_json,
                     })
+
+                elif name in ("alpaca_market_data", "alpaca_news"):
+                    async for evt in _research_alpaca_tool(name, args, tc_id, messages):
+                        yield evt
 
             if cumulative_read_chars >= max_cumulative:
                 logger.info("Research: survey read budget reached (%s chars)", cumulative_read_chars)
@@ -775,9 +869,6 @@ class ResearchOrchestrator:
             execute_web_search,
             execute_wiki_read,
             execute_wiki_search,
-            WIKI_READ_PAGE_TOOL,
-            WIKI_SEARCH_TOOL,
-            WIKI_WEB_SEARCH_TOOL,
         )
 
         wiki_dir = str(self._wiki_pages_dir)
@@ -809,7 +900,7 @@ class ResearchOrchestrator:
             {"role": "user", "content": research_final_summary_user_prompt(topic)},
         ]
 
-        tools: list[dict[str, Any]] = [WIKI_READ_PAGE_TOOL, WIKI_SEARCH_TOOL, WIKI_WEB_SEARCH_TOOL]
+        tools: list[dict[str, Any]] = _research_tools_with_alpaca()
         cumulative_read_chars = 0
         max_turns = int(os.getenv("ZOPEDIA_WIKI_MAX_TOOL_TURNS", "8"))
 
@@ -955,6 +1046,10 @@ class ResearchOrchestrator:
                         "tool_call_id": tc_id,
                         "content": result_json,
                     })
+
+                elif name in ("alpaca_market_data", "alpaca_news"):
+                    async for evt in _research_alpaca_tool(name, args, tc_id, messages):
+                        yield evt
 
             if cumulative_read_chars >= max_cumulative:
                 logger.info("Research: read budget reached (%s chars)", cumulative_read_chars)
