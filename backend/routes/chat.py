@@ -32,6 +32,7 @@ from core.llm import (
     chat_completions_non_streaming,
     chat_completions_stream,
     execute_alpaca_market_data,
+    execute_alpaca_news,
     execute_web_search,
     execute_wiki_read,
     execute_wiki_search,
@@ -446,6 +447,43 @@ async def _resolve_tool_calls_stream(
                 yield {
                     "type": "tool_end",
                     "tool_name": "alpaca_market_data",
+                    "tool_call_id": tc_id,
+                    "result": tool_result,
+                }
+                await asyncio.sleep(0.15)  # rate-limit back-to-back calls
+
+            elif name == "alpaca_news":
+                yield {
+                    "type": "tool_start",
+                    "tool_name": "alpaca_news",
+                    "tool_call_id": tc_id,
+                    "arguments": {"symbols": args.get("symbols")},
+                }
+                yield {"type": "tool_status", "text": "Fetching Alpaca news..."}
+                tool_result = await execute_alpaca_news(
+                    symbols=(args.get("symbols") or None),
+                    start=(args.get("start") or None),
+                    end=(args.get("end") or None),
+                    limit=int(args.get("limit") or 10),
+                    include_content=bool(args.get("include_content", False)),
+                    page_token=(args.get("page_token") or None),
+                )
+                try:
+                    result_data = json.loads(tool_result)
+                    if "error" in result_data:
+                        yield {"type": "tool_status", "text": result_data["error"]}
+                    else:
+                        count = result_data.get("count", 0)
+                        nxt = result_data.get("next_page_token")
+                        status = f"Got {count} news articles"
+                        if nxt:
+                            status += " — more available, ask to continue"
+                        yield {"type": "tool_status", "text": status}
+                except Exception:
+                    pass
+                yield {
+                    "type": "tool_end",
+                    "tool_name": "alpaca_news",
                     "tool_call_id": tc_id,
                     "result": tool_result,
                 }

@@ -219,11 +219,42 @@ TOOL_PARAM_ALPACA_LIMIT_DESC = (
     "the effective cap is 25 per call — use filters to narrow."
 )
 TOOL_PARAM_ALPACA_EXPIRATION_DESC = (
-    "Optional. Options expiration date in YYYY-MM-DD, or a range like "
-    "'2026-08-15:2026-12-19'. For options_chain."
+    "Optional. Options expiration date in YYYY-MM-DD (exact), or use start/end "
+    "date bounds via 'expiration_date_gte:expiration_date_lte' style ranges if "
+    "supported. For options_chain."
 )
 TOOL_PARAM_ALPACA_STRIKE_GTE_DESC = "Optional. Minimum strike price. For options_chain."
 TOOL_PARAM_ALPACA_STRIKE_LTE_DESC = "Optional. Maximum strike price. For options_chain."
+TOOL_PARAM_ALPACA_START_DESC = (
+    "Optional. Start date for 'bars' (YYYY-MM-DD) or 'alpaca_news' (YYYY-MM-DD)."
+)
+TOOL_PARAM_ALPACA_END_DESC = (
+    "Optional. End date for 'bars' (YYYY-MM-DD) or 'alpaca_news' (YYYY-MM-DD)."
+)
+TOOL_PARAM_ALPACA_OPTION_TYPE_DESC = "Optional. Filter options_chain to 'call' or 'put' contracts."
+TOOL_PARAM_ALPACA_PAGE_TOKEN_DESC = (
+    "Optional. Pagination token from a previous response's next_page_token, to "
+    "fetch the next page of results."
+)
+
+TOOL_DESC_ALPACA_NEWS = (
+    "Query financial news articles from the Alpaca Markets news API. "
+    "Returns recent articles with headline, summary, source, URL, timestamp, and "
+    "associated symbols. Filter by comma-separated symbols (e.g. 'AAPL,TSLA'), "
+    "date range (start/end in YYYY-MM-DD), and limit (1-50, default 10). "
+    "Set include_content=true to include full article content. "
+    "Use this for up-to-date company or market news the user asks about."
+)
+
+TOOL_PARAM_ALPACA_NEWS_SYMBOLS_DESC = (
+    "Optional. Comma-separated ticker symbols to filter news for (e.g. 'AAPL,TSLA')."
+)
+TOOL_PARAM_ALPACA_NEWS_LIMIT_DESC = (
+    "Max number of articles to return (1-50, default 10)."
+)
+TOOL_PARAM_ALPACA_NEWS_INCLUDE_CONTENT_DESC = (
+    "Optional. If true, include the full article content (may be large)."
+)
 
 
 # ═══════════════════════════════════════════════════════════════════════

@@ -16,13 +16,21 @@ import httpx
 from prompts import (
     LLM_JSON_MODE_PROMPT,
     TOOL_DESC_ALPACA_MARKET_DATA,
+    TOOL_DESC_ALPACA_NEWS,
     TOOL_DESC_DESCRIBE_DATABASE_SCHEMA,
     TOOL_DESC_EXECUTE_SQL as _tool_desc_execute_sql,
     TOOL_DESC_READ_WIKI_PAGE,
     TOOL_DESC_SEARCH_WIKI,
     TOOL_DESC_WEB_SEARCH,
+    TOOL_PARAM_ALPACA_END_DESC,
     TOOL_PARAM_ALPACA_EXPIRATION_DESC,
     TOOL_PARAM_ALPACA_LIMIT_DESC,
+    TOOL_PARAM_ALPACA_NEWS_INCLUDE_CONTENT_DESC,
+    TOOL_PARAM_ALPACA_NEWS_LIMIT_DESC,
+    TOOL_PARAM_ALPACA_NEWS_SYMBOLS_DESC,
+    TOOL_PARAM_ALPACA_OPTION_TYPE_DESC,
+    TOOL_PARAM_ALPACA_PAGE_TOKEN_DESC,
+    TOOL_PARAM_ALPACA_START_DESC,
     TOOL_PARAM_ALPACA_STRIKE_GTE_DESC,
     TOOL_PARAM_ALPACA_STRIKE_LTE_DESC,
     TOOL_PARAM_ALPACA_SYMBOL_DESC,
@@ -577,6 +585,14 @@ ALPACA_MARKET_DATA_TOOL = {
                     "type": "integer",
                     "description": TOOL_PARAM_ALPACA_LIMIT_DESC,
                 },
+                "start": {
+                    "type": "string",
+                    "description": TOOL_PARAM_ALPACA_START_DESC,
+                },
+                "end": {
+                    "type": "string",
+                    "description": TOOL_PARAM_ALPACA_END_DESC,
+                },
                 "expiration_date": {
                     "type": "string",
                     "description": TOOL_PARAM_ALPACA_EXPIRATION_DESC,
@@ -589,13 +605,60 @@ ALPACA_MARKET_DATA_TOOL = {
                     "type": "number",
                     "description": TOOL_PARAM_ALPACA_STRIKE_LTE_DESC,
                 },
+                "option_type": {
+                    "type": "string",
+                    "enum": ["call", "put"],
+                    "description": TOOL_PARAM_ALPACA_OPTION_TYPE_DESC,
+                },
+                "page_token": {
+                    "type": "string",
+                    "description": TOOL_PARAM_ALPACA_PAGE_TOKEN_DESC,
+                },
             },
             "required": ["symbol", "type"],
         },
     },
 }
 
-ALPACA_TOOLS = [ALPACA_MARKET_DATA_TOOL]
+ALPACA_NEWS_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "alpaca_news",
+        "description": TOOL_DESC_ALPACA_NEWS,
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "symbols": {
+                    "type": "string",
+                    "description": TOOL_PARAM_ALPACA_NEWS_SYMBOLS_DESC,
+                },
+                "start": {
+                    "type": "string",
+                    "description": TOOL_PARAM_ALPACA_START_DESC,
+                },
+                "end": {
+                    "type": "string",
+                    "description": TOOL_PARAM_ALPACA_END_DESC,
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": TOOL_PARAM_ALPACA_NEWS_LIMIT_DESC,
+                },
+                "include_content": {
+                    "type": "boolean",
+                    "description": TOOL_PARAM_ALPACA_NEWS_INCLUDE_CONTENT_DESC,
+                },
+                "page_token": {
+                    "type": "string",
+                    "description": TOOL_PARAM_ALPACA_PAGE_TOKEN_DESC,
+                },
+            },
+            "required": [],
+        },
+    },
+}
+
+ALPACA_TOOLS = [ALPACA_MARKET_DATA_TOOL, ALPACA_NEWS_TOOL]
 
 
 async def execute_web_search(query: str, max_results: int = 5, timelimit: str = "m") -> str:
@@ -693,6 +756,10 @@ async def execute_alpaca_market_data(
     expiration_date: str | None = None,
     strike_gte: float | None = None,
     strike_lte: float | None = None,
+    option_type: str | None = None,
+    page_token: str | None = None,
+    start: str | None = None,
+    end: str | None = None,
 ) -> str:
     """Query live market data from the Alpaca Markets API.
 
@@ -714,6 +781,8 @@ async def execute_alpaca_market_data(
 
     try:
         if data_type == "quote":
+            # GET /v2/stocks/{symbol}/quotes/latest — latest quote.
+            # Fields: t (timestamp), ap/asp (ask price/size), bp/bs (bid price/size).
             url = f"{_ALPACA_DATA_BASE_URL}/v2/stocks/{symbol}/quotes/latest"
             data = await asyncio.to_thread(_alpaca_request, url, {})
             if data is None:
@@ -722,17 +791,21 @@ async def execute_alpaca_market_data(
             return json.dumps({
                 "symbol": symbol,
                 "type": "quote",
-                "bid": quote.get("bid_price"),
-                "bid_size": quote.get("bid_size"),
-                "ask": quote.get("ask_price"),
-                "ask_size": quote.get("ask_size"),
-                "last": quote.get("t", {}).get("price") if isinstance(quote.get("t"), dict) else quote.get("last_price"),
+                "bid": quote.get("bp"),
+                "bid_size": quote.get("bs"),
+                "ask": quote.get("ap"),
+                "ask_size": quote.get("as"),
                 "timestamp": quote.get("t"),
             }, default=str)
 
         if data_type == "bars":
+            # GET /v2/stocks/{symbol}/bars — historical OHLCV bars.
             url = f"{_ALPACA_DATA_BASE_URL}/v2/stocks/{symbol}/bars"
             params = {"timeframe": str(timeframe or "1Day"), "limit": limit}
+            if start:
+                params["start"] = str(start)
+            if end:
+                params["end"] = str(end)
             data = await asyncio.to_thread(_alpaca_request, url, params)
             if data is None:
                 return json.dumps({"error": f"Alpaca: no bars returned for {symbol}."})
@@ -741,11 +814,12 @@ async def execute_alpaca_market_data(
                 "symbol": symbol,
                 "type": "bars",
                 "timeframe": params["timeframe"],
-                "bars": bars,  # each bar: o, h, l, c, v, n, t (OHLCV + trades + timestamp)
+                "bars": bars,  # each bar: t, o, h, l, c, v, n (OHLCV + trades + timestamp)
                 "count": len(bars),
             }, default=str)
 
         if data_type == "snapshot":
+            # GET /v2/stocks/{symbol}/snapshot — latest trade + quote + daily/prev bars.
             url = f"{_ALPACA_DATA_BASE_URL}/v2/stocks/{symbol}/snapshot"
             data = await asyncio.to_thread(_alpaca_request, url, {})
             if data is None:
@@ -771,22 +845,31 @@ async def execute_alpaca_market_data(
             }, default=str)
 
         if data_type == "options_chain":
-            url = f"{_ALPACA_DATA_BASE_URL}/v1beta1/options/snapshots"
+            # GET /v1beta1/options/snapshots/{underlying_symbol} — options snapshots.
+            # underlying_symbol is a PATH param (e.g. AAPL). Default feed is
+            # 'opra' if subscribed, else 'indicative' — don't force it.
+            url = f"{_ALPACA_DATA_BASE_URL}/v1beta1/options/snapshots/{symbol}"
             # Options snapshots are large — keep the default cap low so the
             # model gets a focused slice; surface next_page_token for more.
             chain_limit = min(limit, 25)
-            params = {"underlying_symbol": symbol, "limit": chain_limit, "feed": "indicative"}
+            params = {"limit": chain_limit}
             if expiration_date:
                 params["expiration_date"] = str(expiration_date)
             if strike_gte is not None:
                 params["strike_price_gte"] = strike_gte
             if strike_lte is not None:
                 params["strike_price_lte"] = strike_lte
+            if option_type in ("call", "put"):
+                params["type"] = option_type
+            if page_token:
+                params["page_token"] = str(page_token)
             data = await asyncio.to_thread(_alpaca_request, url, params)
             if data is None:
                 return json.dumps({"error": f"Alpaca: no options snapshots returned for {symbol}."})
             snapshots = data.get("snapshots") or {}
-            # snapshots is {option_symbol: {latestTrade, latestQuote, greeks, impliedVolatility, openInterest, ...}}
+            # snapshots is {option_symbol: {latestTrade, latestQuote, greeks,
+            # impliedVolatility, ...}}. openInterest is not in the documented
+            # schema — read defensively if the feed includes it.
             items = []
             for opt_symbol, snap in snapshots.items():
                 quote = snap.get("latestQuote") or {}
@@ -798,7 +881,7 @@ async def execute_alpaca_market_data(
                     "ask": quote.get("ap"),
                     "last": trade.get("p"),
                     "implied_volatility": snap.get("impliedVolatility"),
-                    "open_interest": snap.get("openInterest"),
+                    "open_interest": snap.get("openInterest") if snap.get("openInterest") is not None else snap.get("open_interest"),
                     "delta": greeks.get("delta"),
                     "gamma": greeks.get("gamma"),
                     "theta": greeks.get("theta"),
@@ -815,6 +898,71 @@ async def execute_alpaca_market_data(
         return json.dumps({"error": f"Alpaca: unknown type '{data_type}'. Use quote, bars, snapshot, or options_chain."})
     except Exception as exc:
         return json.dumps({"error": f"Alpaca market data failed: {exc}"})
+
+
+async def execute_alpaca_news(
+    symbols: str | None = None,
+    start: str | None = None,
+    end: str | None = None,
+    limit: int = 10,
+    include_content: bool = False,
+    page_token: str | None = None,
+) -> str:
+    """Query financial news from the Alpaca Markets news API.
+
+    Requires ZOPEDIA_ALPACA_API_KEY and ZOPEDIA_ALPACA_API_SECRET env vars.
+    Returns a JSON string (never raises).
+    """
+    if not _ALPACA_API_KEY or not _ALPACA_API_SECRET:
+        return json.dumps({"error": "Alpaca API key not configured. Set ZOPEDIA_ALPACA_API_KEY and ZOPEDIA_ALPACA_API_SECRET."})
+
+    try:
+        limit = max(1, min(int(limit or 10), 50))
+    except (TypeError, ValueError):
+        limit = 10
+
+    try:
+        # GET /v1beta1/news — news articles (fields: id, headline, author,
+        # created_at, updated_at, summary, content, symbols, source, url).
+        url = f"{_ALPACA_DATA_BASE_URL}/v1beta1/news"
+        params: dict = {"limit": limit, "sort": "desc"}
+        if symbols:
+            params["symbols"] = str(symbols)
+        if start:
+            params["start"] = str(start)
+        if end:
+            params["end"] = str(end)
+        if include_content:
+            params["include_content"] = True
+        if page_token:
+            params["page_token"] = str(page_token)
+        data = await asyncio.to_thread(_alpaca_request, url, params)
+        if data is None:
+            return json.dumps({"error": "Alpaca: no news returned (check symbols / API access)."})
+        news = data.get("news") or []
+        items = []
+        for a in news:
+            item = {
+                "headline": a.get("headline"),
+                "summary": a.get("summary"),
+                "source": a.get("source"),
+                "url": a.get("url"),
+                "author": a.get("author"),
+                "created_at": a.get("created_at"),
+                "updated_at": a.get("updated_at"),
+                "symbols": a.get("symbols") or [],
+            }
+            if include_content:
+                item["content"] = a.get("content")
+            items.append(item)
+        return json.dumps({
+            "type": "news",
+            "count": len(items),
+            "next_page_token": data.get("next_page_token"),
+            "articles": items,
+        }, default=str)
+    except Exception as exc:
+        return json.dumps({"error": f"Alpaca news failed: {exc}"})
 
 
 async def execute_video_search(query: str, max_results: int = 5, timelimit: str = "m") -> str:
