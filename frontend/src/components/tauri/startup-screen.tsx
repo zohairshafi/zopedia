@@ -51,8 +51,17 @@ function TealSpinner({ size = 24 }: { size?: number }) {
 function Logo() {
   return (
     <div className="flex flex-col items-center gap-4">
-      <img src="/sticker.png" alt="Zopedia" className="h-[72px] w-[72px] object-contain" />
-      <img src="/studio.png" alt="Zopedia" className="h-auto w-[250px] object-contain dark:invert" />
+      <img
+        src="/logo_main_light.png"
+        alt="Zopedia"
+        className="h-[72px] w-[72px] object-contain dark:hidden"
+      />
+      <img
+        src="/logo_main.png"
+        alt="Zopedia"
+        className="hidden h-[72px] w-[72px] object-contain dark:block"
+      />
+      <img src="/logotext.png" alt="Zopedia" className="h-auto w-[250px] object-contain dark:invert" />
     </div>
   );
 }

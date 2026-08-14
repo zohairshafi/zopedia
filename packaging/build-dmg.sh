@@ -49,11 +49,19 @@ if command -v create-dmg &>/dev/null; then
         "$DMG_PATH" \
         "$DIST_DIR/"
 else
-    echo "==> create-dmg not found, using hdiutil (no drag-to-install background)..."
+    echo "==> create-dmg not found, using hdiutil with an Applications shortcut..."
+    # Stage the .app next to a symlink to /Applications so the mounted DMG
+    # shows an "Applications" target for drag-to-install.
+    STAGING_DIR="$DIST_DIR/dmg-staging"
+    rm -rf "$STAGING_DIR"
+    mkdir -p "$STAGING_DIR"
+    cp -R "$APP_BUNDLE" "$STAGING_DIR/"
+    ln -s /Applications "$STAGING_DIR/Applications"
     hdiutil create -volname "$APP_NAME" \
-        -srcfolder "$APP_BUNDLE" \
+        -srcfolder "$STAGING_DIR" \
         -ov -format UDZO \
         "$DMG_PATH"
+    rm -rf "$STAGING_DIR"
 fi
 
 echo "==> Done: $DMG_PATH"

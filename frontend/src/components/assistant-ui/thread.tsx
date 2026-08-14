@@ -728,7 +728,16 @@ const ExportHTMLButton: FC = () => {
         toast.error("No messages to export yet.");
         return;
       }
-      await exportThreadAsHtml(msgs, thread?.title);
+      // Periodic research appends one message per daily run into a single
+      // thread, so the thread can accumulate dozens of full reports. Building
+      // an HTML with all of them is huge enough to crash the iOS WKWebView and
+      // hang the desktop save dialog. Export only the last 3 runs — each run
+      // is one message, so that's the last 3 messages. Regular chat threads
+      // are untouched.
+      const msgsToExport = threadId.startsWith("periodic-")
+        ? msgs.slice(-3)
+        : msgs;
+      await exportThreadAsHtml(msgsToExport, thread?.title);
     } catch (error) {
       toast.error("Export failed", {
         description: error instanceof Error ? error.message : "Unknown error",

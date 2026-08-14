@@ -60,7 +60,16 @@ export function UpdateBanner({
 
             {/* Header */}
             <div className="flex items-center gap-2">
-              <span className="text-lg">🦥</span>
+              <img
+                src="/circle-logo-small-light.png"
+                alt="Zopedia"
+                className="size-7 rounded-full object-cover dark:hidden"
+              />
+              <img
+                src="/circle-logo-small.png"
+                alt="Zopedia"
+                className="hidden size-7 rounded-full object-cover dark:block"
+              />
               <div>
                 <p className="text-sm font-semibold text-foreground">
                   New version: v{info.version}
