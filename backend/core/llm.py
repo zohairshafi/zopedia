@@ -17,6 +17,7 @@ from prompts import (
     LLM_JSON_MODE_PROMPT,
     TOOL_DESC_ALPACA_MARKET_DATA,
     TOOL_DESC_ALPACA_NEWS,
+    TOOL_DESC_ASK_USER_QUESTION,
     TOOL_DESC_DESCRIBE_DATABASE_SCHEMA,
     TOOL_DESC_EXECUTE_SQL as _tool_desc_execute_sql,
     TOOL_DESC_READ_WIKI_PAGE,
@@ -36,6 +37,8 @@ from prompts import (
     TOOL_PARAM_ALPACA_SYMBOL_DESC,
     TOOL_PARAM_ALPACA_TIMEFRAME_DESC,
     TOOL_PARAM_ALPACA_TYPE_DESC,
+    TOOL_PARAM_ASK_USER_OPTIONS_DESC,
+    TOOL_PARAM_ASK_USER_QUESTION_DESC,
     TOOL_PARAM_PATH_DESC,
     TOOL_PARAM_SQL_QUERY_DESC,
     TOOL_PARAM_TABLE_NAME_DESC,
@@ -664,6 +667,33 @@ ALPACA_NEWS_TOOL = {
 }
 
 ALPACA_TOOLS = [ALPACA_MARKET_DATA_TOOL, ALPACA_NEWS_TOOL]
+
+ASK_USER_QUESTION_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "ask_user_question",
+        "description": TOOL_DESC_ASK_USER_QUESTION,
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "question": {
+                    "type": "string",
+                    "description": TOOL_PARAM_ASK_USER_QUESTION_DESC,
+                },
+                "options": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": TOOL_PARAM_ASK_USER_OPTIONS_DESC,
+                },
+            },
+            "required": ["question"],
+        },
+    },
+}
+
+# Interactive tools pause generation to ask the user something and resume
+# with their answer. They are added to the chat tool list unconditionally.
+INTERACTIVE_TOOLS = [ASK_USER_QUESTION_TOOL]
 
 
 async def execute_web_search(query: str, max_results: int = 5, timelimit: str = "m") -> str:

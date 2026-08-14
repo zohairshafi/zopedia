@@ -256,6 +256,23 @@ TOOL_PARAM_ALPACA_NEWS_INCLUDE_CONTENT_DESC = (
     "Optional. If true, include the full article content (may be large)."
 )
 
+TOOL_DESC_ASK_USER_QUESTION = (
+    "Ask the user a clarifying question before answering. Use this only when the "
+    "request is genuinely ambiguous and the user's choice would materially change "
+    "the answer — not for minor details you can reasonably infer. Provide a concise "
+    "question and 2-5 concrete options when possible; the user can also type a "
+    "free-form answer. If the user declines or gives no answer, proceed with a "
+    "sensible default."
+)
+TOOL_PARAM_ASK_USER_QUESTION_DESC = (
+    "The clarifying question to ask the user. Keep it concise and specific."
+)
+TOOL_PARAM_ASK_USER_OPTIONS_DESC = (
+    "Optional. 2-5 preset answers the user can pick from. Use when there are a "
+    "handful of distinct reasonable choices. The user can still type a free-form "
+    "answer instead."
+)
+
 
 # ═══════════════════════════════════════════════════════════════════════
 # Research prompts (core/research.py)

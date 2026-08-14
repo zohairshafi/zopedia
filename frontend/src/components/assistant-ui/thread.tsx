@@ -17,6 +17,7 @@ import { PythonToolUI } from "@/components/assistant-ui/tool-ui-python";
 import { TerminalToolUI } from "@/components/assistant-ui/tool-ui-terminal";
 import { SqlToolUI } from "@/components/assistant-ui/tool-ui-sql";
 import { WebSearchToolUI } from "@/components/assistant-ui/tool-ui-web-search";
+import { AskUserQuestionToolUI } from "@/components/assistant-ui/tool-ui-ask-user";
 import { TooltipIconButton } from "@/components/assistant-ui/tooltip-icon-button";
 import {
   IntentAwareScrollProvider,
@@ -1128,6 +1129,7 @@ const AssistantMessage: FC = () => {
                 python: PythonToolUI,
                 terminal: TerminalToolUI,
                 execute_sql_query: SqlToolUI,
+                ask_user_question: AskUserQuestionToolUI,
               },
               Fallback: ToolFallback,
             },

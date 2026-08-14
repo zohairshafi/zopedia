@@ -27,6 +27,7 @@ from core.llm import (
     _base_url,
     _headers,
     ALPACA_TOOLS,
+    ASK_USER_QUESTION_TOOL,
     DB_TOOLS,
     WIKI_TOOLS,
     chat_completions_non_streaming,
@@ -81,6 +82,13 @@ _background_tasks: set[asyncio.Task] = set()
 # value is set high enough that it effectively never throttles normal usage.
 _active_bg_generations = 0
 _MAX_BG_GENERATIONS = 50
+
+# In-flight ask_user_question pauses.  Keyed by "session_id:tool_call_id".
+# The tool branch blocks on the asyncio.Event; the /api/chat/tool-answer
+# endpoint stores the answer and sets the event to resume the same stream.
+_chat_ask_events: dict[str, asyncio.Event] = {}
+_chat_ask_answers: dict[str, str] = {}
+_ASK_USER_TIMEOUT_SECONDS = 600
 
 _LLM_TIMEOUT_SECONDS = int(os.getenv("ZOPEDIA_LLM_TIMEOUT_SECONDS", "300"))
 _LLM_MODEL = os.getenv("ZOPEDIA_LLM_MODEL", "").strip()
@@ -173,6 +181,8 @@ async def _resolve_tool_calls_stream(
     resolved_model: str,
     max_turns: int | None = None,
     thinking: dict | None = None,
+    session_id: str | None = None,
+    client_gone: dict | None = None,
 ):
     if max_turns is None:
         max_turns = _wiki_max_tool_turns()
@@ -489,6 +499,51 @@ async def _resolve_tool_calls_stream(
                 }
                 await asyncio.sleep(0.15)  # rate-limit back-to-back calls
 
+            elif name == "ask_user_question":
+                question = str(args.get("question", ""))
+                options = args.get("options") or []
+                yield {
+                    "type": "tool_start",
+                    "tool_name": "ask_user_question",
+                    "tool_call_id": tc_id,
+                    "arguments": {"question": question, "options": options},
+                }
+                yield {"type": "tool_status", "text": "Waiting for your answer..."}
+
+                # Block until the user answers via /api/chat/tool-answer, or the
+                # wait times out, or the client disconnects (so a background
+                # generation can't hang waiting for input nobody can give).
+                answer = None
+                if session_id:
+                    key = f"{session_id}:{tc_id}"
+                    event = asyncio.Event()
+                    _chat_ask_events[key] = event
+                    deadline = time.monotonic() + _ASK_USER_TIMEOUT_SECONDS
+                    try:
+                        while not event.is_set() and not (client_gone or {}).get("gone"):
+                            remaining = deadline - time.monotonic()
+                            if remaining <= 0:
+                                break
+                            try:
+                                await asyncio.wait_for(event.wait(), timeout=min(remaining, 1.0))
+                            except asyncio.TimeoutError:
+                                continue
+                    finally:
+                        _chat_ask_events.pop(key, None)
+                    answer = _chat_ask_answers.pop(key, None)
+
+                if answer is not None:
+                    tool_result = json.dumps({"answer": answer})
+                else:
+                    tool_result = json.dumps({"answer": None, "note": "no response"})
+                yield {
+                    "type": "tool_end",
+                    "tool_name": "ask_user_question",
+                    "tool_call_id": tc_id,
+                    "result": tool_result,
+                }
+                await asyncio.sleep(0.15)
+
             else:
                 tool_result = json.dumps({"error": f"Unknown tool: {name}"})
                 yield {
@@ -601,11 +656,15 @@ async def openai_chat_completions(request: Request):
         )
         if has_alpaca:
             wiki_tools += ALPACA_TOOLS
+        # Interactive tools (ask_user_question) are always available so the model
+        # can pause and ask the user a clarifying question.
+        wiki_tools += [ASK_USER_QUESTION_TOOL]
         # Add any custom tools from the request (only those not already known)
         _known_tool_names = (
             {t["function"]["name"] for t in WIKI_TOOLS}
             | {t["function"]["name"] for t in DB_TOOLS}
             | {t["function"]["name"] for t in ALPACA_TOOLS}
+            | {t["function"]["name"] for t in [ASK_USER_QUESTION_TOOL]}
         )
         wiki_tools += [t for t in tools if t.get("function", {}).get("name") not in _known_tool_names]
 
@@ -754,7 +813,7 @@ async def openai_chat_completions(request: Request):
                 try:
                     # Phase 1: tool resolution with progress events
                     try:
-                        async for evt in _resolve_tool_calls_stream(messages, wiki_tools, resolved_model, thinking=thinking):
+                        async for evt in _resolve_tool_calls_stream(messages, wiki_tools, resolved_model, thinking=thinking, session_id=session_id, client_gone=client_gone):
                             etype = evt["type"]
                             if etype == "tool_status":
                                 _payload = json.dumps({'type': 'tool_status', 'content': evt['text']})
@@ -919,6 +978,31 @@ async def openai_chat_completions(request: Request):
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=result["error"])
         result["model"] = resolved_model
         return result
+
+
+# ── Ask-user answer delivery ────────────────────────────────────────
+
+
+@router.post("/api/chat/tool-answer")
+async def chat_tool_answer(request: Request):
+    """Deliver a user's answer to a paused ask_user_question tool call.
+
+    The in-flight generation is blocked on an asyncio.Event keyed by
+    "session_id:tool_call_id". Storing the answer and setting the event wakes
+    the generator, which yields tool_end and continues the same stream.
+    """
+    body = await request.json()
+    key = f"{body.get('session_id', '')}:{body.get('tool_call_id', '')}"
+    answer = body.get("answer", "")
+
+    if not key or key.startswith(":"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="session_id and tool_call_id are required")
+
+    _chat_ask_answers[key] = answer
+    event = _chat_ask_events.get(key)
+    if event:
+        event.set()
+    return {"status": "ok"}
 
 
 # ── Title generation ────────────────────────────────────────────────
