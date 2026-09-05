@@ -2,6 +2,15 @@
 // Copyright 2026-present the Zopedia team. All rights reserved. See /studio/LICENSE.AGPL-3.0
 
 import type { MessageRecord } from "../types";
+import { unified } from "unified";
+import remarkParse from "remark-parse";
+import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import remarkRehype from "remark-rehype";
+import rehypeKatex from "rehype-katex";
+import rehypeStringify from "rehype-stringify";
+import katexCss from "katex/dist/katex.min.css?inline";
+import { preprocessLaTeX } from "@/lib/latex";
 
 interface ContentPart {
   type: string;
@@ -23,288 +32,24 @@ function escapeHtml(text: string): string {
     .replace(/"/g, "&quot;");
 }
 
-// ── Block-level markdown parsing ────────────────────────────────
+// ── Markdown → HTML (off-the-shelf unified/remark/rehype) ─────────
 
-/** Token types produced by the block-level lexer. */
-type BlockToken =
-  | { type: "fence"; lang: string; code: string }
-  | { type: "table"; rows: string[][]; align: string[] }
-  | { type: "heading"; level: number; text: string }
-  | { type: "hr" }
-  | { type: "blockquote"; lines: string[] }
-  | { type: "list"; items: { checked: boolean | null; text: string }[]; ordered: boolean }
-  | { type: "paragraph"; text: string }
-  | { type: "blank" };
+// Synchronous markdown → HTML, using the same engine as the chat UI's
+// Streamdown component: remark-gfm for tables/strikethrough/task-lists, and
+// remark-math + rehype-katex for LaTeX (single-dollar inline math, matching
+// the chat).
+const markdownProcessor = unified()
+  .use(remarkParse)
+  .use(remarkGfm)
+  .use(remarkMath, { singleDollarTextMath: true })
+  .use(remarkRehype)
+  .use(rehypeKatex)
+  .use(rehypeStringify);
 
-/**
- * Lex markdown into block-level tokens.
- * Handles: fenced code blocks, tables, headings, horizontal rules,
- * blockquotes, ordered/unordered/task lists, and paragraphs.
- */
-function lexBlocks(markdown: string): BlockToken[] {
-  const lines = markdown.split("\n");
-  const tokens: BlockToken[] = [];
-  let i = 0;
-
-  while (i < lines.length) {
-    const line = lines[i] ?? "";
-
-    // Fenced code block
-    const fenceMatch = line.match(/^(`{3,})(\w*)\s*$/);
-    if (fenceMatch) {
-      const fence = fenceMatch[1] ?? "";
-      const lang = fenceMatch[2] ?? "";
-      const codeLines: string[] = [];
-      i++;
-      while (i < lines.length) {
-        if (lines[i]?.startsWith(fence)) {
-          i++;
-          break;
-        }
-        codeLines.push(lines[i] ?? "");
-        i++;
-      }
-      tokens.push({ type: "fence", lang, code: codeLines.join("\n") });
-      continue;
-    }
-
-    // Table (must have at least 2 lines: header + separator)
-    if (line.includes("|")) {
-      const table = tryParseTable(lines, i);
-      if (table) {
-        tokens.push({ type: "table", rows: table.rows, align: table.align });
-        i = table.nextIndex;
-        continue;
-      }
-    }
-
-    // Horizontal rule
-    if (/^(-{3,}|\*{3,}|_{3,})\s*$/.test(line)) {
-      tokens.push({ type: "hr" });
-      i++;
-      continue;
-    }
-
-    // Heading
-    const headingMatch = line.match(/^(#{1,6})\s+(.+)/);
-    if (headingMatch) {
-      tokens.push({
-        type: "heading",
-        level: (headingMatch[1] ?? "").length,
-        text: headingMatch[2] ?? "",
-      });
-      i++;
-      continue;
-    }
-
-    // Blockquote (may be multi-line)
-    if (line.startsWith("> ")) {
-      const bqLines: string[] = [];
-      while (i < lines.length && (lines[i] ?? "").startsWith("> ")) {
-        bqLines.push((lines[i] ?? "").replace(/^> /, ""));
-        i++;
-      }
-      tokens.push({ type: "blockquote", lines: bqLines });
-      continue;
-    }
-
-    // Unordered / task list
-    const ulMatch = line.match(/^(\s*)[-*+]\s+(.*)$/);
-    if (ulMatch) {
-      const listItems: { checked: boolean | null; text: string }[] = [];
-      let isTaskList = false;
-      while (i < lines.length) {
-        const liLine = lines[i] ?? "";
-        // Allow blank lines between loose list items — peek ahead to
-        // see if a list item follows the blank(s), and if so, continue.
-        if (liLine.trim() === "") {
-          let peek = i + 1;
-          while (peek < lines.length && (lines[peek] ?? "").trim() === "") peek++;
-          if (peek < lines.length && /^(\s*)[-*+]\s+/.test(lines[peek] ?? "")) {
-            i = peek;
-            continue;
-          }
-          break;
-        }
-        const liMatch = liLine.match(/^(\s*)[-*+]\s+(.*)$/);
-        if (!liMatch) break;
-        let content = liMatch[2] ?? "";
-        // Task list checkbox
-        const taskMatch = content.match(/^\[( |x|X)\]\s*(.*)/);
-        let checked: boolean | null = null;
-        if (taskMatch) {
-          isTaskList = true;
-          checked = (taskMatch[1] ?? " ").toLowerCase() === "x";
-          content = taskMatch[2] ?? "";
-        }
-        listItems.push({ checked, text: content });
-        i++;
-      }
-      tokens.push({
-        type: "list",
-        items: listItems,
-        ordered: false,
-        ...(isTaskList ? {} : {}),
-      } as BlockToken);
-      continue;
-    }
-
-    // Ordered list
-    const olMatch = line.match(/^(\s*)\d+\.\s+(.*)$/);
-    if (olMatch) {
-      const listItems: { checked: boolean | null; text: string }[] = [];
-      while (i < lines.length) {
-        const liLine = lines[i] ?? "";
-        // Allow blank lines between loose list items
-        if (liLine.trim() === "") {
-          let peek = i + 1;
-          while (peek < lines.length && (lines[peek] ?? "").trim() === "") peek++;
-          if (peek < lines.length && /^\d+\.\s+/.test(lines[peek] ?? "")) {
-            i = peek;
-            continue;
-          }
-          break;
-        }
-        const liMatch = liLine.match(/^\d+\.\s+(.*)$/);
-        if (!liMatch) break;
-        listItems.push({ checked: null, text: liMatch[1] ?? "" });
-        i++;
-      }
-      tokens.push({ type: "list", items: listItems, ordered: true });
-      continue;
-    }
-
-    // Blank line
-    if (line.trim() === "") {
-      tokens.push({ type: "blank" });
-      i++;
-      continue;
-    }
-
-    // Paragraph — collect until blank line or next block token
-    const paraLines: string[] = [];
-    while (i < lines.length && (lines[i] ?? "").trim() !== "") {
-      // Stop if the line would start a new block. These conditions MUST match
-      // the block-start checks above exactly — a mismatch (e.g. a heading
-      // marker with no text, or an invalid fence) would otherwise break here
-      // without advancing i and spin the outer loop forever.
-      const peek = lines[i] ?? "";
-      if (
-        /^(`{3,})(\w*)\s*$/.test(peek) ||
-        peek.startsWith("> ") ||
-        /^(\s*)[-*+]\s+(.*)$/.test(peek) ||
-        /^(\s*)\d+\.\s+(.*)$/.test(peek) ||
-        /^(#{1,6})\s+(.+)/.test(peek) ||
-        /^(-{3,}|\*{3,}|_{3,})\s*$/.test(peek) ||
-        (peek.includes("|") && tryParseTable(lines, i) !== null)
-      ) {
-        break;
-      }
-      paraLines.push(peek);
-      i++;
-    }
-    // Safety net: a line that matches none of the block checks above (and is
-    // not blank) must still be consumed, or the outer loop would never advance.
-    if (paraLines.length === 0) {
-      tokens.push({ type: "paragraph", text: lines[i] ?? "" });
-      i++;
-    } else {
-      tokens.push({ type: "paragraph", text: paraLines.join("\n") });
-    }
-  }
-
-  return tokens;
-}
-
-/** Try to parse a GFM table starting at the given line index. Returns null if not a valid table. */
-function tryParseTable(
-  lines: string[],
-  start: number,
-): { rows: string[][]; align: string[]; nextIndex: number } | null {
-  const headerLine = lines[start];
-  const sepLine = lines[start + 1];
-  if (!headerLine || !sepLine) return null;
-  if (!/^\|.*\|$/.test(headerLine.trim()) && !/^[^|]+\|/.test(headerLine.trim())) return null;
-  if (!/^[\s:| -]+$/.test(sepLine.trim())) return null;
-
-  const align = parseTableAlign(sepLine);
-  const rows: string[][] = [];
-  rows.push(parseTableRow(headerLine));
-
-  let i = start + 2;
-  while (i < lines.length) {
-    const rowLine = lines[i] ?? "";
-    if (!rowLine.includes("|")) break;
-    rows.push(parseTableRow(rowLine));
-    i++;
-  }
-
-  return { rows, align, nextIndex: i };
-}
-
-function parseTableAlign(sep: string): string[] {
-  return sep
-    .trim()
-    .replace(/^\|/, "")
-    .replace(/\|$/, "")
-    .split("|")
-    .map((cell) => {
-      const trimmed = cell.trim();
-      if (trimmed.startsWith(":") && trimmed.endsWith(":")) return "center";
-      if (trimmed.endsWith(":")) return "right";
-      return "left";
-    });
-}
-
-function parseTableRow(line: string): string[] {
-  return line
-    .trim()
-    .replace(/^\|/, "")
-    .replace(/\|$/, "")
-    .split("|")
-    .map((cell) => cell.trim());
-}
-
-// ── Inline markdown rendering ───────────────────────────────────
-
-/**
- * Render inline markdown (bold, italic, code, links, images, strikethrough).
- * Must be called on text that has already had block-level tokens extracted.
- */
-function renderInline(text: string): string {
-  let out = text;
-
-  // Images (must come before links)
-  out = out.replace(
-    /!\[([^\]]*)\]\(([^)]+)\)/g,
-    '<img src="$2" alt="$1" loading="lazy">',
-  );
-
-  // Links
-  out = out.replace(
-    /\[([^\]]+)\]\(([^)]+)\)/g,
-    '<a href="$2" target="_blank" rel="noopener">$1</a>',
-  );
-
-  // Inline code
-  out = out.replace(/`([^`]+)`/g, (_m: string, code: string) => `<code>${escapeHtml(code)}</code>`);
-
-  // Bold
-  out = out.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
-
-  // Italic
-  out = out.replace(/\*([^*]+)\*/g, "<em>$1</em>");
-
-  // Strikethrough
-  out = out.replace(/~~([^~]+)~~/g, "<del>$1</del>");
-
-  return out;
-}
-
-/** Render a fenced code block to HTML. */
-function renderFence(lang: string, code: string): string {
-  const langLabel = lang ? `<span class="code-lang">${escapeHtml(lang)}</span>` : "";
-  return `<pre>${langLabel}<code class="language-${escapeHtml(lang)}">${escapeHtml(code.trimEnd())}</code></pre>`;
+/** Render markdown text to HTML using the same engine as the chat UI. */
+function renderMarkdown(markdown: string): string {
+  if (!markdown) return "";
+  return markdownProcessor.processSync(preprocessLaTeX(markdown)).toString();
 }
 
 // ── Tool result parsing (web_search) ────────────────────────────
@@ -345,89 +90,6 @@ function extractDomain(url: string): string {
   } catch {
     return url;
   }
-}
-
-// ── Full markdown rendering (block + inline) ────────────────────
-
-function renderMarkdown(markdown: string): string {
-  const tokens = lexBlocks(markdown);
-  const htmlParts: string[] = [];
-
-  for (let t = 0; t < tokens.length; t++) {
-    const token = tokens[t]!;
-
-    switch (token.type) {
-      case "fence":
-        htmlParts.push(renderFence(token.lang, token.code));
-        break;
-
-      case "table": {
-        const { rows, align } = token;
-        const thead = `<thead><tr>${rows[0]!
-          .map(
-            (cell, ci) =>
-              `<th style="text-align:${align[ci] ?? "left"}">${renderInline(cell)}</th>`,
-          )
-          .join("")}</tr></thead>`;
-        const tbody = `<tbody>${rows
-          .slice(1)
-          .map(
-            (row) =>
-              `<tr>${row
-                .map(
-                  (cell, ci) =>
-                    `<td style="text-align:${align[ci] ?? "left"}">${renderInline(cell)}</td>`,
-                )
-                .join("")}</tr>`,
-          )
-          .join("")}</tbody>`;
-        htmlParts.push(`<div class="table-wrapper"><table>${thead}${tbody}</table></div>`);
-        break;
-      }
-
-      case "heading":
-        htmlParts.push(
-          `<h${token.level}>${renderInline(token.text)}</h${token.level}>`,
-        );
-        break;
-
-      case "hr":
-        htmlParts.push("<hr>");
-        break;
-
-      case "blockquote":
-        htmlParts.push(
-          `<blockquote>${token.lines.map((l) => renderInline(l)).join("<br>")}</blockquote>`,
-        );
-        break;
-
-      case "list": {
-        const tag = token.ordered ? "ol" : "ul";
-        const items = token.items
-          .map((item) => {
-            const isTask = item.checked !== null;
-            const checkbox = isTask
-              ? `<input type="checkbox" disabled${item.checked ? " checked" : ""}>`
-              : "";
-            const cls = isTask ? ' class="task-list-item"' : "";
-            return `<li${cls}>${checkbox}${renderInline(item.text)}</li>`;
-          })
-          .join("");
-        htmlParts.push(`<${tag}>${items}</${tag}>`);
-        break;
-      }
-
-      case "paragraph":
-        htmlParts.push(`<p>${renderInline(token.text)}</p>`);
-        break;
-
-      case "blank":
-        // skip — spacing is handled by CSS margins
-        break;
-    }
-  }
-
-  return htmlParts.join("\n");
 }
 
 // ── Tool icons (inline SVGs matching lucide-react icons) ─────────
@@ -984,18 +646,6 @@ export async function exportThreadAsHtml(
     line-height: 1.55;
     position: relative;
   }
-  .message-body pre .code-lang {
-    position: absolute;
-    top: 0;
-    right: 0;
-    padding: 2px 8px;
-    font-size: 0.7rem;
-    font-family: var(--font-sans);
-    color: var(--code-fg);
-    opacity: 0.5;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-  }
   .message-body pre code {
     background: none;
     padding: 0;
@@ -1033,16 +683,11 @@ export async function exportThreadAsHtml(
   .message-body del { text-decoration: line-through; opacity: 0.7; }
 
   /* ── Tables ────────────────────────────────────────── */
-  .table-wrapper {
-    overflow-x: auto;
-    margin: 10px 0;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-  }
   .message-body table {
     width: 100%;
     border-collapse: collapse;
     font-size: 0.9em;
+    margin: 10px 0;
   }
   .message-body thead {
     border-bottom: 2px solid var(--border);
@@ -1295,6 +940,7 @@ export async function exportThreadAsHtml(
 
   .empty { color: var(--fg-muted); }
 </style>
+<style>${katexCss}</style>
 </head>
 <body>
 <header>
