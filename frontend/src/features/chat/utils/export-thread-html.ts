@@ -184,14 +184,17 @@ function lexBlocks(markdown: string): BlockToken[] {
     // Paragraph — collect until blank line or next block token
     const paraLines: string[] = [];
     while (i < lines.length && (lines[i] ?? "").trim() !== "") {
-      // Stop if the line would start a new block
+      // Stop if the line would start a new block. These conditions MUST match
+      // the block-start checks above exactly — a mismatch (e.g. a heading
+      // marker with no text, or an invalid fence) would otherwise break here
+      // without advancing i and spin the outer loop forever.
       const peek = lines[i] ?? "";
       if (
-        peek.startsWith("```") ||
+        /^(`{3,})(\w*)\s*$/.test(peek) ||
         peek.startsWith("> ") ||
-        /^(\s*)[-*+]\s+/.test(peek) ||
-        /^\d+\.\s+/.test(peek) ||
-        /^(#{1,6})\s+/.test(peek) ||
+        /^(\s*)[-*+]\s+(.*)$/.test(peek) ||
+        /^(\s*)\d+\.\s+(.*)$/.test(peek) ||
+        /^(#{1,6})\s+(.+)/.test(peek) ||
         /^(-{3,}|\*{3,}|_{3,})\s*$/.test(peek) ||
         (peek.includes("|") && tryParseTable(lines, i) !== null)
       ) {
@@ -200,7 +203,12 @@ function lexBlocks(markdown: string): BlockToken[] {
       paraLines.push(peek);
       i++;
     }
-    if (paraLines.length > 0) {
+    // Safety net: a line that matches none of the block checks above (and is
+    // not blank) must still be consumed, or the outer loop would never advance.
+    if (paraLines.length === 0) {
+      tokens.push({ type: "paragraph", text: lines[i] ?? "" });
+      i++;
+    } else {
       tokens.push({ type: "paragraph", text: paraLines.join("\n") });
     }
   }
