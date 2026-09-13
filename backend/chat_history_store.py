@@ -21,7 +21,11 @@ def _ensure_dir(path: Path) -> Path:
 
 DB_PATH = _auth_root() / "chat_history.db"
 
-MESSAGE_CONTENT_MAX_CHARS = 100_000
+# Cap on a single message's serialized content. Must exceed the cumulative wiki
+# read budget (ZOPEDIA_WIKI_MAX_CUMULATIVE_READ_CHARS, default 500k) plus
+# reasoning, or large multi-tool messages get truncated mid-result. 1M chars
+# gives ~2x headroom over the read budget.
+MESSAGE_CONTENT_MAX_CHARS = 1_000_000
 
 
 def _get_connection() -> sqlite3.Connection:
