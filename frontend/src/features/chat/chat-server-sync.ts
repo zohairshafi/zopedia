@@ -4,7 +4,6 @@ import type { MessageRecord, ThreadRecord } from "./types";
 import { toast } from "sonner";
 
 const DEBOUNCE_MS = 800;
-const MAX_MESSAGE_CONTENT_BYTES = 40_000; // chunk messages exceeding ~40KB serialized
 const debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 // In-memory set of message IDs already confirmed synced to the server.
@@ -90,44 +89,6 @@ function _installUnloadHandlers(): void {
 
 // Install once at module load
 _installUnloadHandlers();
-
-function chunkLargeContent(content: unknown): unknown[] {
-  // If content is a string and exceeds the size threshold, split it at
-  // paragraph boundaries so each chunk stays under the byte limit.
-  if (typeof content !== "string") {
-    // Non-string content (arrays of content blocks) can't be chunked.
-    // Log a warning if it's unusually large.
-    const jsonSize = new TextEncoder().encode(JSON.stringify(content)).length;
-    if (jsonSize > MAX_MESSAGE_CONTENT_BYTES) {
-      console.warn("[sync] non-string content exceeds size limit, sending as-is", jsonSize);
-    }
-    return [content];
-  }
-  const jsonSize = new TextEncoder().encode(JSON.stringify(content)).length;
-  if (jsonSize <= MAX_MESSAGE_CONTENT_BYTES) return [content];
-
-  // Split at double-newline (paragraph) boundaries, using byte-aware slicing
-  const encoder = new TextEncoder();
-  const maxChunkBytes = Math.floor(MAX_MESSAGE_CONTENT_BYTES / 2);
-  const parts: string[] = [];
-  let remaining = content;
-  while (remaining.length > 0) {
-    // Start with a character-based estimate, then shrink to fit byte limit
-    let chunk = remaining.slice(0, Math.floor(maxChunkBytes * 0.75));
-    while (encoder.encode(chunk).length > maxChunkBytes && chunk.length > 1) {
-      chunk = chunk.slice(0, Math.floor(chunk.length * 0.9));
-    }
-    // Back up to the last paragraph boundary for clean splits
-    const lastBreak = chunk.lastIndexOf("\n\n");
-    if (lastBreak > chunk.length / 2) {
-      chunk = chunk.slice(0, lastBreak);
-    }
-    parts.push(chunk.trim());
-    remaining = remaining.slice(chunk.length).trimStart();
-  }
-  console.log("[sync] chunked large message into", parts.length, "parts (original bytes:", jsonSize, ")");
-  return parts;
-}
 
 // Called when the app returns to the foreground.  Registered by ChatRuntimeProvider
 // (which has aui access) so the active thread can re-sync + reload — picking up a
@@ -282,48 +243,18 @@ async function syncThreadToServer(threadId: string): Promise<void> {
     return;
   }
 
-  // Prepare messages, chunking oversized content.
-  // Also build a map from send-ID → original message so we can correctly
-  // track which original messages were confirmed after the server responds.
-  type Msg = {
-    id: string;
-    role: string;
-    content: unknown;
-    reasoning_content?: string;
-    parent_id?: string | null;
-    created_at?: string;
-  };
-  const toSend: Msg[] = [];
-  const sendIdToOriginal = new Map<string, string>(); // send-id → original message id
-  const chunksPerOriginal = new Map<string, number>(); // original id → expected chunk count
-  for (const m of unsynced) {
-    const chunks = chunkLargeContent(m.content);
-    chunksPerOriginal.set(m.id, chunks.length);
-    if (chunks.length === 1) {
-      toSend.push({
-        id: m.id,
-        role: m.role,
-        content: m.content,
-        reasoning_content: (m.metadata as any)?.reasoning_content,
-        parent_id: m.parentId,
-        created_at: new Date(m.createdAt).toISOString(),
-      });
-      sendIdToOriginal.set(m.id, m.id);
-    } else {
-      for (let i = 0; i < chunks.length; i++) {
-        const chunkId = `${m.id}-chunk-${i}`;
-        toSend.push({
-          id: chunkId,
-          role: m.role,
-          content: chunks[i],
-          reasoning_content: (m.metadata as any)?.reasoning_content,
-          parent_id: i === 0 ? m.parentId : `${m.id}-chunk-${i - 1}`,
-          created_at: new Date(m.createdAt + i).toISOString(),
-        });
-        sendIdToOriginal.set(chunkId, m.id);
-      }
-    }
-  }
+  // Prepare messages — send each unsynced message as-is.  We do NOT chunk
+  // oversized content: the old chunking split JSON content into invalid
+  // fragments (rendered as raw JSON on fresh clients), and it's redundant with
+  // the keepalive-skip logic in appendMessagesToServer.
+  const toSend = unsynced.map((m) => ({
+    id: m.id,
+    role: m.role,
+    content: m.content,
+    reasoning_content: (m.metadata as any)?.reasoning_content,
+    parent_id: m.parentId,
+    created_at: new Date(m.createdAt).toISOString(),
+  }));
 
   const isFirstSync = allMsgs.every((m) => !syncedMessageIds.has(m.id));
 
@@ -350,18 +281,10 @@ async function syncThreadToServer(threadId: string): Promise<void> {
     confirmedSendIds = await appendMessagesToServer(threadId, thread.title, toSend);
   }
 
-  // Only mark a message synced if ALL its chunks were confirmed by the server.
-  const confirmedByOriginal = new Map<string, number>(); // original id → confirmed chunk count
-  for (const sendId of confirmedSendIds) {
-    const origId = sendIdToOriginal.get(sendId);
-    if (origId) confirmedByOriginal.set(origId, (confirmedByOriginal.get(origId) ?? 0) + 1);
-  }
-  for (const m of unsynced) {
-    const expected = chunksPerOriginal.get(m.id) ?? 1;
-    const confirmed = confirmedByOriginal.get(m.id) ?? 0;
-    if (confirmed >= expected) {
-      syncedMessageIds.add(m.id);
-    }
+  // Mark confirmed messages as synced (send-id === message id now that we no
+  // longer chunk).
+  for (const id of confirmedSendIds) {
+    syncedMessageIds.add(id);
   }
   console.info("[sync] thread %s: sent %d msgs, confirmed %d, total synced %d",
     threadId, toSend.length, confirmedSendIds.length, syncedMessageIds.size);
@@ -487,8 +410,97 @@ function parseStoredContent(content: unknown): unknown {
   try {
     return JSON.parse(content);
   } catch {
+    // Best-effort repair of content the server truncated mid-string.
+    const repaired = repairTruncatedJson(content);
+    if (repaired !== null) {
+      try {
+        return JSON.parse(repaired);
+      } catch {
+        // fall through to raw string
+      }
+    }
     return content;
   }
+}
+
+// The server used to truncate oversized content by cutting the serialized JSON
+// at a fixed char limit and appending "\n\n...(truncated at …)". That cut lands
+// mid-string, so the JSON no longer parses and the message renders as raw JSON.
+// Strip the marker and close the unterminated string + any open brackets so the
+// message parses again (the tail of a large tool result is lost, but the
+// structure and most of the content survive).
+function repairTruncatedJson(raw: string): string | null {
+  const markerRe = /\n\n\.\.\.\(truncated at \d+ chars, original: \d+ chars\)\s*$/;
+  if (!markerRe.test(raw)) return null;
+  const base = raw.replace(markerRe, "");
+
+  let inString = false;
+  let escaped = false;
+  const stack: string[] = [];
+  for (const ch of base) {
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === "{" || ch === "[") stack.push(ch);
+    else if (ch === "}" || ch === "]") stack.pop();
+  }
+
+  let out = base;
+  if (inString) {
+    if (escaped) out = out.slice(0, -1); // drop a dangling backslash at the cut
+    out += '"';
+  }
+  while (stack.length > 0) {
+    out += stack.pop() === "{" ? "}" : "]";
+  }
+  return out;
+}
+
+// Older sync code split oversized message content into `{id}-chunk-{N}`
+// messages whose `content` is an invalid JSON fragment (cut mid-string). Those
+// fragments render as raw JSON. Reassemble consecutive chunks back into a
+// single message so they parse and render correctly. Fragments were contiguous
+// slices, so concatenation reconstructs the original JSON (up to lost boundary
+// whitespace); if it still fails to parse, the message falls back to raw text.
+function reassembleChunkedMessages(messages: any[]): any[] {
+  const chunkRe = /^(.*)-chunk-(\d+)$/;
+  const byBase = new Map<string, any[]>();
+  const others: any[] = [];
+  for (const msg of messages) {
+    const m = msg?.id && typeof msg.id === "string" ? msg.id.match(chunkRe) : null;
+    if (m) {
+      const list = byBase.get(m[1]) ?? [];
+      list.push(msg);
+      byBase.set(m[1], list);
+    } else {
+      others.push(msg);
+    }
+  }
+  if (byBase.size === 0) return messages;
+
+  const reassembled: any[] = [...others];
+  for (const [base, chunks] of byBase) {
+    chunks.sort((a, b) => {
+      const ai = parseInt(a.id.match(chunkRe)?.[2] ?? "0", 10);
+      const bi = parseInt(b.id.match(chunkRe)?.[2] ?? "0", 10);
+      return ai - bi;
+    });
+    const full = chunks
+      .map((c) => (typeof c.content === "string" ? c.content : ""))
+      .join("");
+    reassembled.push({
+      ...chunks[0],
+      id: base,
+      content: parseStoredContent(full),
+    });
+  }
+  // Preserve server order so parent_id references resolve.
+  reassembled.sort((a, b) => String(a.created_at ?? "").localeCompare(String(b.created_at ?? "")));
+  return reassembled;
 }
 
 export async function syncThreadMessagesFromServer(
@@ -497,6 +509,7 @@ export async function syncThreadMessagesFromServer(
 ): Promise<number> {
   const result = await fetchServerThread(threadId, opts);
   if (!result?.messages?.length) return 0;
+  const messages = reassembleChunkedMessages(result.messages);
 
   // Tombstones: locally-deleted message ids that must NOT be resurrected by a
   // downsync. The server DELETE may not have landed yet (fire-and-forget), so
@@ -512,7 +525,7 @@ export async function syncThreadMessagesFromServer(
   );
   const serverIds = new Set<string>();
   let insertedCount = 0;
-  for (const msg of result.messages) {
+  for (const msg of messages) {
     serverIds.add(msg.id);
     if (tombstones.has(msg.id)) continue; // don't resurrect a locally-deleted message
     if (!existingIds.has(msg.id)) {

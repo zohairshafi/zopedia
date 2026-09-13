@@ -89,12 +89,33 @@ def _truncate_content(content: str | None) -> str | None:
     )
 
 
+def _truncate_content_strings(value: Any) -> Any:
+    """Recursively truncate string values so the surrounding JSON stays valid.
+
+    Truncating the serialized JSON string (what _truncate_content does for the
+    legacy string-content path) cuts it mid-string and breaks client parsing.
+    Truncating individual string values keeps the JSON structure intact.
+    """
+    if isinstance(value, str):
+        if len(value) <= MESSAGE_CONTENT_MAX_CHARS:
+            return value
+        return (
+            value[:MESSAGE_CONTENT_MAX_CHARS]
+            + f" ...(truncated at {MESSAGE_CONTENT_MAX_CHARS} chars, original: {len(value)} chars)"
+        )
+    if isinstance(value, list):
+        return [_truncate_content_strings(v) for v in value]
+    if isinstance(value, dict):
+        return {k: _truncate_content_strings(v) for k, v in value.items()}
+    return value
+
+
 def _serialize_content(content: Any) -> str | None:
     if content is None:
         return None
     if isinstance(content, str):
         return _truncate_content(content)
-    return _truncate_content(json.dumps(content, ensure_ascii=False))
+    return json.dumps(_truncate_content_strings(content), ensure_ascii=False)
 
 
 # ── Threads ──────────────────────────────────────────────────────────
