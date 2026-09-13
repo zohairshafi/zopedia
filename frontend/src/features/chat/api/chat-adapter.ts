@@ -14,6 +14,7 @@ import {
   validateModel,
 } from "./chat-api";
 import { db } from "../db";
+import { markBackgroundCompletionPending } from "../chat-server-sync";
 import {
   resolveReasoningStyle,
   useChatRuntimeStore,
@@ -680,7 +681,7 @@ async function autoLoadSmallestModel(): Promise<{
 
 export function createOpenAIStreamAdapter(): ChatModelAdapter {
   return {
-    async *run({ messages, abortSignal, unstable_threadId, unstable_assistantMessageId }) {
+    async *run({ messages, abortSignal, unstable_threadId, unstable_assistantMessageId, unstable_parentId }) {
       let runtime = useChatRuntimeStore.getState();
       // Capture the thread ID once at the start so it stays stable even if
       // the user switches chats while waiting for model load / auto-load.
@@ -914,6 +915,7 @@ export function createOpenAIStreamAdapter(): ChatModelAdapter {
                   })(),
                   session_id: resolvedThreadId,
                   ...(assistantMessageId ? { assistant_message_id: assistantMessageId } : {}),
+                  ...(unstable_parentId ? { parent_id: unstable_parentId } : {}),
                 }
               : {}),
           },
@@ -1121,6 +1123,7 @@ export function createOpenAIStreamAdapter(): ChatModelAdapter {
             // the thread; it will appear here when the user returns.  Do not
             // show a fatal error.  The friendly thrown message becomes the
             // inline message status so the partial bubble reads as a notice.
+            if (resolvedThreadId) markBackgroundCompletionPending(resolvedThreadId);
             toast.info("Finishing response in the background", {
               description:
                 "The connection was lost — the full response will appear in this chat when you're back online.",

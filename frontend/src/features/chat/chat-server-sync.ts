@@ -18,6 +18,25 @@ const syncedMessageIds = new Set<string>();
 // across sessions.
 const recentlyDeletedThreadIds = new Set<string>();
 
+// Thread IDs with an in-flight background completion (connection lost
+// mid-stream). Set by the chat adapter when it detects the lost connection;
+// cleared once a foreground re-sync picks up the completed message (or gives
+// up polling). Lets the foreground handler distinguish "poll for a generation
+// that's still finishing" from an ordinary foreground return with nothing due.
+const pendingBackgroundCompletions = new Set<string>();
+
+export function markBackgroundCompletionPending(threadId: string): void {
+  if (threadId) pendingBackgroundCompletions.add(threadId);
+}
+
+export function isBackgroundCompletionPending(threadId: string): boolean {
+  return pendingBackgroundCompletions.has(threadId);
+}
+
+export function clearBackgroundCompletionPending(threadId: string): void {
+  pendingBackgroundCompletions.delete(threadId);
+}
+
 // Surface message-sync failures loudly (visible toast) instead of only
 // console.error — the pywebview console is hidden, so silent failures
 // would otherwise look like "messages vanished after reopen". Throttled

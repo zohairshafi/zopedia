@@ -38,6 +38,8 @@ import {
   deleteThreadFromBoth,
   maybeMigrateLocalToServer,
   registerOnForeground,
+  isBackgroundCompletionPending,
+  clearBackgroundCompletionPending,
 } from "./chat-server-sync";
 
 const DEFAULT_SUGGESTIONS = [
@@ -457,14 +459,29 @@ export async function refreshThreadFromServer(
   aui: ReturnType<typeof useAui>,
   remoteId: string,
 ): Promise<void> {
-  const inserted = await syncThreadMessagesFromServer(remoteId);
-  if (inserted <= 0) return; // nothing new — leave the in-memory view as-is
-  try {
-    const msgs = await db.messages.where("threadId").equals(remoteId).toArray();
-    aui.thread().import(buildRepositoryFromRecords(msgs));
-  } catch (err) {
-    console.error("[history] reconnect reload failed:", err);
+  // If a generation was left completing in the background, poll with backoff so
+  // a message that finishes right after we return to the foreground is still
+  // picked up (the one-shot check would otherwise miss it and never retry).
+  const pending = isBackgroundCompletionPending(remoteId);
+  const maxAttempts = pending ? 6 : 1; // 1s, 2s, 4s, 8s, 16s ≈ 31s total
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const inserted = await syncThreadMessagesFromServer(remoteId);
+    if (inserted > 0) {
+      if (pending) clearBackgroundCompletionPending(remoteId);
+      try {
+        const msgs = await db.messages.where("threadId").equals(remoteId).toArray();
+        aui.thread().import(buildRepositoryFromRecords(msgs));
+      } catch (err) {
+        console.error("[history] reconnect reload failed:", err);
+      }
+      return;
+    }
+    if (pending && attempt < maxAttempts - 1) {
+      await new Promise((r) => setTimeout(r, 1000 * 2 ** attempt));
+    }
   }
+  // Nothing arrived — give up so we don't poll on every future foreground.
+  if (pending) clearBackgroundCompletionPending(remoteId);
 }
 
 function createDexieAdapter(

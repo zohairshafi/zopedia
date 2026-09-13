@@ -595,6 +595,7 @@ async def openai_chat_completions(request: Request):
     # generation server-side when the client disconnects mid-stream.
     session_id = body.get("session_id") or None
     assistant_message_id = body.get("assistant_message_id") or None
+    parent_id = body.get("parent_id") or None
 
     # Build thinking param for upstream API.  When reasoning_effort is
     # set the frontend wants effort-based reasoning; otherwise a simple
@@ -916,7 +917,7 @@ async def openai_chat_completions(request: Request):
                                 "role": "assistant",
                                 "content": [{"type": "text", "text": full_text}],
                                 "reasoning_content": full_reasoning or None,
-                                "parent_id": None,
+                                "parent_id": parent_id,
                                 "created_at": _now,
                             }],
                         )
