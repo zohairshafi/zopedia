@@ -21,12 +21,6 @@ def _ensure_dir(path: Path) -> Path:
 
 DB_PATH = _auth_root() / "chat_history.db"
 
-# Cap on a single message's serialized content. Must exceed the cumulative wiki
-# read budget (ZOPEDIA_WIKI_MAX_CUMULATIVE_READ_CHARS, default 500k) plus
-# reasoning, or large multi-tool messages get truncated mid-result. 1M chars
-# gives ~2x headroom over the read budget.
-MESSAGE_CONTENT_MAX_CHARS = 1_000_000
-
 
 def _get_connection() -> sqlite3.Connection:
     _ensure_dir(DB_PATH.parent)
@@ -82,44 +76,12 @@ def _get_connection() -> sqlite3.Connection:
     return conn
 
 
-def _truncate_content(content: str | None) -> str | None:
-    if content is None:
-        return None
-    if len(content) <= MESSAGE_CONTENT_MAX_CHARS:
-        return content
-    return (
-        content[:MESSAGE_CONTENT_MAX_CHARS]
-        + f"\n\n...(truncated at {MESSAGE_CONTENT_MAX_CHARS} chars, original: {len(content)} chars)"
-    )
-
-
-def _truncate_content_strings(value: Any) -> Any:
-    """Recursively truncate string values so the surrounding JSON stays valid.
-
-    Truncating the serialized JSON string (what _truncate_content does for the
-    legacy string-content path) cuts it mid-string and breaks client parsing.
-    Truncating individual string values keeps the JSON structure intact.
-    """
-    if isinstance(value, str):
-        if len(value) <= MESSAGE_CONTENT_MAX_CHARS:
-            return value
-        return (
-            value[:MESSAGE_CONTENT_MAX_CHARS]
-            + f" ...(truncated at {MESSAGE_CONTENT_MAX_CHARS} chars, original: {len(value)} chars)"
-        )
-    if isinstance(value, list):
-        return [_truncate_content_strings(v) for v in value]
-    if isinstance(value, dict):
-        return {k: _truncate_content_strings(v) for k, v in value.items()}
-    return value
-
-
 def _serialize_content(content: Any) -> str | None:
     if content is None:
         return None
     if isinstance(content, str):
-        return _truncate_content(content)
-    return json.dumps(_truncate_content_strings(content), ensure_ascii=False)
+        return content
+    return json.dumps(content, ensure_ascii=False)
 
 
 # ── Threads ──────────────────────────────────────────────────────────
