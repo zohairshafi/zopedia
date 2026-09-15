@@ -582,7 +582,7 @@ async def openai_chat_completions(request: Request):
     messages: list[dict] = body.get("messages", [])
     model = body.get("model")
     temperature = float(body.get("temperature", 0.7))
-    max_tokens = int(body.get("max_tokens", 4096))
+    max_tokens = int(body.get("max_tokens", 100000))
     stream = bool(body.get("stream", False))
     tools: list[dict] = body.get("tools") or []
     tool_choice = body.get("tool_choice")

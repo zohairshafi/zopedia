@@ -24,7 +24,7 @@ export const DEFAULT_INFERENCE_PARAMS: InferenceParams = {
   repetitionPenalty: 1.0,
   presencePenalty: 0.0,
   maxSeqLength: 4096,
-  maxTokens: 8192,
+  maxTokens: 100000,
   systemPrompt: "",
   checkpoint: "",
   trustRemoteCode: false,

@@ -164,7 +164,12 @@ function loadInferenceParams(): InferenceParams {
         parsed.maxSeqLength,
         DEFAULT_INFERENCE_PARAMS.maxSeqLength,
       ),
-      maxTokens: asFiniteNumber(parsed.maxTokens, DEFAULT_INFERENCE_PARAMS.maxTokens),
+      // Floor at the default so a stale 8192 (or lower) persisted value from
+      // an older build can't silently cap synthesis output below 100k.
+      maxTokens: Math.max(
+        asFiniteNumber(parsed.maxTokens, DEFAULT_INFERENCE_PARAMS.maxTokens),
+        DEFAULT_INFERENCE_PARAMS.maxTokens,
+      ),
       systemPrompt: asString(parsed.systemPrompt, DEFAULT_INFERENCE_PARAMS.systemPrompt),
       checkpoint: DEFAULT_INFERENCE_PARAMS.checkpoint,
       trustRemoteCode: asBoolean(
