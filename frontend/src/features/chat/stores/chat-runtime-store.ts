@@ -141,6 +141,14 @@ function asBoolean(value: unknown, fallback: boolean): boolean {
   return typeof value === "boolean" ? value : fallback;
 }
 
+/** Floor maxTokens at the default. A stale value persisted by an older build
+ *  (localStorage or server preferences) would otherwise silently cap synthesis
+ *  output — reasoning + answer share the budget, so a low cap cuts the answer
+ *  off mid-sentence. */
+function floorMaxTokens(value: number): number {
+  return Math.max(value, DEFAULT_INFERENCE_PARAMS.maxTokens);
+}
+
 function loadInferenceParams(): InferenceParams {
   if (!canUseStorage()) return DEFAULT_INFERENCE_PARAMS;
   try {
@@ -164,11 +172,8 @@ function loadInferenceParams(): InferenceParams {
         parsed.maxSeqLength,
         DEFAULT_INFERENCE_PARAMS.maxSeqLength,
       ),
-      // Floor at the default so a stale 8192 (or lower) persisted value from
-      // an older build can't silently cap synthesis output below 100k.
-      maxTokens: Math.max(
+      maxTokens: floorMaxTokens(
         asFiniteNumber(parsed.maxTokens, DEFAULT_INFERENCE_PARAMS.maxTokens),
-        DEFAULT_INFERENCE_PARAMS.maxTokens,
       ),
       systemPrompt: asString(parsed.systemPrompt, DEFAULT_INFERENCE_PARAMS.systemPrompt),
       checkpoint: DEFAULT_INFERENCE_PARAMS.checkpoint,
@@ -556,7 +561,16 @@ export async function loadPreferencesFromServer(): Promise<void> {
       sanitized[k] = v;
     }
     const merged = { ...store.params, ...sanitized, checkpoint: store.params.checkpoint };
-    store.setParams(merged);
+    // Server prefs take precedence over localStorage, so a stale maxTokens
+    // synced up by an older build would otherwise undo the floor applied at
+    // load and re-cap synthesis output. Sanitize first — a malformed server
+    // value would otherwise turn into NaN.
+    store.setParams({
+      ...merged,
+      maxTokens: floorMaxTokens(
+        asFiniteNumber(merged.maxTokens, DEFAULT_INFERENCE_PARAMS.maxTokens),
+      ),
+    });
   } catch (e) {
     console.error("[prefs] loadPreferencesFromServer failed", e);
   }
