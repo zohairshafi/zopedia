@@ -238,6 +238,25 @@ def append_thread_messages(
         conn.close()
 
 
+def message_exists(message_id: str, thread_id: str, username: str) -> bool:
+    """Whether a message with this id is already stored for the thread.
+
+    Lets the server tell "the client already synced its own copy" apart from
+    "the client never received this answer", without relying on detecting the
+    disconnect (a sleeping client leaves the socket half-open and never
+    surfaces as one).
+    """
+    conn = _get_connection()
+    try:
+        row = conn.execute(
+            "SELECT 1 FROM chat_messages WHERE id = ? AND thread_id = ? AND username = ? LIMIT 1",
+            (message_id, thread_id, username),
+        ).fetchone()
+        return row is not None
+    finally:
+        conn.close()
+
+
 def patch_thread_title(thread_id: str, username: str, title: str) -> bool:
     """Update only the title of an existing thread. Does not touch messages."""
     from datetime import datetime, timezone

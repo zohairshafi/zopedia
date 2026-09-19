@@ -83,6 +83,12 @@ _background_tasks: set[asyncio.Task] = set()
 _active_bg_generations = 0
 _MAX_BG_GENERATIONS = 50
 
+# How long to wait, after a generation finishes with the client apparently still
+# connected, before deciding the client never received the answer and persisting
+# it server-side.  Has to comfortably exceed the client's 800ms sync debounce
+# plus its append round-trip.
+_PERSIST_GRACE_SECONDS = 10.0
+
 # In-flight ask_user_question pauses.  Keyed by "session_id:tool_call_id".
 # The tool branch blocks on the asyncio.Event; the /api/chat/tool-answer
 # endpoint stores the answer and sets the event to resume the same stream.
@@ -797,8 +803,16 @@ async def openai_chat_completions(request: Request):
                     _require_subj = getattr(request.app.state, "require_valid_subject", None)
                     if _require_subj is not None:
                         persist_username = await _require_subj(request)
-                except Exception:
-                    persist_username = None  # never fail the stream over persistence
+                except Exception as exc:
+                    # Never fail the user's stream over persistence — but don't
+                    # swallow it either: a silent None here means a dropped
+                    # connection loses the answer with nothing in the logs.
+                    logger.warning(
+                        "chat: no valid subject for %s — background persistence "
+                        "disabled for this generation: %s",
+                        session_id, exc,
+                    )
+                    persist_username = None
 
             queue: asyncio.Queue = asyncio.Queue()  # unbounded
             client_gone = {"gone": False}
@@ -900,36 +914,56 @@ async def openai_chat_completions(request: Request):
                 # Wait for the consumer to finish consuming or to disconnect.
                 await consumer_done.wait()
 
-                if client_gone["gone"] and succeeded and persist_username and session_id:
-                    full_text = "".join(acc_text).strip()
-                    full_reasoning = "".join(acc_reasoning).strip()
-                    try:
-                        from chat_history_store import append_thread_messages
-                        _now = datetime.now(timezone.utc).isoformat()
-                        msg_id = assistant_message_id or f"{session_id}-gen-{int(time.time())}"
-                        append_thread_messages(
-                            thread_id=session_id,
-                            username=persist_username,
-                            title=None,
-                            updated_at=_now,
-                            messages=[{
-                                "id": msg_id,
-                                "role": "assistant",
-                                "content": [{"type": "text", "text": full_text}],
-                                "reasoning_content": full_reasoning or None,
-                                "parent_id": parent_id,
-                                "created_at": _now,
-                            }],
+                if succeeded and persist_username and session_id:
+                    # The client normally persists its own copy (with tool-call
+                    # parts and metadata) right after receiving the stream. This
+                    # path is the fallback for when it never received it.
+                    #
+                    # We can't just test client_gone: a sleeping machine leaves
+                    # the TCP connection half-open with no FIN, so the disconnect
+                    # never surfaces as a CancelledError — generation completes
+                    # here but the client got nothing. Instead, wait out the
+                    # client's sync debounce and persist only if its copy never
+                    # landed.  INSERT OR IGNORE makes a double write harmless.
+                    msg_id = assistant_message_id or f"{session_id}-gen-{int(time.time())}"
+                    needs_fallback = client_gone["gone"]
+                    if not needs_fallback and assistant_message_id:
+                        await asyncio.sleep(_PERSIST_GRACE_SECONDS)
+                        from chat_history_store import message_exists
+                        needs_fallback = not message_exists(
+                            assistant_message_id, session_id, persist_username
                         )
-                        logger.info(
-                            "chat: persisted completed generation for thread %s (client disconnected)",
-                            session_id,
-                        )
-                    except Exception as exc:
-                        logger.warning(
-                            "chat: failed to persist disconnected generation for %s: %s",
-                            session_id, exc,
-                        )
+
+                    if needs_fallback:
+                        full_text = "".join(acc_text).strip()
+                        full_reasoning = "".join(acc_reasoning).strip()
+                        try:
+                            from chat_history_store import append_thread_messages
+                            _now = datetime.now(timezone.utc).isoformat()
+                            append_thread_messages(
+                                thread_id=session_id,
+                                username=persist_username,
+                                title=None,
+                                updated_at=_now,
+                                messages=[{
+                                    "id": msg_id,
+                                    "role": "assistant",
+                                    "content": [{"type": "text", "text": full_text}],
+                                    "reasoning_content": full_reasoning or None,
+                                    "parent_id": parent_id,
+                                    "created_at": _now,
+                                }],
+                            )
+                            logger.info(
+                                "chat: persisted generation for thread %s that the "
+                                "client never synced (client_gone=%s)",
+                                session_id, client_gone["gone"],
+                            )
+                        except Exception as exc:
+                            logger.warning(
+                                "chat: failed to persist fallback generation for %s: %s",
+                                session_id, exc,
+                            )
 
             task = asyncio.create_task(_run_generation())
             _background_tasks.add(task)
