@@ -30,7 +30,10 @@ async function submitToolAnswer(
   toolCallId: string,
   answer: string,
 ): Promise<void> {
-  const res = await authFetch("/api/chat/tool-answer", {
+  // Served by chat_router, which is mounted at prefix "/v1" (see main.py) —
+  // so the resolved path is /v1/api/chat/tool-answer. Without the /v1 this
+  // only matches the GET-only SPA catch-all and comes back 405.
+  const res = await authFetch("/v1/api/chat/tool-answer", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ session_id: sessionId, tool_call_id: toolCallId, answer }),
