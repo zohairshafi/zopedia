@@ -113,6 +113,11 @@ class PeriodicScheduler:
     def __init__(self, default_username: str = "default"):
         self._tasks: dict[str, asyncio.Task] = {}
         self._locks: dict[str, asyncio.Lock] = {}
+        # Strong references to manual (run-now) tasks, mirroring chat.py's
+        # _background_tasks. The event loop only weakly references tasks and
+        # the asyncio docs advise keeping a reference; the scheduled path
+        # already does the equivalent via self._tasks.
+        self._manual_tasks: set[asyncio.Task] = set()
         self._default_username = default_username
 
     async def start(self) -> None:
@@ -162,23 +167,37 @@ class PeriodicScheduler:
             raise ValueError(f"Config {config_id} not found")
         logger.info("PeriodicScheduler: running config %s now", config_id)
 
-        # Mark started immediately so UI shows the run was triggered
-        now = datetime.now(timezone.utc).isoformat()
-        from periodic_store import update_config
-        update_config(config_id, username, last_run_at=now)
-
         # Ensure a lock exists (normally created by _schedule_one, but
         # run_now may be called before the first scheduled run).
         if config_id not in self._locks:
             self._locks[config_id] = asyncio.Lock()
 
-        async def _locked_run():
+        async def _locked_run() -> None:
             async with self._locks[config_id]:
-                await self._execute_research(cfg)
+                # Stamp last_run_at only once the run actually begins. Stamping
+                # when the request is accepted makes the UI report a run that
+                # never happened if the task dies before it executes.
+                from periodic_store import update_config
+                update_config(
+                    config_id,
+                    username,
+                    last_run_at=datetime.now(timezone.utc).isoformat(),
+                )
+                try:
+                    await self._execute_research(cfg)
+                except asyncio.CancelledError:
+                    logger.info("Periodic: manual run cancelled for %s", config_id)
+                    raise
+                except Exception:
+                    # Nothing awaits this task, so without this the exception
+                    # would never be surfaced and the run would just vanish.
+                    logger.exception("Periodic: manual run failed for %s", config_id)
 
-        asyncio.create_task(
+        task = asyncio.create_task(
             _locked_run(), name=f"periodic-{config_id}-manual"
         )
+        self._manual_tasks.add(task)
+        task.add_done_callback(self._manual_tasks.discard)
 
     # -- internals ---------------------------------------------------------
 
