@@ -26,6 +26,9 @@ class CreatePeriodicRequest(BaseModel):
     research_depth: str = "standard"
     source_types: list[str] = []
     timelimit: str = "m"
+    # Per-schedule opt-in: may this run PROPOSE trades? Orders it wants are
+    # queued for approval and never placed automatically. Default off.
+    alpaca_trading_enabled: bool = False
     periodic_interval: str = "daily"  # hourly, daily, weekly, monthly
     periodic_hour: int | None = None  # 0-23
     periodic_dow: int | None = None   # 0=Mon..6=Sun, for weekly
@@ -66,6 +69,7 @@ async def create_periodic(request: Request, body: CreatePeriodicRequest):
         "research_depth": body.research_depth,
         "source_types": body.source_types,
         "timelimit": body.timelimit,
+        "alpaca_trading_enabled": body.alpaca_trading_enabled,
     }
 
     run_hour = body.periodic_hour
@@ -171,6 +175,9 @@ async def get_periodic(request: Request, config_id: str):
         "trusted_sources": config_data.get("trusted_sources", []),
         "blocked_sources": config_data.get("blocked_sources", []),
         "research_depth": config_data.get("research_depth", "standard"),
+        "alpaca_trading_enabled": bool(
+            config_data.get("alpaca_trading_enabled", False)
+        ),
         "source_types": config_data.get("source_types", []),
         "timelimit": config_data.get("timelimit", "m"),
     }
@@ -200,6 +207,7 @@ async def update_periodic(request: Request, config_id: str, body: CreatePeriodic
         "research_depth": body.research_depth,
         "source_types": body.source_types,
         "timelimit": body.timelimit,
+        "alpaca_trading_enabled": body.alpaca_trading_enabled,
     }
 
     run_hour = body.periodic_hour

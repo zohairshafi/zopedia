@@ -49,9 +49,24 @@ async def research_stream(request: Request):
         research_depth=str(body.get("research_depth", "standard")),
         source_types=list(body.get("source_types", [])),
         timelimit="" if body.get("timelimit") == "all" else str(body.get("timelimit", "m")),
+        # An interactive run queues proposed orders for approval just like a
+        # scheduled one — it does NOT pause mid-stream to ask. One mechanism,
+        # one place to review.
+        alpaca_trading_enabled=bool(body.get("alpaca_trading_enabled", False)),
     )
 
     session_id = body.get("session_id", uuid.uuid4().hex[:16])
+
+    # Attribution for anything this run queues for approval.
+    try:
+        require_valid = getattr(request.app.state, "require_valid_subject", None)
+        config.username = await require_valid(request) if require_valid else "default"
+    except Exception as exc:
+        # Without a subject a queued order can't be attributed to anyone, so it
+        # could never be approved. Log rather than fail the run silently.
+        logger.warning("research: no valid subject, queued orders will not be attributable: %s", exc)
+        config.username = "default"
+    config.config_id = session_id
 
     wiki_dir, raw_dir = _get_wiki_dirs()
     orchestrator = ResearchOrchestrator(wiki_dir, raw_dir, wiki_llm_fn)

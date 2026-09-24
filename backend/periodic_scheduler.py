@@ -292,6 +292,15 @@ class PeriodicScheduler:
             research_depth=str(config_data.get("research_depth", "standard")),
             source_types=list(config_data.get("source_types", [])),
             timelimit=str(config_data.get("timelimit", "m")),
+            # Off unless this schedule explicitly opted in. When on, the run may
+            # propose trades — they are queued for approval, never placed.
+            alpaca_trading_enabled=bool(
+                config_data.get("alpaca_trading_enabled", False)
+            ),
+            # Attribution for anything the run queues.
+            username=username,
+            config_id=config_id,
+            thread_id=get_thread_id(config_id) or None,
         )
 
         wiki_dir, raw_dir = _get_wiki_dirs()

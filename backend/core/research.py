@@ -66,6 +66,15 @@ class ResearchConfig:
     research_depth: str = "standard"
     source_types: list[str] = field(default_factory=list)
     timelimit: str = "m"  # '', 'd', 'w', 'm', 'y'
+    # Whether this run may PROPOSE trades. When set, alpaca_trade is offered and
+    # any order it wants is queued for approval — never placed, since a headless
+    # run has nobody to ask. Read-only account access is always available.
+    alpaca_trading_enabled: bool = False
+    # Attribution for queued orders, so a pending approval can be traced back to
+    # the config and run that produced it.
+    username: str | None = None
+    config_id: str | None = None
+    thread_id: str | None = None
 
 
 def _apply_depth_preset(config: ResearchConfig) -> ResearchConfig:
@@ -125,11 +134,18 @@ def _source_type(url: str) -> str:
     return "webpage"
 
 
-def _research_tools_with_alpaca() -> list[dict]:
-    """The research tool set. Includes the Alpaca market-data/news tools only
-    when their API keys are configured."""
+def _research_tools_with_alpaca(trading_enabled: bool = False) -> list[dict]:
+    """The research tool set.
+
+    Alpaca market-data/news and the READ-ONLY account tool come with the keys.
+    The write tool is offered only when this run has trading enabled — a
+    headless run with nobody watching must not be handed the ability to trade
+    unless it was explicitly turned on for that config.
+    """
     from core.llm import (
+        ALPACA_ACCOUNT_TOOL,
         ALPACA_TOOLS,
+        ALPACA_TRADE_TOOL,
         WIKI_READ_PAGE_TOOL,
         WIKI_SEARCH_TOOL,
         WIKI_WEB_SEARCH_TOOL,
@@ -139,6 +155,10 @@ def _research_tools_with_alpaca() -> list[dict]:
     tools = [WIKI_READ_PAGE_TOOL, WIKI_SEARCH_TOOL, WIKI_WEB_SEARCH_TOOL]
     if alpaca_configured():
         tools += ALPACA_TOOLS
+        # Reading the account is safe anywhere: it cannot change anything.
+        tools += [ALPACA_ACCOUNT_TOOL]
+        if trading_enabled:
+            tools += [ALPACA_TRADE_TOOL]
     return tools
 
 
@@ -159,10 +179,194 @@ def _alpaca_result_status(result_json: str, label: str) -> str | None:
     return status
 
 
-async def _research_alpaca_tool(name: str, args: dict, tc_id: str, messages: list):
+async def _research_alpaca_tool(
+    name: str,
+    args: dict,
+    tc_id: str,
+    messages: list,
+    run_config: "ResearchConfig | None" = None,
+):
     """Run an Alpaca tool during research. Yields research_tool_* events and
-    appends the tool result to messages. Only called for alpaca tool names."""
-    from core.llm import execute_alpaca_market_data, execute_alpaca_news
+    appends the tool result to messages. Only called for alpaca tool names.
+
+    The account tool is read-only. The trade tool never places anything here —
+    research is headless, so an order it wants is queued for the user to approve
+    later, and the result says so explicitly.
+    """
+    from core.llm import (
+        execute_alpaca_account,
+        execute_alpaca_market_data,
+        execute_alpaca_news,
+    )
+
+    if name == "alpaca_account":
+        section = str(args.get("section", "") or "").strip().lower()
+        yield {
+            "type": "research_tool_start",
+            "tool_name": name,
+            "tool_call_id": tc_id,
+            "arguments": {"section": section},
+        }
+        yield {"type": "research_tool_status", "text": f"Reading Alpaca account ({section})..."}
+        result_json = await execute_alpaca_account(
+            section,
+            order_status=str(args.get("order_status") or "open"),
+            symbol=(args.get("symbol") or None),
+            limit=int(args.get("limit") or 100),
+        )
+        try:
+            parsed = json.loads(result_json)
+            if "error" in parsed:
+                yield {"type": "research_tool_status", "text": parsed["error"]}
+            else:
+                yield {"type": "research_tool_status", "text": "Read Alpaca account"}
+        except json.JSONDecodeError:
+            pass
+        yield {
+            "type": "research_tool_end",
+            "tool_name": name,
+            "tool_call_id": tc_id,
+            "result": result_json,
+        }
+        messages.append({"role": "tool", "tool_call_id": tc_id, "content": result_json})
+        return
+
+    if name == "alpaca_trade":
+        from core.alpaca_trading import max_pending_per_run, preflight, validate_order_request
+        from periodic_store import count_pending_for_run, create_pending_approval
+
+        def _finish(payload: dict) -> None:
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tc_id,
+                    "content": json.dumps(payload, ensure_ascii=False, default=str),
+                }
+            )
+
+        yield {
+            "type": "research_tool_start",
+            "tool_name": name,
+            "tool_call_id": tc_id,
+            "arguments": {"action": args.get("action")},
+        }
+
+        # Refuse loudly rather than doing nothing if this run was not granted
+        # trading (a stale tool list, or the model guessing the tool name).
+        if not (run_config and run_config.alpaca_trading_enabled):
+            text = (
+                "Trading is disabled for this research configuration, so no order "
+                "was queued. Turn on trading for this schedule if you want it to "
+                "propose trades."
+            )
+            yield {"type": "research_tool_status", "text": text}
+            yield {
+                "type": "research_tool_end",
+                "tool_name": name,
+                "tool_call_id": tc_id,
+                "result": json.dumps({"error": text}),
+            }
+            _finish({"error": text})
+            return
+
+        if str(args.get("action", "") or "").strip().lower() != "place_order":
+            text = (
+                "Only place_order can be proposed from a research run; cancelling "
+                "an order needs an interactive session."
+            )
+            yield {"type": "research_tool_status", "text": text}
+            yield {
+                "type": "research_tool_end",
+                "tool_name": name,
+                "tool_call_id": tc_id,
+                "result": json.dumps({"error": text}),
+            }
+            _finish({"error": text})
+            return
+
+        req, problems = validate_order_request(args)
+        if problems or req is None:
+            yield {"type": "research_tool_status", "text": "Proposed order failed validation"}
+            payload = {
+                "error": "No order was queued — it failed validation.",
+                "problems": problems,
+            }
+            yield {
+                "type": "research_tool_end",
+                "tool_name": name,
+                "tool_call_id": tc_id,
+                "result": json.dumps(payload),
+            }
+            _finish(payload)
+            return
+
+        context, preflight_problems = await preflight(req)
+        if preflight_problems:
+            yield {"type": "research_tool_status", "text": "Proposed order failed pre-flight"}
+            payload = {
+                "error": "No order was queued — it failed pre-flight checks.",
+                "problems": preflight_problems,
+            }
+            yield {
+                "type": "research_tool_end",
+                "tool_name": name,
+                "tool_call_id": tc_id,
+                "result": json.dumps(payload, default=str),
+            }
+            _finish(payload)
+            return
+
+        # Cap per-run queueing: without it a rebalancing loop can queue dozens of
+        # orders for a single review session.
+        cap = max_pending_per_run()
+        config_id = (run_config.config_id or "") if run_config else ""
+        username = (run_config.username or "default") if run_config else "default"
+        if config_id and count_pending_for_run(config_id, username) >= cap:
+            text = (
+                f"Queued-order limit reached for this run ({cap}). No further "
+                "orders will be queued."
+            )
+            yield {"type": "research_tool_status", "text": text}
+            yield {
+                "type": "research_tool_end",
+                "tool_name": name,
+                "tool_call_id": tc_id,
+                "result": json.dumps({"error": text}),
+            }
+            _finish({"error": text})
+            return
+
+        approval_id = create_pending_approval(
+            username,
+            req.to_dict(),
+            rationale=req.rationale,
+            source="research",
+            config_id=(run_config.config_id if run_config else None),
+            thread_id=(run_config.thread_id if run_config else None),
+        )
+        queued = {
+            "status": "pending_approval",
+            "approval_id": approval_id,
+            "order": req.to_dict(),
+            "market_open": context.get("market_open"),
+            "note": (
+                "Order queued for the user's approval. It will NOT be placed "
+                "automatically and may never be placed. Do not tell the user the "
+                "order was executed — report it as awaiting their approval."
+            ),
+        }
+        yield {
+            "type": "research_tool_status",
+            "text": f"Queued for your approval: {req.summary()}",
+        }
+        yield {
+            "type": "research_tool_end",
+            "tool_name": name,
+            "tool_call_id": tc_id,
+            "result": json.dumps(queued, ensure_ascii=False, default=str),
+        }
+        _finish(queued)
+        return
 
     if name == "alpaca_market_data":
         symbol = str(args.get("symbol", ""))
@@ -234,7 +438,12 @@ class ResearchOrchestrator:
 
     # -- wiki survey -------------------------------------------------------
 
-    async def _survey_wiki(self, topic: str, prior_report: str | None = None) -> AsyncGenerator[dict, None]:
+    async def _survey_wiki(
+        self,
+        topic: str,
+        prior_report: str | None = None,
+        run_config: "ResearchConfig | None" = None,
+    ) -> AsyncGenerator[dict, None]:
         """Read wiki index and let the LLM explore relevant pages via tool calls.
         Yields tool_start/tool_end/tool_status events, then a research_survey event."""
         from core.llm import (
@@ -275,7 +484,9 @@ class ResearchOrchestrator:
             {"role": "user", "content": research_survey_user_prompt(topic)},
         ]
 
-        tools: list[dict[str, Any]] = _research_tools_with_alpaca()
+        tools: list[dict[str, Any]] = _research_tools_with_alpaca(
+            bool(run_config and run_config.alpaca_trading_enabled)
+        )
         cumulative_read_chars = 0
 
         for turn in range(1, max_turns + 1):
@@ -420,8 +631,13 @@ class ResearchOrchestrator:
                         "content": result_json,
                     })
 
-                elif name in ("alpaca_market_data", "alpaca_news"):
-                    async for evt in _research_alpaca_tool(name, args, tc_id, messages):
+                elif name in (
+                    "alpaca_market_data", "alpaca_news",
+                    "alpaca_account", "alpaca_trade",
+                ):
+                    async for evt in _research_alpaca_tool(
+                        name, args, tc_id, messages, run_config=run_config
+                    ):
                         yield evt
 
             if cumulative_read_chars >= max_cumulative:
@@ -858,6 +1074,7 @@ class ResearchOrchestrator:
     async def _generate_final_summary(
         self, topic: str, all_ingested: list[dict],
         prior_report: str | None = None,
+        run_config: "ResearchConfig | None" = None,
     ) -> AsyncGenerator[dict, None]:
         """Run a tool-calling loop so the LLM can read wiki pages, then stream
         a final research summary. Uses the same read_wiki_page tool as chat.
@@ -900,7 +1117,9 @@ class ResearchOrchestrator:
             {"role": "user", "content": research_final_summary_user_prompt(topic)},
         ]
 
-        tools: list[dict[str, Any]] = _research_tools_with_alpaca()
+        tools: list[dict[str, Any]] = _research_tools_with_alpaca(
+            bool(run_config and run_config.alpaca_trading_enabled)
+        )
         cumulative_read_chars = 0
         max_turns = int(os.getenv("ZOPEDIA_WIKI_MAX_TOOL_TURNS", "8"))
 
@@ -1047,8 +1266,13 @@ class ResearchOrchestrator:
                         "content": result_json,
                     })
 
-                elif name in ("alpaca_market_data", "alpaca_news"):
-                    async for evt in _research_alpaca_tool(name, args, tc_id, messages):
+                elif name in (
+                    "alpaca_market_data", "alpaca_news",
+                    "alpaca_account", "alpaca_trade",
+                ):
+                    async for evt in _research_alpaca_tool(
+                        name, args, tc_id, messages, run_config=run_config
+                    ):
                         yield evt
 
             if cumulative_read_chars >= max_cumulative:
@@ -1090,7 +1314,9 @@ class ResearchOrchestrator:
 
         try:
             # Phase 1: Survey wiki (tool-calling — yields tool_start/tool_end/tool_status + research_survey)
-            async for event in self._survey_wiki(config.topic):
+            async for event in self._survey_wiki(
+            config.topic, run_config=config
+        ):
                 yield event
 
             for round_num in range(1, config.rounds + 1):
@@ -1182,7 +1408,9 @@ class ResearchOrchestrator:
 
             # Phase 6: Final summary
             yield _make_event("research_summarizing", message="Generating final report...")
-            async for event in self._generate_final_summary(config.topic, all_ingested):
+            async for event in self._generate_final_summary(
+            config.topic, all_ingested, run_config=config
+        ):
                 yield event
 
             # Surface any warnings (e.g. PDF URLs that returned HTML)
@@ -1250,7 +1478,10 @@ class ResearchOrchestrator:
 
         try:
             # Phase 1: Survey wiki (consume generator, needed for context)
-            async for _event in self._survey_wiki(config.topic, prior_report=prior_report):
+            async for _event in self._survey_wiki(
+                config.topic, prior_report=prior_report,
+                run_config=config,
+            ):
                 pass
 
             for round_num in range(1, config.rounds + 1):
@@ -1302,7 +1533,10 @@ class ResearchOrchestrator:
                         pass
 
             # Phase 6: Final summary
-            async for event in self._generate_final_summary(config.topic, all_ingested, prior_report=prior_report):
+            async for event in self._generate_final_summary(
+                config.topic, all_ingested, prior_report=prior_report,
+                run_config=config,
+            ):
                 if event.get("type") == "research_final_summary":
                     final_report_parts.append(event.get("content", ""))
 
