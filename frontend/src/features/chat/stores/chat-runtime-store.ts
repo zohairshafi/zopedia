@@ -486,12 +486,13 @@ export const useChatRuntimeStore = create<ChatRuntimeStore>((set) => ({
   setCodeToolsEnabled: (codeToolsEnabled) => set({ codeToolsEnabled }),
   setDbQueryEnabled: (dbQueryEnabled: boolean) => set({ dbQueryEnabled }),
   setAlpacaQueryEnabled: (alpacaQueryEnabled: boolean) => set({ alpacaQueryEnabled }),
-  setAlpacaTradeEnabled: (alpacaTradeEnabled) => {
-    // This store has no persist middleware — without the explicit saveBool
-    // the toggle would silently reset on every reload.
-    saveBool(ALPACA_TRADE_KEY, alpacaTradeEnabled);
-    return { alpacaTradeEnabled };
-  },
+  setAlpacaTradeEnabled: (alpacaTradeEnabled) =>
+    set(() => {
+      // This store has no persist middleware — without the explicit saveBool
+      // the toggle would silently reset on every reload.
+      saveBool(ALPACA_TRADE_KEY, alpacaTradeEnabled);
+      return { alpacaTradeEnabled };
+    }),
   setToolStatus: (toolStatus) => set({ toolStatus }),
   setGeneratingStatus: (generatingStatus) => set({ generatingStatus }),
   setAutoHealToolCalls: (autoHealToolCalls) =>
