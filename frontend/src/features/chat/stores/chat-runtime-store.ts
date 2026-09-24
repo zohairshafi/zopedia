@@ -23,6 +23,7 @@ const INFERENCE_PARAMS_KEY = "unsloth_chat_inference_params";
 const REASONING_EFFORT_KEY = "unsloth_reasoning_effort";
 const REASONING_STYLE_KEY = "unsloth_reasoning_style";
 const PRESERVE_THINKING_KEY = "unsloth_preserve_thinking";
+const ALPACA_TRADE_KEY = "unsloth_chat_alpaca_trade_enabled";
 
 export type ReasoningStyle = "enable_thinking" | "reasoning_effort";
 export type ReasoningEffort = "low" | "medium" | "high" | "max";
@@ -228,6 +229,10 @@ type ChatRuntimeStore = {
   codeToolsEnabled: boolean;
   dbQueryEnabled: boolean;
   alpacaQueryEnabled: boolean;
+  /** Allow the model to PROPOSE trades. Every order still needs explicit
+   *  approval before it is submitted. Off by default: a write capability
+   *  should be opt-in, unlike the read-only market-data toggle. */
+  alpacaTradeEnabled: boolean;
   toolStatus: string | null;
   generatingStatus: string | null;
   autoHealToolCalls: boolean;
@@ -277,6 +282,7 @@ type ChatRuntimeStore = {
   setCodeToolsEnabled: (enabled: boolean) => void;
   setDbQueryEnabled: (enabled: boolean) => void;
   setAlpacaQueryEnabled: (enabled: boolean) => void;
+  setAlpacaTradeEnabled: (enabled: boolean) => void;
   setToolStatus: (status: string | null) => void;
   setGeneratingStatus: (status: string | null) => void;
   setAutoHealToolCalls: (enabled: boolean) => void;
@@ -322,6 +328,7 @@ export const useChatRuntimeStore = create<ChatRuntimeStore>((set) => ({
   codeToolsEnabled: initialUseUpstream,
   dbQueryEnabled: false,
   alpacaQueryEnabled: true,
+  alpacaTradeEnabled: loadBool(ALPACA_TRADE_KEY, false),
   toolStatus: null,
   generatingStatus: null,
   autoHealToolCalls: loadBool(AUTO_HEAL_TOOL_CALLS_KEY, true),
@@ -479,6 +486,12 @@ export const useChatRuntimeStore = create<ChatRuntimeStore>((set) => ({
   setCodeToolsEnabled: (codeToolsEnabled) => set({ codeToolsEnabled }),
   setDbQueryEnabled: (dbQueryEnabled: boolean) => set({ dbQueryEnabled }),
   setAlpacaQueryEnabled: (alpacaQueryEnabled: boolean) => set({ alpacaQueryEnabled }),
+  setAlpacaTradeEnabled: (alpacaTradeEnabled) => {
+    // This store has no persist middleware — without the explicit saveBool
+    // the toggle would silently reset on every reload.
+    saveBool(ALPACA_TRADE_KEY, alpacaTradeEnabled);
+    return { alpacaTradeEnabled };
+  },
   setToolStatus: (toolStatus) => set({ toolStatus }),
   setGeneratingStatus: (generatingStatus) => set({ generatingStatus }),
   setAutoHealToolCalls: (autoHealToolCalls) =>

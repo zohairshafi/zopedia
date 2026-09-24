@@ -902,6 +902,11 @@ export function createOpenAIStreamAdapter(): ChatModelAdapter {
                     ...(useChatRuntimeStore.getState().alpacaQueryEnabled
                       ? ["alpaca_market_data", "alpaca_news"]
                       : []),
+                    // Trading is opt-in and gated server-side by this list, not
+                    // by key presence. Orders still need per-order approval.
+                    ...(useChatRuntimeStore.getState().alpacaTradeEnabled
+                      ? ["alpaca_account", "alpaca_trade"]
+                      : []),
                     ...(toolsEnabled ? ["web_search"] : []),
                     ...(useChatRuntimeStore.getState().dbQueryEnabled
                       ? ["execute_sql_query", "describe_database_schema"]

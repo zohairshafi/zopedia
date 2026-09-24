@@ -18,6 +18,7 @@ import { TerminalToolUI } from "@/components/assistant-ui/tool-ui-terminal";
 import { SqlToolUI } from "@/components/assistant-ui/tool-ui-sql";
 import { WebSearchToolUI } from "@/components/assistant-ui/tool-ui-web-search";
 import { AskUserQuestionToolUI } from "@/components/assistant-ui/tool-ui-ask-user";
+import { AlpacaTradeToolUI } from "@/components/assistant-ui/tool-ui-alpaca-trade";
 import { TooltipIconButton } from "@/components/assistant-ui/tooltip-icon-button";
 import {
   IntentAwareScrollProvider,
@@ -64,6 +65,7 @@ import {
   CheckIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
+  ArrowLeftRightIcon,
   CandlestickChartIcon,
   CopyIcon,
   DownloadIcon,
@@ -708,6 +710,40 @@ const AlpacaDataToggle: FC = () => {
   );
 };
 
+/** Separate from AlpacaDataToggle on purpose: letting the model *read* market
+ *  data and letting it *propose orders* are different risk classes, and the
+ *  trade toggle defaults off. Every order still needs explicit approval. */
+const AlpacaTradeToggle: FC = () => {
+  const useUpstream = useChatRuntimeStore((s) => s.useUpstream);
+  const alpacaTradeEnabled = useChatRuntimeStore((s) => s.alpacaTradeEnabled);
+  const setAlpacaTradeEnabled = useChatRuntimeStore((s) => s.setAlpacaTradeEnabled);
+  const disabled = !useUpstream;
+
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={() => setAlpacaTradeEnabled(!alpacaTradeEnabled)}
+      className={cn(
+        "flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-colors",
+        disabled
+          ? "cursor-not-allowed opacity-40"
+          : alpacaTradeEnabled
+            ? "bg-primary/10 text-primary hover:bg-primary/20"
+            : "bg-muted text-muted-foreground hover:bg-muted-foreground/15",
+      )}
+      aria-label={
+        alpacaTradeEnabled
+          ? "Disable Alpaca trading (orders still require approval)"
+          : "Enable Alpaca trading (every order requires your approval)"
+      }
+    >
+      <ArrowLeftRightIcon className="size-3.5" />
+      <span>Trade</span>
+    </button>
+  );
+};
+
 
 
 const ExportHTMLButton: FC = () => {
@@ -1026,6 +1062,7 @@ const ComposerAction: FC<{ disabled?: boolean }> = ({ disabled }) => {
         <WebSearchToggle />
         <DatabaseQueryToggle />
         <AlpacaDataToggle />
+        <AlpacaTradeToggle />
         <CompactChatButton />
         {getPermissions().can_save_chat_history && <WikiChatHistoryToggle />}
         <ExportHTMLButton />
@@ -1130,6 +1167,7 @@ const AssistantMessage: FC = () => {
                 terminal: TerminalToolUI,
                 execute_sql_query: SqlToolUI,
                 ask_user_question: AskUserQuestionToolUI,
+                alpaca_trade: AlpacaTradeToolUI,
               },
               Fallback: ToolFallback,
             },
