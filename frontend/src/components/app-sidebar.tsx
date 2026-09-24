@@ -79,8 +79,9 @@ import {
   useChatSearchStore,
   ChatSearchDialog,
 } from "@/features/chat";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { usePendingApprovals } from "@/features/research/hooks/use-pending-approvals";
 import { ShutdownDialog } from "@/components/shutdown-dialog";
 import { WikiBehaviourDialog } from "@/components/wiki-behaviour-dialog";
 import { WikiDataDialog } from "@/components/wiki-data-dialog";
@@ -257,6 +258,7 @@ function NavItem({
   onClick,
   children,
   dataTour,
+  badge,
 }: {
   icon: typeof ZapIcon;
   label: string;
@@ -265,6 +267,8 @@ function NavItem({
   onClick: () => void;
   children?: React.ReactNode;
   dataTour?: string;
+  /** Optional count pill on the right — hidden when the rail is collapsed. */
+  badge?: number;
 }) {
   return (
     <SidebarMenuItem>
@@ -279,6 +283,14 @@ function NavItem({
         >
           <HugeiconsIcon icon={icon} strokeWidth={1.75} className="size-[18px]! shrink-0 group-hover/menu-button:animate-icon-pop" />
           <span className="text-[14px] leading-[18px] tracking-[0.01em]">{label}</span>
+          {badge !== undefined && badge > 0 && (
+            <span
+              className="ml-auto shrink-0 rounded-full bg-primary/15 px-1.5 text-[11px] font-semibold leading-[16px] text-primary group-data-[collapsible=icon]:hidden"
+              aria-label={`${badge} awaiting approval`}
+            >
+              {badge > 99 ? "99+" : badge}
+            </span>
+          )}
         </SidebarMenuButton>
       </div>
       {children}
@@ -301,6 +313,31 @@ export function AppSidebar() {
   const closeMobileIfOpen = () => {
     if (isMobile) setOpenMobile(false);
   };
+
+  // Orders queued by research runs need a human, and they expire. Surfacing the
+  // count here means it is visible from anywhere in the app, not only on
+  // /research — and the one-shot toast below is what stops one expiring
+  // unnoticed while the user never visits that page.
+  const { pendingCount } = usePendingApprovals();
+  const notifiedCount = useRef(0);
+  useEffect(() => {
+    if (pendingCount <= 0 || pendingCount <= notifiedCount.current) return;
+    notifiedCount.current = pendingCount;
+    toast.info(
+      pendingCount === 1
+        ? "A trade is awaiting your approval"
+        : `${pendingCount} trades are awaiting your approval`,
+      {
+        description:
+          "Research proposed these orders but nothing was placed. Review them before they expire.",
+        duration: 10000,
+        action: {
+          label: "Review",
+          onClick: () => navigate({ to: "/research" }),
+        },
+      },
+    );
+  }, [pendingCount, navigate]);
 
   const chatOnly = false;
   const [shutdownOpen, setShutdownOpen] = useState(false);
@@ -606,6 +643,7 @@ export function AppSidebar() {
               icon={Chemistry01Icon}
               label="New Research"
               active={false}
+              badge={pendingCount}
               onClick={() => {
                 navigate({
                   to: "/research",
