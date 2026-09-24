@@ -256,12 +256,19 @@ async def _run_alpaca_trade(
         }
         return
 
-    # 3. The approval card renders entirely from these arguments.
+    # 3. The approval card renders entirely from these arguments. session_id is
+    #    included so the card echoes back the exact key the pause is waiting on
+    #    rather than deriving it from its own (possibly different) thread id.
     yield {
         "type": "tool_start",
         "tool_name": "alpaca_trade",
         "tool_call_id": tc_id,
-        "arguments": {"action": "place_order", "order": req.to_dict(), **context},
+        "arguments": {
+            "action": "place_order",
+            "session_id": session_id or "",
+            "order": req.to_dict(),
+            **context,
+        },
     }
 
     # 4. No session means no one can approve — never place an order in that case.
@@ -746,7 +753,17 @@ async def _resolve_tool_calls_stream(
                     "type": "tool_start",
                     "tool_name": "ask_user_question",
                     "tool_call_id": tc_id,
-                    "arguments": {"question": question, "options": options},
+                    # session_id is echoed back so the client does not have to
+                    # reconstruct it. The pause is keyed on the id this request
+                    # carried (captured at run start and deliberately sticky),
+                    # while the client can only see its CURRENT thread id — if
+                    # those diverge the answer lands on a key nobody is waiting
+                    # on, and the tool silently returns "no response".
+                    "arguments": {
+                        "question": question,
+                        "options": options,
+                        "session_id": session_id or "",
+                    },
                 }
                 yield {"type": "tool_status", "text": "Waiting for your answer..."}
 
@@ -1322,10 +1339,27 @@ async def chat_tool_answer(request: Request):
     if not key or key.startswith(":"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="session_id and tool_call_id are required")
 
-    _chat_ask_answers[key] = answer
     event = _chat_ask_events.get(key)
-    if event:
-        event.set()
+    if event is None:
+        # No pause is waiting on this key. Previously we stored the answer and
+        # returned 200 anyway, so the UI said "Answer sent" while the tool sat
+        # until its timeout and handed the model {"answer": null}. Fail loudly
+        # instead — both for the user and so a key mismatch is diagnosable.
+        logger.warning(
+            "chat: answer arrived for a tool call that is not awaiting input "
+            "(session=%r tool_call=%r) — the answer was discarded",
+            body.get("session_id"), body.get("tool_call_id"),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "This question is no longer awaiting an answer — it timed out, was "
+                "already answered, or the request is no longer running."
+            ),
+        )
+
+    _chat_ask_answers[key] = answer
+    event.set()
     return {"status": "ok"}
 
 

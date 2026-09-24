@@ -17,6 +17,8 @@ import {
 interface AskUserArgs {
   question?: string;
   options?: string[];
+  /** Echoed back by the server in tool_start — the id the pause is keyed on. */
+  session_id?: string;
 }
 
 interface AskUserResult {
@@ -39,7 +41,17 @@ async function submitToolAnswer(
     body: JSON.stringify({ session_id: sessionId, tool_call_id: toolCallId, answer }),
   });
   if (!res.ok) {
-    throw new Error(`Failed to submit answer (${res.status})`);
+    // Surface the server's reason: 409 means the question is no longer
+    // awaiting an answer, which is the difference between "retry" and
+    // "the model already moved on".
+    let detail = "";
+    try {
+      const body = await res.json();
+      if (typeof body?.detail === "string") detail = body.detail;
+    } catch {
+      detail = "";
+    }
+    throw new Error(detail || `Failed to submit answer (${res.status})`);
   }
 }
 
@@ -49,12 +61,21 @@ const AskUserQuestionToolUIImpl: ToolCallMessagePartComponent = ({
   status,
   toolCallId,
 }) => {
-  const { question = "", options = [] } = (args ?? {}) as AskUserArgs;
+  const { question = "", options = [], session_id } = (args ?? {}) as AskUserArgs;
   const isRunning = status?.type === "running";
-  const threadId = useAuiState(({ threads }) => threads.mainThreadId);
+  const liveThreadId = useAuiState(({ threads }) => threads.mainThreadId);
+  // Prefer the id the server sent with tool_start. The pause is keyed on the
+  // thread id the request carried at run start, which is not necessarily the
+  // thread the user is looking at now — using the live id here silently
+  // answered the wrong key and the model got "no response".
+  const threadId = session_id || liveThreadId;
 
   const [freeText, setFreeText] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  // Distinct from `submitting`: only true once the server has actually accepted
+  // the answer. Showing "sent" while the request is still in flight is what made
+  // a rejected answer look delivered.
+  const [sent, setSent] = useState(false);
 
   const answered =
     !isRunning && result !== undefined && typeof result === "string";
@@ -77,8 +98,9 @@ const AskUserQuestionToolUIImpl: ToolCallMessagePartComponent = ({
     setSubmitting(true);
     try {
       await submitToolAnswer(threadId, toolCallId, value);
-      // Stream resumes server-side; tool_end will transition this part to
-      // complete. Nothing more to do here.
+      // Accepted by the server. The stream resumes server-side and tool_end
+      // transitions this part to complete.
+      setSent(true);
     } catch (err) {
       setSubmitting(false);
       toast.error("Failed to send your answer", {
@@ -149,7 +171,10 @@ const AskUserQuestionToolUIImpl: ToolCallMessagePartComponent = ({
                 )}
               </button>
             </div>
-            {submitting && (
+            {submitting && !sent && (
+              <p className="text-xs text-muted-foreground">Sending your answer…</p>
+            )}
+            {sent && (
               <p className="text-xs text-muted-foreground">Answer sent — the assistant will continue shortly…</p>
             )}
           </div>

@@ -50,6 +50,8 @@ interface ContractShape {
 
 interface TradeArgs {
   action?: string;
+  /** Echoed back by the server in tool_start — the id the pause is keyed on. */
+  session_id?: string;
   order?: OrderShape;
   contract?: ContractShape | null;
   market_open?: boolean | null;
@@ -134,7 +136,12 @@ const AlpacaTradeToolUIImpl: ToolCallMessagePartComponent = ({
   const a = (args ?? {}) as TradeArgs;
   const order = a.order ?? {};
   const isRunning = status?.type === "running";
-  const threadId = useAuiState(({ threads }) => threads.mainThreadId);
+  const liveThreadId = useAuiState(({ threads }) => threads.mainThreadId);
+  // Prefer the id the server sent with tool_start: the pause is keyed on the
+  // thread id the request carried at run start, which may not be the thread the
+  // user is looking at now. Deriving it locally meant an approval could land on
+  // a key nobody was waiting on.
+  const threadId = a.session_id || liveThreadId;
   const [pending, setPending] = useState<"approve" | "reject" | null>(null);
 
   const decided = !isRunning && result !== undefined && typeof result === "string";
