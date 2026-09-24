@@ -15,6 +15,9 @@ export interface ResearchConfig {
   periodic_hour: number | null;
   periodic_dow: number | null;  // 0=Mon..6=Sun, for weekly
   periodic_dom: number | null;  // 1-31, for monthly (clamped to last day of month)
+  /** May this run PROPOSE trades? Off by default. Orders it proposes are
+   *  queued for your approval and are never placed automatically. */
+  alpaca_trading_enabled: boolean;
 }
 
 export const DOW_OPTIONS = [
@@ -60,11 +63,47 @@ export interface PeriodicConfig {
 
 /** Full periodic config returned by GET single endpoint — used for editing. */
 export interface FullPeriodicConfig extends PeriodicConfig {
+  alpaca_trading_enabled: boolean;
   trusted_sources: string[];
   blocked_sources: string[];
   research_depth: string;
   source_types: string[];
   timelimit: string;
+}
+
+/** Order shape proposed by a run, as stored for approval. */
+export interface ProposedOrder {
+  symbol?: string;
+  asset_type?: string;
+  side?: string;
+  qty?: number | null;
+  notional?: number | null;
+  order_type?: string;
+  time_in_force?: string;
+  limit_price?: number | null;
+  stop_price?: number | null;
+  position_intent?: string | null;
+  derived_position_intent?: boolean;
+  rationale?: string | null;
+}
+
+/**
+ * An order a research run queued for approval. It has NOT been placed — these
+ * rows exist precisely so nothing trades while nobody is watching.
+ */
+export interface PendingTradeApproval {
+  id: string;
+  username: string;
+  source: string;
+  config_id: string | null;
+  thread_id: string | null;
+  order: ProposedOrder;
+  rationale: string | null;
+  status: "pending" | "approved" | "rejected" | "expired" | "placed" | "failed";
+  created_at: string;
+  expires_at: string;
+  decided_at: string | null;
+  result: Record<string, unknown> | null;
 }
 
 export interface SourceSuggestion {
@@ -188,5 +227,6 @@ export function defaultResearchConfig(): ResearchConfig {
     periodic_hour: null,
     periodic_dow: null,
     periodic_dom: null,
+    alpaca_trading_enabled: false,
   };
 }

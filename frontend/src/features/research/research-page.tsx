@@ -6,6 +6,7 @@ import { Switch } from "@/components/ui/switch";
 import { Loader2 } from "lucide-react";
 import { ResearchSetupForm } from "./components/research-setup-form";
 import { ResearchRunView } from "./components/research-run-view";
+import { PendingTradeApprovals } from "./components/pending-trade-approvals";
 import { useResearchStore } from "./stores/research-store";
 import {
   listPeriodicResearch,
@@ -254,6 +255,11 @@ export function ResearchPage() {
   return (
     <div className="flex flex-col items-center px-4 py-8 gap-8">
       <ResearchSetupForm onStart={handleStart} />
+      {/* Orders proposed by runs live here because this is where a user comes to
+          look at their research — and they must be found before they expire. */}
+      <div className="w-full max-w-xl">
+        <PendingTradeApprovals />
+      </div>
       {periodicConfigs.length > 0 && (
         <div className="w-full max-w-xl space-y-3">
           <h3 className="text-sm font-semibold text-muted-foreground">

@@ -69,6 +69,7 @@ export function ResearchSetupForm({ onStart, onUpdated, loading, editConfig }: P
         periodic_hour: editConfig.run_hour ?? null,
         periodic_dow: editConfig.run_dow ?? null,
         periodic_dom: editConfig.run_dom ?? null,
+        alpaca_trading_enabled: editConfig.alpaca_trading_enabled ?? false,
       };
     }
     return { ...defaultResearchConfig(), source_types: prefs.sourceTypes };
@@ -236,6 +237,24 @@ export function ResearchSetupForm({ onStart, onUpdated, loading, editConfig }: P
             checked={config.auto_mode}
             onCheckedChange={(v) =>
               setConfig((c) => ({ ...c, auto_mode: v }))
+            }
+          />
+        </div>
+
+        {/* Let this schedule propose trades. Off by default: a run is headless,
+            so anything it proposes is queued for approval and never placed. */}
+        <div className="flex items-center justify-between">
+          <div className="space-y-0.5">
+            <Label>Alpaca Trading</Label>
+            <p className="text-sm text-muted-foreground">
+              Let this run propose trades. Orders are queued for your approval and
+              are never placed automatically.
+            </p>
+          </div>
+          <Switch
+            checked={config.alpaca_trading_enabled}
+            onCheckedChange={(v) =>
+              setConfig((c) => ({ ...c, alpaca_trading_enabled: v }))
             }
           />
         </div>
