@@ -15,27 +15,48 @@ import httpx
 
 from prompts import (
     LLM_JSON_MODE_PROMPT,
+    TOOL_DESC_ALPACA_ACCOUNT,
     TOOL_DESC_ALPACA_MARKET_DATA,
     TOOL_DESC_ALPACA_NEWS,
+    TOOL_DESC_ALPACA_TRADE,
     TOOL_DESC_ASK_USER_QUESTION,
     TOOL_DESC_DESCRIBE_DATABASE_SCHEMA,
     TOOL_DESC_EXECUTE_SQL as _tool_desc_execute_sql,
     TOOL_DESC_READ_WIKI_PAGE,
     TOOL_DESC_SEARCH_WIKI,
     TOOL_DESC_WEB_SEARCH,
+    TOOL_PARAM_ALPACA_ACTION_DESC,
+    TOOL_PARAM_ALPACA_ASSET_TYPE_DESC,
     TOOL_PARAM_ALPACA_END_DESC,
     TOOL_PARAM_ALPACA_EXPIRATION_DESC,
+    TOOL_PARAM_ALPACA_EXTENDED_HOURS_DESC,
+    TOOL_PARAM_ALPACA_LEGS_DESC,
     TOOL_PARAM_ALPACA_LIMIT_DESC,
+    TOOL_PARAM_ALPACA_LIMIT_PRICE_DESC,
     TOOL_PARAM_ALPACA_NEWS_INCLUDE_CONTENT_DESC,
     TOOL_PARAM_ALPACA_NEWS_LIMIT_DESC,
     TOOL_PARAM_ALPACA_NEWS_SYMBOLS_DESC,
+    TOOL_PARAM_ALPACA_NOTIONAL_DESC,
     TOOL_PARAM_ALPACA_OPTION_TYPE_DESC,
+    TOOL_PARAM_ALPACA_ORDER_CLASS_DESC,
+    TOOL_PARAM_ALPACA_ORDER_ID_DESC,
+    TOOL_PARAM_ALPACA_ORDER_STATUS_DESC,
+    TOOL_PARAM_ALPACA_ORDER_TYPE_DESC,
     TOOL_PARAM_ALPACA_PAGE_TOKEN_DESC,
+    TOOL_PARAM_ALPACA_POSITION_INTENT_DESC,
+    TOOL_PARAM_ALPACA_QTY_DESC,
+    TOOL_PARAM_ALPACA_RATIONALE_DESC,
+    TOOL_PARAM_ALPACA_SECTION_DESC,
+    TOOL_PARAM_ALPACA_SIDE_DESC,
     TOOL_PARAM_ALPACA_START_DESC,
+    TOOL_PARAM_ALPACA_STOP_PRICE_DESC,
     TOOL_PARAM_ALPACA_STRIKE_GTE_DESC,
     TOOL_PARAM_ALPACA_STRIKE_LTE_DESC,
     TOOL_PARAM_ALPACA_SYMBOL_DESC,
+    TOOL_PARAM_ALPACA_TIF_DESC,
     TOOL_PARAM_ALPACA_TIMEFRAME_DESC,
+    TOOL_PARAM_ALPACA_TRAIL_DESC,
+    TOOL_PARAM_ALPACA_TRADE_SYMBOL_DESC,
     TOOL_PARAM_ALPACA_TYPE_DESC,
     TOOL_PARAM_ASK_USER_OPTIONS_DESC,
     TOOL_PARAM_ASK_USER_QUESTION_DESC,
@@ -121,6 +142,16 @@ def llm_available() -> bool:
 def alpaca_configured() -> bool:
     """True when Alpaca API keys are configured (market data + news tools available)."""
     return bool(_ALPACA_API_KEY and _ALPACA_API_SECRET)
+
+
+def alpaca_credentials() -> tuple[str, str]:
+    """Current Alpaca (key_id, secret), read live.
+
+    These are module globals reassigned by refresh_llm_config(), so callers must
+    read them through here rather than importing the values — a value import
+    would capture whatever was set at import time and go stale.
+    """
+    return _ALPACA_API_KEY, _ALPACA_API_SECRET
 
 
 def _headers() -> dict[str, str]:
@@ -667,6 +698,154 @@ ALPACA_NEWS_TOOL = {
 }
 
 ALPACA_TOOLS = [ALPACA_MARKET_DATA_TOOL, ALPACA_NEWS_TOOL]
+
+# Trading tools.  Kept OUT of ALPACA_TOOLS on purpose: that list is appended
+# whenever the API keys exist, and the write tool must never ride along on that
+# rule — it is opt-in per context (chat toggle / per-config research flag).
+ALPACA_ACCOUNT_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "alpaca_account",
+        "description": TOOL_DESC_ALPACA_ACCOUNT,
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "section": {
+                    "type": "string",
+                    "enum": ["summary", "positions", "orders", "clock"],
+                    "description": TOOL_PARAM_ALPACA_SECTION_DESC,
+                },
+                "order_status": {
+                    "type": "string",
+                    "enum": ["open", "closed", "all"],
+                    "description": TOOL_PARAM_ALPACA_ORDER_STATUS_DESC,
+                },
+                "symbol": {
+                    "type": "string",
+                    "description": TOOL_PARAM_ALPACA_SYMBOL_DESC,
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": TOOL_PARAM_ALPACA_LIMIT_DESC,
+                },
+            },
+            "required": ["section"],
+        },
+    },
+}
+
+ALPACA_TRADE_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "alpaca_trade",
+        "description": TOOL_DESC_ALPACA_TRADE,
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["place_order", "cancel_order"],
+                    "description": TOOL_PARAM_ALPACA_ACTION_DESC,
+                },
+                "asset_type": {
+                    "type": "string",
+                    "enum": ["equity", "option"],
+                    "description": TOOL_PARAM_ALPACA_ASSET_TYPE_DESC,
+                },
+                "symbol": {
+                    "type": "string",
+                    "description": TOOL_PARAM_ALPACA_TRADE_SYMBOL_DESC,
+                },
+                "side": {
+                    "type": "string",
+                    "enum": ["buy", "sell"],
+                    "description": TOOL_PARAM_ALPACA_SIDE_DESC,
+                },
+                "qty": {
+                    "type": "number",
+                    "description": TOOL_PARAM_ALPACA_QTY_DESC,
+                },
+                "notional": {
+                    "type": "number",
+                    "description": TOOL_PARAM_ALPACA_NOTIONAL_DESC,
+                },
+                "type": {
+                    "type": "string",
+                    "enum": ["market", "limit", "stop", "stop_limit", "trailing_stop"],
+                    "description": TOOL_PARAM_ALPACA_ORDER_TYPE_DESC,
+                },
+                "time_in_force": {
+                    "type": "string",
+                    "enum": ["day", "gtc", "opg", "cls", "ioc", "fok"],
+                    "description": TOOL_PARAM_ALPACA_TIF_DESC,
+                },
+                "limit_price": {
+                    "type": "number",
+                    "description": TOOL_PARAM_ALPACA_LIMIT_PRICE_DESC,
+                },
+                "stop_price": {
+                    "type": "number",
+                    "description": TOOL_PARAM_ALPACA_STOP_PRICE_DESC,
+                },
+                "trail_price": {
+                    "type": "number",
+                    "description": TOOL_PARAM_ALPACA_TRAIL_DESC,
+                },
+                "trail_percent": {
+                    "type": "number",
+                    "description": TOOL_PARAM_ALPACA_TRAIL_DESC,
+                },
+                "extended_hours": {
+                    "type": "boolean",
+                    "description": TOOL_PARAM_ALPACA_EXTENDED_HOURS_DESC,
+                },
+                "order_class": {
+                    "type": "string",
+                    "enum": ["simple", "bracket", "oco", "oto", "mleg"],
+                    "description": TOOL_PARAM_ALPACA_ORDER_CLASS_DESC,
+                },
+                "position_intent": {
+                    "type": "string",
+                    "enum": [
+                        "buy_to_open",
+                        "buy_to_close",
+                        "sell_to_open",
+                        "sell_to_close",
+                    ],
+                    "description": TOOL_PARAM_ALPACA_POSITION_INTENT_DESC,
+                },
+                "legs": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "symbol": {"type": "string"},
+                            "ratio_qty": {"type": "number"},
+                            "side": {"type": "string", "enum": ["buy", "sell"]},
+                            "position_intent": {"type": "string"},
+                        },
+                        "required": ["symbol", "ratio_qty"],
+                    },
+                    "description": TOOL_PARAM_ALPACA_LEGS_DESC,
+                },
+                "order_id": {
+                    "type": "string",
+                    "description": TOOL_PARAM_ALPACA_ORDER_ID_DESC,
+                },
+                "rationale": {
+                    "type": "string",
+                    "description": TOOL_PARAM_ALPACA_RATIONALE_DESC,
+                },
+            },
+            # Only `action` is schema-required: cancel_order needs just order_id,
+            # while place_order's requirements are enforced by
+            # validate_order_request(), which reports every violation at once.
+            "required": ["action"],
+        },
+    },
+}
+
+ALPACA_TRADING_TOOLS = [ALPACA_ACCOUNT_TOOL, ALPACA_TRADE_TOOL]
 
 ASK_USER_QUESTION_TOOL = {
     "type": "function",

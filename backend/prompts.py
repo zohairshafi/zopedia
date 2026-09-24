@@ -256,6 +256,102 @@ TOOL_PARAM_ALPACA_NEWS_INCLUDE_CONTENT_DESC = (
     "Optional. If true, include the full article content (may be large)."
 )
 
+TOOL_DESC_ALPACA_ACCOUNT = (
+    "Read the user's Alpaca trading account. This tool is READ-ONLY — it never "
+    "places, changes, or cancels anything. Use section='summary' for cash, buying "
+    "power, portfolio value and whether trading is blocked; 'positions' for open "
+    "holdings; 'orders' for orders with a given status; 'clock' for whether the "
+    "market is currently open and when it next opens or closes. Call this before "
+    "proposing any trade so you know the buying power and whether options trading "
+    "is permitted on the account. The summary names which account it is (paper or "
+    "live) — always report that to the user rather than assuming."
+)
+TOOL_PARAM_ALPACA_SECTION_DESC = (
+    "Which part of the account to read: 'summary' (balances + permissions), "
+    "'positions' (open holdings), 'orders' (order history), or 'clock' (market hours)."
+)
+TOOL_PARAM_ALPACA_ORDER_STATUS_DESC = (
+    "For section='orders'. Alpaca groups orders as 'open', 'closed', or 'all'. "
+    "This is NOT the individual order status such as 'filled' or 'canceled'."
+)
+
+TOOL_DESC_ALPACA_TRADE = (
+    "Propose a trade on the user's Alpaca account — buy or sell stocks and options. "
+    "IMPORTANT: this does NOT execute immediately. Every order is shown to the user "
+    "for explicit approval first, and nothing is submitted unless they approve it. "
+    "In an automated/headless run the order is queued for approval and is NOT placed. "
+    "Never tell the user an order was executed based on this tool alone — report that "
+    "it is awaiting their approval, and only treat it as placed if the result says so. "
+    "Use action='place_order' with asset_type='equity' or 'option'. Option symbols use "
+    "the OSI format (e.g. AAPL231201C00195000) and qty counts contracts, not shares. "
+    "Give qty OR notional, never both; notional is equity market-day orders only and "
+    "is not valid for options. Provide limit_price for limit orders and stop_price for "
+    "stop orders. Use action='cancel_order' with order_id to cancel a working order. "
+    "Always read alpaca_account first so you know the available buying power."
+)
+TOOL_PARAM_ALPACA_ACTION_DESC = (
+    "'place_order' to propose a new buy/sell, or 'cancel_order' to cancel an existing "
+    "working order by order_id."
+)
+TOOL_PARAM_ALPACA_ASSET_TYPE_DESC = (
+    "Required for place_order. 'equity' for stocks, 'option' for an options contract."
+)
+TOOL_PARAM_ALPACA_TRADE_SYMBOL_DESC = (
+    "Ticker to trade, uppercase. For asset_type='option' this must be a full OSI "
+    "option symbol, e.g. AAPL231201C00195000 (root + YYMMDD expiry + C/P + 8-digit "
+    "strike)."
+)
+TOOL_PARAM_ALPACA_SIDE_DESC = "Buy or sell."
+TOOL_PARAM_ALPACA_QTY_DESC = (
+    "Number of units: shares for equities, contracts for options (each contract is "
+    "normally 100 shares). Mutually exclusive with notional."
+)
+TOOL_PARAM_ALPACA_NOTIONAL_DESC = (
+    "Dollar amount to trade. Equities only, and only with type='market' and "
+    "time_in_force='day'. Mutually exclusive with qty. Not valid for options."
+)
+TOOL_PARAM_ALPACA_ORDER_TYPE_DESC = (
+    "Order type: 'market', 'limit', 'stop', 'stop_limit', or 'trailing_stop'."
+)
+TOOL_PARAM_ALPACA_TIF_DESC = (
+    "Time in force: 'day', 'gtc', 'opg', 'cls', 'ioc', or 'fok'."
+)
+TOOL_PARAM_ALPACA_LIMIT_PRICE_DESC = (
+    "Limit price. Required for type='limit' and type='stop_limit'."
+)
+TOOL_PARAM_ALPACA_STOP_PRICE_DESC = (
+    "Stop price. Required for type='stop' and type='stop_limit'."
+)
+TOOL_PARAM_ALPACA_TRAIL_DESC = (
+    "For type='trailing_stop', give exactly one of trail_price (absolute offset) or "
+    "trail_percent (percentage offset)."
+)
+TOOL_PARAM_ALPACA_EXTENDED_HOURS_DESC = (
+    "Optional. Allow execution outside regular hours. Only valid with type='limit' "
+    "and time_in_force 'day' or 'gtc'."
+)
+TOOL_PARAM_ALPACA_ORDER_CLASS_DESC = (
+    "Optional. 'simple' (default), 'bracket', 'oco', 'oto', or 'mleg' (multi-leg; "
+    "requires legs)."
+)
+TOOL_PARAM_ALPACA_POSITION_INTENT_DESC = (
+    "Options only. Whether this opens or closes a position: 'buy_to_open', "
+    "'buy_to_close', 'sell_to_open', 'sell_to_close'. If omitted it is derived from "
+    "side (buy -> buy_to_open, sell -> sell_to_close) and shown to the user for "
+    "confirmation before anything is submitted."
+)
+TOOL_PARAM_ALPACA_LEGS_DESC = (
+    "Optional, for order_class='mleg' only. Up to 4 legs, each needing symbol and "
+    "ratio_qty, plus optional side and position_intent."
+)
+TOOL_PARAM_ALPACA_ORDER_ID_DESC = (
+    "For action='cancel_order'. The Alpaca order id to cancel."
+)
+TOOL_PARAM_ALPACA_RATIONALE_DESC = (
+    "Optional. One or two sentences on why you are proposing this trade. Shown to the "
+    "user on the approval card to help them decide."
+)
+
 TOOL_DESC_ASK_USER_QUESTION = (
     "Ask the user a clarifying question before answering. Use this only when the "
     "request is genuinely ambiguous and the user's choice would materially change "
