@@ -592,6 +592,10 @@ app.include_router(research_router, prefix="")
 from routes.periodic import router as periodic_router
 app.include_router(periodic_router, prefix="")
 
+# Trading (pending order approvals)
+from routes.trading import router as trading_router
+app.include_router(trading_router, prefix="")
+
 # ── Shutdown ────────────────────────────────────────────────────────
 
 

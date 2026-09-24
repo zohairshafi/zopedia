@@ -27,6 +27,7 @@ from core.llm import (
     _base_url,
     _headers,
     ALPACA_TOOLS,
+    ALPACA_TRADING_TOOLS,
     ASK_USER_QUESTION_TOOL,
     DB_TOOLS,
     WIKI_TOOLS,
@@ -38,6 +39,14 @@ from core.llm import (
     execute_wiki_read,
     execute_wiki_search,
     llm_available,
+)
+from core.alpaca_trading import (
+    chat_approval_timeout_seconds,
+    execute_alpaca_account,
+    execute_alpaca_cancel,
+    place_order,
+    preflight,
+    validate_order_request,
 )
 
 import core.database as db
@@ -89,12 +98,237 @@ _MAX_BG_GENERATIONS = 50
 # plus its append round-trip.
 _PERSIST_GRACE_SECONDS = 10.0
 
-# In-flight ask_user_question pauses.  Keyed by "session_id:tool_call_id".
-# The tool branch blocks on the asyncio.Event; the /api/chat/tool-answer
-# endpoint stores the answer and sets the event to resume the same stream.
+# In-flight interactive pauses, keyed by "session_id:tool_call_id".  A tool
+# branch blocks on the asyncio.Event; the matching endpoint stores the payload
+# and sets the event to resume the same stream.
+#   ask_user_question -> _chat_ask_answers (free text)
+#   alpaca_trade      -> _chat_approval_decisions (approve / reject)
 _chat_ask_events: dict[str, asyncio.Event] = {}
 _chat_ask_answers: dict[str, str] = {}
+_chat_approval_decisions: dict[str, dict] = {}
 _ASK_USER_TIMEOUT_SECONDS = 600
+
+# How often to emit a keepalive while blocked on a human.
+_PAUSE_HEARTBEAT_SECONDS = 20.0
+
+
+async def _await_user_input(
+    key: str,
+    deadline: float,
+    client_gone: dict | None,
+    waiting_text: str,
+):
+    """Block until the user responds, the deadline passes, or the client leaves.
+
+    Yields `tool_status` keepalives every _PAUSE_HEARTBEAT_SECONDS.  That is not
+    cosmetic: a pause can idle for minutes, and a streaming connection with no
+    bytes on it for that long gets dropped by the edge proxy — the user then
+    sees a broken stream instead of "waiting for your approval".
+
+    Yields nothing on success, so callers can't tell the two outcomes from here —
+    and they don't need to: the responding endpoint writes its payload *before*
+    setting the event, so `pop(key, None)` returning None is exactly "nobody
+    answered". That keeps this helper shared between payload shapes.
+    """
+    event = asyncio.Event()
+    _chat_ask_events[key] = event
+    last_beat = time.monotonic()
+    try:
+        while not event.is_set() and not (client_gone or {}).get("gone"):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            try:
+                await asyncio.wait_for(event.wait(), timeout=min(remaining, 1.0))
+            except asyncio.TimeoutError:
+                pass
+            # `event.wait()` returns immediately once set, so only beat while
+            # still waiting — otherwise we emit a keepalive for a finished pause.
+            if event.is_set():
+                break
+            now = time.monotonic()
+            if now - last_beat >= _PAUSE_HEARTBEAT_SECONDS:
+                last_beat = now
+                elapsed = int(_ASK_USER_TIMEOUT_SECONDS - max(remaining, 0))
+                yield {"type": "tool_status", "text": f"{waiting_text} ({elapsed}s)"}
+    finally:
+        _chat_ask_events.pop(key, None)
+
+
+async def _run_alpaca_trade(
+    args: dict,
+    action: str,
+    tc_id: str,
+    session_id: str | None,
+    client_gone: dict | None,
+):
+    """Handle the alpaca_trade tool, yielding SSE events.
+
+    An async generator rather than a coroutine because it emits tool_status
+    keepalives while it waits for the user, which a plain return value can't do.
+
+    Cancelling is executed immediately — it only reduces exposure, and making a
+    user approve getting *out* of a position is the wrong default. Placing always
+    requires an explicit approval.
+    """
+    if action == "cancel_order":
+        order_id = str(args.get("order_id", "") or "").strip()
+        yield {
+            "type": "tool_start",
+            "tool_name": "alpaca_trade",
+            "tool_call_id": tc_id,
+            "arguments": {"action": "cancel_order", "order_id": order_id},
+        }
+        yield {"type": "tool_status", "text": f"Cancelling order {order_id}..."}
+        tool_result = await execute_alpaca_cancel(order_id)
+        try:
+            parsed = json.loads(tool_result)
+            if "error" in parsed:
+                yield {"type": "tool_status", "text": parsed["error"]}
+            else:
+                yield {"type": "tool_status", "text": "Order cancelled"}
+        except Exception:
+            pass
+        yield {
+            "type": "tool_end",
+            "tool_name": "alpaca_trade",
+            "tool_call_id": tc_id,
+            "result": tool_result,
+        }
+        return
+
+    if action != "place_order":
+        yield {
+            "type": "tool_end",
+            "tool_name": "alpaca_trade",
+            "tool_call_id": tc_id,
+            "result": json.dumps(
+                {"error": "action must be 'place_order' or 'cancel_order'."}
+            ),
+        }
+        return
+
+    # 1. Validate. Every problem at once, so the model can fix them in one turn.
+    req, problems = validate_order_request(args)
+    if problems or req is None:
+        yield {
+            "type": "tool_start",
+            "tool_name": "alpaca_trade",
+            "tool_call_id": tc_id,
+            "arguments": {"action": "place_order", "invalid": problems},
+        }
+        yield {"type": "tool_status", "text": "Order rejected — see the errors"}
+        yield {
+            "type": "tool_end",
+            "tool_name": "alpaca_trade",
+            "tool_call_id": tc_id,
+            "result": json.dumps(
+                {
+                    "error": "Order was not submitted — it failed validation.",
+                    "problems": problems,
+                }
+            ),
+        }
+        return
+
+    # 2. Pre-flight. Anything that would make the order un-placeable fails here,
+    #    before the user is asked to approve something that cannot go through.
+    context, preflight_problems = await preflight(req)
+    if preflight_problems:
+        yield {
+            "type": "tool_start",
+            "tool_name": "alpaca_trade",
+            "tool_call_id": tc_id,
+            "arguments": {"action": "place_order", "order": req.to_dict()},
+        }
+        yield {"type": "tool_status", "text": "Order rejected by pre-flight checks"}
+        yield {
+            "type": "tool_end",
+            "tool_name": "alpaca_trade",
+            "tool_call_id": tc_id,
+            "result": json.dumps(
+                {
+                    "error": "Order was not submitted — it failed pre-flight checks.",
+                    "problems": preflight_problems,
+                    "context": context,
+                }
+            ),
+        }
+        return
+
+    # 3. The approval card renders entirely from these arguments.
+    yield {
+        "type": "tool_start",
+        "tool_name": "alpaca_trade",
+        "tool_call_id": tc_id,
+        "arguments": {"action": "place_order", "order": req.to_dict(), **context},
+    }
+
+    # 4. No session means no one can approve — never place an order in that case.
+    if not session_id:
+        yield {
+            "type": "tool_end",
+            "tool_name": "alpaca_trade",
+            "tool_call_id": tc_id,
+            "result": json.dumps(
+                {
+                    "status": "not_placed",
+                    "error": (
+                        "Order approval needs an interactive chat session, and this "
+                        "request has none. No order was placed."
+                    ),
+                }
+            ),
+        }
+        return
+
+    yield {"type": "tool_status", "text": "Waiting for your approval..."}
+    key = f"{session_id}:{tc_id}"
+    deadline = time.monotonic() + chat_approval_timeout_seconds()
+    async for beat in _await_user_input(
+        key, deadline, client_gone, "Still waiting for your approval..."
+    ):
+        yield beat
+    decision = _chat_approval_decisions.pop(key, None) or {}
+
+    # 5. Exactly one path places an order: an explicit approval.
+    if decision.get("decision") == "approve":
+        yield {"type": "tool_status", "text": f"Submitting: {req.summary()}"}
+        result = await place_order(req)
+        if result.ok:
+            order = result.data or {}
+            yield {
+                "type": "tool_status",
+                "text": (
+                    f"Order {order.get('status', 'submitted')} "
+                    f"({order.get('id', '')})"
+                ),
+            }
+            tool_result = json.dumps({"status": "placed", "order": order}, default=str)
+        else:
+            # Alpaca's own wording, verbatim.
+            tool_result = json.dumps(result.as_error_dict("Alpaca rejected the order"))
+    elif decision.get("decision") == "reject":
+        tool_result = json.dumps(
+            {"status": "rejected", "note": "You declined this order. Nothing was placed."}
+        )
+    else:
+        tool_result = json.dumps(
+            {
+                "status": "expired",
+                "note": (
+                    "No approval was received before the deadline (or the client "
+                    "disconnected). Nothing was placed."
+                ),
+            }
+        )
+
+    yield {
+        "type": "tool_end",
+        "tool_name": "alpaca_trade",
+        "tool_call_id": tc_id,
+        "result": tool_result,
+    }
 
 _LLM_TIMEOUT_SECONDS = int(os.getenv("ZOPEDIA_LLM_TIMEOUT_SECONDS", "300"))
 _LLM_MODEL = os.getenv("ZOPEDIA_LLM_MODEL", "").strip()
@@ -522,20 +756,11 @@ async def _resolve_tool_calls_stream(
                 answer = None
                 if session_id:
                     key = f"{session_id}:{tc_id}"
-                    event = asyncio.Event()
-                    _chat_ask_events[key] = event
                     deadline = time.monotonic() + _ASK_USER_TIMEOUT_SECONDS
-                    try:
-                        while not event.is_set() and not (client_gone or {}).get("gone"):
-                            remaining = deadline - time.monotonic()
-                            if remaining <= 0:
-                                break
-                            try:
-                                await asyncio.wait_for(event.wait(), timeout=min(remaining, 1.0))
-                            except asyncio.TimeoutError:
-                                continue
-                    finally:
-                        _chat_ask_events.pop(key, None)
+                    async for beat in _await_user_input(
+                        key, deadline, client_gone, "Still waiting for your answer..."
+                    ):
+                        yield beat
                     answer = _chat_ask_answers.pop(key, None)
 
                 if answer is not None:
@@ -548,6 +773,60 @@ async def _resolve_tool_calls_stream(
                     "tool_call_id": tc_id,
                     "result": tool_result,
                 }
+                await asyncio.sleep(0.15)
+
+            elif name == "alpaca_account":
+                section = str(args.get("section", "") or "").strip().lower()
+                yield {
+                    "type": "tool_start",
+                    "tool_name": "alpaca_account",
+                    "tool_call_id": tc_id,
+                    "arguments": {"section": section},
+                }
+                yield {"type": "tool_status", "text": f"Reading Alpaca account ({section})..."}
+                tool_result = await execute_alpaca_account(
+                    section,
+                    order_status=str(args.get("order_status") or "open"),
+                    symbol=(args.get("symbol") or None),
+                    limit=int(args.get("limit") or 100),
+                )
+                try:
+                    parsed = json.loads(tool_result)
+                    if "error" in parsed:
+                        yield {"type": "tool_status", "text": parsed["error"]}
+                    elif section == "positions":
+                        yield {
+                            "type": "tool_status",
+                            "text": f"Got {parsed.get('count', 0)} position(s)",
+                        }
+                    elif section == "orders":
+                        yield {
+                            "type": "tool_status",
+                            "text": f"Got {parsed.get('count', 0)} order(s)",
+                        }
+                    elif section == "clock":
+                        clock = parsed.get("clock") or {}
+                        state = "open" if clock.get("is_open") else "closed"
+                        yield {"type": "tool_status", "text": f"Market is {state}"}
+                    else:
+                        yield {"type": "tool_status", "text": "Got account summary"}
+                except Exception:
+                    pass
+                yield {
+                    "type": "tool_end",
+                    "tool_name": "alpaca_account",
+                    "tool_call_id": tc_id,
+                    "result": tool_result,
+                }
+                await asyncio.sleep(0.15)
+
+            elif name == "alpaca_trade":
+                action = str(args.get("action", "") or "").strip().lower()
+                # The helper yields its own tool_start/status/end events.
+                async for evt in _run_alpaca_trade(
+                    args, action, tc_id, session_id, client_gone
+                ):
+                    yield evt
                 await asyncio.sleep(0.15)
 
             else:
@@ -663,6 +942,15 @@ async def openai_chat_completions(request: Request):
         )
         if has_alpaca:
             wiki_tools += ALPACA_TOOLS
+        # Trading tools are OPT-IN, unlike the market-data tools above: they can
+        # move money, so they follow the DB-tools pattern and are filtered by the
+        # frontend's enabled_tools list rather than riding on key presence.
+        trading_tool_names = {t["function"]["name"] for t in ALPACA_TRADING_TOOLS}
+        has_trading = has_alpaca and (
+            not enable_tools or bool(enabled_set & trading_tool_names)
+        )
+        if has_trading:
+            wiki_tools += ALPACA_TRADING_TOOLS
         # Interactive tools (ask_user_question) are always available so the model
         # can pause and ask the user a clarifying question.
         wiki_tools += [ASK_USER_QUESTION_TOOL]
@@ -671,6 +959,7 @@ async def openai_chat_completions(request: Request):
             {t["function"]["name"] for t in WIKI_TOOLS}
             | {t["function"]["name"] for t in DB_TOOLS}
             | {t["function"]["name"] for t in ALPACA_TOOLS}
+            | {t["function"]["name"] for t in ALPACA_TRADING_TOOLS}
             | {t["function"]["name"] for t in [ASK_USER_QUESTION_TOOL]}
         )
         wiki_tools += [t for t in tools if t.get("function", {}).get("name") not in _known_tool_names]
@@ -1038,6 +1327,51 @@ async def chat_tool_answer(request: Request):
     if event:
         event.set()
     return {"status": "ok"}
+
+
+@router.post("/api/chat/tool-approval")
+async def chat_tool_approval(request: Request):
+    """Deliver the user's approve/reject decision for a paused alpaca_trade call.
+
+    Same pause mechanism as tool-answer, separate payload store — the decision is
+    structured ({decision, note}), not free text.
+
+    409 when no pause is in flight: that means the wait already ended (timeout,
+    disconnect, or a second click), so returning an error here is what stops a
+    stale decision being written after the fact.
+    """
+    body = await request.json()
+    key = f"{body.get('session_id', '')}:{body.get('tool_call_id', '')}"
+    decision = str(body.get("decision", "") or "").strip().lower()
+
+    if not key or key.startswith(":"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="session_id and tool_call_id are required",
+        )
+    if decision not in {"approve", "reject"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="decision must be 'approve' or 'reject'",
+        )
+
+    event = _chat_ask_events.get(key)
+    if event is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "This order is no longer awaiting approval — the request timed "
+                "out, was already answered, or the connection dropped. Nothing "
+                "was placed."
+            ),
+        )
+
+    _chat_approval_decisions[key] = {
+        "decision": decision,
+        "note": body.get("note", ""),
+    }
+    event.set()
+    return {"status": "ok", "decision": decision}
 
 
 # ── Title generation ────────────────────────────────────────────────
