@@ -4,7 +4,7 @@
 "use client";
 
 import { type ToolCallMessagePartComponent, useAuiState } from "@assistant-ui/react";
-import { CheckCircle2Icon, HelpCircleIcon, LoaderIcon } from "lucide-react";
+import { CheckCircle2Icon, HelpCircleIcon, LoaderIcon, XCircleIcon } from "lucide-react";
 import { memo, useState } from "react";
 import { toast } from "sonner";
 import { authFetch } from "@/features/auth";
@@ -64,11 +64,11 @@ const AskUserQuestionToolUIImpl: ToolCallMessagePartComponent = ({
   const { question = "", options = [], session_id } = (args ?? {}) as AskUserArgs;
   const isRunning = status?.type === "running";
   const liveThreadId = useAuiState(({ threads }) => threads.mainThreadId);
-  // Prefer the id the server sent with tool_start. The pause is keyed on the
-  // thread id the request carried at run start, which is not necessarily the
-  // thread the user is looking at now — using the live id here silently
-  // answered the wrong key and the model got "no response".
-  const threadId = session_id || liveThreadId;
+  // Use the id the server sent with tool_start — including when it is an empty
+  // string, which is what a brand-new chat has before its thread id is
+  // assigned. `||` here would fall back to the live thread id and key the answer
+  // to a different pause, which is how the model ended up with "no response".
+  const threadId = session_id !== undefined ? session_id : liveThreadId;
 
   const [freeText, setFreeText] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -91,7 +91,7 @@ const AskUserQuestionToolUIImpl: ToolCallMessagePartComponent = ({
   const submit = async (answer: string) => {
     const value = answer.trim();
     if (!value || submitting) return;
-    if (!threadId) {
+    if (threadId === undefined || threadId === null) {
       toast.error("Unable to submit answer: no active chat thread.");
       return;
     }
@@ -117,16 +117,34 @@ const AskUserQuestionToolUIImpl: ToolCallMessagePartComponent = ({
         icon={HelpCircleIcon}
       />
       <ToolFallbackContent>
-        {answered && parsedResult?.answer ? (
-          <div className="flex items-start gap-2 rounded-md border border-border bg-muted/30 px-3 py-2 text-sm">
-            <CheckCircle2Icon className="mt-0.5 size-4 shrink-0 text-primary" />
-            <div className="min-w-0">
-              <p className="font-medium text-foreground">{question}</p>
-              <p className="text-muted-foreground">
-                You answered: <span className="font-medium text-foreground">{parsedResult.answer}</span>
-              </p>
+        {answered ? (
+          parsedResult?.answer ? (
+            <div className="flex items-start gap-2 rounded-md border border-border bg-muted/30 px-3 py-2 text-sm">
+              <CheckCircle2Icon className="mt-0.5 size-4 shrink-0 text-primary" />
+              <div className="min-w-0">
+                <p className="font-medium text-foreground">{question}</p>
+                <p className="text-muted-foreground">
+                  You answered: <span className="font-medium text-foreground">{parsedResult.answer}</span>
+                </p>
+              </div>
             </div>
-          </div>
+          ) : (
+            // Finished WITHOUT an answer. This must not fall through to the
+            // form below: a completed call whose answer is null used to render
+            // identically to a live pause, so the only way to discover the
+            // question had already been abandoned was to click Send and get a
+            // 409 back.
+            <div className="flex items-start gap-2 rounded-md border border-border bg-muted/30 px-3 py-2 text-sm">
+              <XCircleIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+              <div className="min-w-0">
+                <p className="font-medium text-foreground">{question}</p>
+                <p className="text-muted-foreground">
+                  The assistant continued without an answer
+                  {parsedResult?.note ? ` (${parsedResult.note})` : ""}.
+                </p>
+              </div>
+            </div>
+          )
         ) : (
           <div className="space-y-3">
             {question && (

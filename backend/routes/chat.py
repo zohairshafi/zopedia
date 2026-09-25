@@ -271,8 +271,9 @@ async def _run_alpaca_trade(
         },
     }
 
-    # 4. No session means no one can approve — never place an order in that case.
-    if not session_id:
+    # 4. Without an attached client nobody can approve — never place in that case.
+    #    client_gone is a dict only on the interactive streaming path.
+    if client_gone is None:
         yield {
             "type": "tool_end",
             "tool_name": "alpaca_trade",
@@ -290,7 +291,7 @@ async def _run_alpaca_trade(
         return
 
     yield {"type": "tool_status", "text": "Waiting for your approval..."}
-    key = f"{session_id}:{tc_id}"
+    key = f"{session_id or ''}:{tc_id}"
     deadline = time.monotonic() + chat_approval_timeout_seconds()
     async for beat in _await_user_input(
         key, deadline, client_gone, "Still waiting for your approval..."
@@ -681,10 +682,20 @@ async def _resolve_tool_calls_stream(
                     symbol,
                     data_type,
                     timeframe=str(args.get("timeframe") or "1Day"),
-                    limit=int(args.get("limit") or 10),
+                    # None means "use the endpoint's maximum" — not an invented 10.
+                    limit=(int(args["limit"]) if args.get("limit") is not None else None),
                     expiration_date=(args.get("expiration_date") or None),
                     strike_gte=(float(args["strike_gte"]) if args.get("strike_gte") is not None else None),
                     strike_lte=(float(args["strike_lte"]) if args.get("strike_lte") is not None else None),
+                    # These four are declared in the tool schema but were never
+                    # forwarded here. The function accepts and uses all of them,
+                    # so the capability existed and was unreachable: asking for
+                    # puts, or for a date range of bars, silently returned an
+                    # unfiltered result instead.
+                    option_type=(args.get("option_type") or None),
+                    page_token=(args.get("page_token") or None),
+                    start=(args.get("start") or None),
+                    end=(args.get("end") or None),
                 )
                 try:
                     result_data = json.loads(tool_result)
@@ -771,18 +782,45 @@ async def _resolve_tool_calls_stream(
                 # wait times out, or the client disconnects (so a background
                 # generation can't hang waiting for input nobody can give).
                 answer = None
-                if session_id:
-                    key = f"{session_id}:{tc_id}"
+                # Gate on client_gone, NOT session_id. client_gone is a dict on
+                # the interactive streaming path and None on the non-streaming
+                # one, which is exactly "is a human attached". session_id is
+                # absent for a brand-new chat (its thread id is assigned lazily),
+                # so gating on it silently skipped the pause and answered the
+                # model with "no response" the moment it asked.
+                if client_gone is not None:
+                    key = f"{session_id or ''}:{tc_id}"
                     deadline = time.monotonic() + _ASK_USER_TIMEOUT_SECONDS
                     async for beat in _await_user_input(
                         key, deadline, client_gone, "Still waiting for your answer..."
                     ):
                         yield beat
                     answer = _chat_ask_answers.pop(key, None)
+                else:
+                    # No human attached — this is the non-streaming call path, so
+                    # pausing is impossible. The card was already emitted above,
+                    # so log it: silently handing the model "no response" is what
+                    # made this look like a UI bug for so long.
+                    logger.warning(
+                        "chat: ask_user_question has no interactive client "
+                        "(session=%r tool_call=%r) — cannot pause, answering null",
+                        session_id, tc_id,
+                    )
 
                 if answer is not None:
                     tool_result = json.dumps({"answer": answer})
                 else:
+                    # Say which of the three ways we gave up. From the outside
+                    # these are indistinguishable — the model just gets "no
+                    # response" — but they have very different causes: a real
+                    # 600s timeout, a client that was already marked gone before
+                    # the pause began, or (logged above) no client at all.
+                    elapsed = int(_ASK_USER_TIMEOUT_SECONDS - max(deadline - time.monotonic(), 0))
+                    logger.warning(
+                        "chat: ask_user_question got no answer (session=%r tool_call=%r, "
+                        "waited=%ss, client_gone=%r) — the model will be told there was no response",
+                        session_id, tc_id, elapsed, client_gone,
+                    )
                     tool_result = json.dumps({"answer": None, "note": "no response"})
                 yield {
                     "type": "tool_end",
@@ -1125,6 +1163,13 @@ async def openai_chat_completions(request: Request):
             consumer_done = asyncio.Event()
 
             async def _run_generation():
+                # Required: this function both reads and writes the module-level
+                # counter. Without it Python treats the name as local, so the
+                # first read raises UnboundLocalError — and because that happens
+                # in the `finally`, it also skips every line after the try block,
+                # including the fallback persistence for a disconnected client.
+                global _active_bg_generations
+
                 chunk_id = f"chatcmpl-{int(time.time())}"
                 created = int(time.time())
                 acc_text: list[str] = []
@@ -1345,10 +1390,13 @@ async def chat_tool_answer(request: Request):
         # returned 200 anyway, so the UI said "Answer sent" while the tool sat
         # until its timeout and handed the model {"answer": null}. Fail loudly
         # instead — both for the user and so a key mismatch is diagnosable.
+        # Log the keys that ARE awaiting: an empty list means the pause never
+        # registered or already ended, whereas a non-empty list that excludes
+        # `key` means the two sides disagree on the key itself.
         logger.warning(
             "chat: answer arrived for a tool call that is not awaiting input "
-            "(session=%r tool_call=%r) — the answer was discarded",
-            body.get("session_id"), body.get("tool_call_id"),
+            "(session=%r tool_call=%r) — the answer was discarded; awaiting=%r",
+            body.get("session_id"), body.get("tool_call_id"), sorted(_chat_ask_events),
         )
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

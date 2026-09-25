@@ -137,11 +137,10 @@ const AlpacaTradeToolUIImpl: ToolCallMessagePartComponent = ({
   const order = a.order ?? {};
   const isRunning = status?.type === "running";
   const liveThreadId = useAuiState(({ threads }) => threads.mainThreadId);
-  // Prefer the id the server sent with tool_start: the pause is keyed on the
-  // thread id the request carried at run start, which may not be the thread the
-  // user is looking at now. Deriving it locally meant an approval could land on
-  // a key nobody was waiting on.
-  const threadId = a.session_id || liveThreadId;
+  // Use the id the server sent with tool_start, including when it is an empty
+  // string (a brand-new chat has no thread id yet). `||` would fall back to the
+  // live thread id and send the approval to a pause nobody is waiting on.
+  const threadId = a.session_id !== undefined ? a.session_id : liveThreadId;
   const [pending, setPending] = useState<"approve" | "reject" | null>(null);
 
   const decided = !isRunning && result !== undefined && typeof result === "string";
@@ -160,7 +159,7 @@ const AlpacaTradeToolUIImpl: ToolCallMessagePartComponent = ({
 
   const decide = async (decision: "approve" | "reject") => {
     if (pending) return;
-    if (!threadId) {
+    if (threadId === undefined || threadId === null) {
       toast.error("Unable to submit: no active chat thread.");
       return;
     }
