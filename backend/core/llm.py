@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import datetime
 import json
 import logging
 import os
@@ -29,6 +30,8 @@ from prompts import (
     TOOL_PARAM_ALPACA_ASSET_TYPE_DESC,
     TOOL_PARAM_ALPACA_END_DESC,
     TOOL_PARAM_ALPACA_EXPIRATION_DESC,
+    TOOL_PARAM_ALPACA_EXPIRATION_GTE_DESC,
+    TOOL_PARAM_ALPACA_EXPIRATION_LTE_DESC,
     TOOL_PARAM_ALPACA_EXTENDED_HOURS_DESC,
     TOOL_PARAM_ALPACA_LEGS_DESC,
     TOOL_PARAM_ALPACA_LIMIT_DESC,
@@ -636,6 +639,14 @@ ALPACA_MARKET_DATA_TOOL = {
                     "type": "string",
                     "description": TOOL_PARAM_ALPACA_EXPIRATION_DESC,
                 },
+                "expiration_date_gte": {
+                    "type": "string",
+                    "description": TOOL_PARAM_ALPACA_EXPIRATION_GTE_DESC,
+                },
+                "expiration_date_lte": {
+                    "type": "string",
+                    "description": TOOL_PARAM_ALPACA_EXPIRATION_LTE_DESC,
+                },
                 "strike_gte": {
                     "type": "number",
                     "description": TOOL_PARAM_ALPACA_STRIKE_GTE_DESC,
@@ -974,6 +985,8 @@ async def execute_alpaca_market_data(
     page_token: str | None = None,
     start: str | None = None,
     end: str | None = None,
+    expiration_date_gte: str | None = None,
+    expiration_date_lte: str | None = None,
 ) -> str:
     """Query live market data from the Alpaca Markets API.
 
@@ -1085,8 +1098,43 @@ async def execute_alpaca_market_data(
             # 25-row cap. Alpaca's own maximum here is 1000; use the caller's
             # limit up to that, or the maximum if they gave none.
             params = {"limit": 1000 if limit is None else min(limit, 1000)}
+            # Check the dates here rather than letting a malformed one reach
+            # Alpaca: it answers 400, and this function reports any non-200 as
+            # "no options snapshots returned" — indistinguishable from a
+            # genuinely empty chain, and the same misleading shape that had a
+            # model conclude puts did not exist. date.fromisoformat, not a regex.
+            for _label, _value in (
+                ("expiration_date", expiration_date),
+                ("expiration_date_gte", expiration_date_gte),
+                ("expiration_date_lte", expiration_date_lte),
+            ):
+                if not _value:
+                    continue
+                try:
+                    _parsed = datetime.datetime.strptime(str(_value), "%Y-%m-%d").date()
+                except ValueError:
+                    _parsed = None
+                # Require the canonical spelling by re-formatting and comparing.
+                # Neither stdlib parser matches Alpaca's Go "2006-01-02" layout on
+                # its own: strptime accepts the unpadded "2026-9-25", and
+                # date.fromisoformat accepts the basic "20260925" from 3.11 on
+                # (the container is 3.12). A value that passes here but not there
+                # reaches Alpaca as a 400, which this function reports as "no
+                # options snapshots returned" — indistinguishable from an empty
+                # chain, and the same misleading shape that hid the puts bug.
+                if _parsed is None or _parsed.strftime("%Y-%m-%d") != str(_value):
+                    return json.dumps({
+                        "error": (
+                            f"Alpaca: {_label}={_value!r} is not a valid date. "
+                            "Dates must be YYYY-MM-DD, zero-padded."
+                        )
+                    })
             if expiration_date:
                 params["expiration_date"] = str(expiration_date)
+            if expiration_date_gte:
+                params["expiration_date_gte"] = str(expiration_date_gte)
+            if expiration_date_lte:
+                params["expiration_date_lte"] = str(expiration_date_lte)
             if strike_gte is not None:
                 params["strike_price_gte"] = strike_gte
             if strike_lte is not None:

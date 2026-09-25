@@ -391,6 +391,8 @@ async def _research_alpaca_tool(
             page_token=(args.get("page_token") or None),
             start=(args.get("start") or None),
             end=(args.get("end") or None),
+            expiration_date_gte=(args.get("expiration_date_gte") or None),
+            expiration_date_lte=(args.get("expiration_date_lte") or None),
         )
         label = "market data"
     else:  # alpaca_news

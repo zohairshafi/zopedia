@@ -197,8 +197,9 @@ TOOL_DESC_ALPACA_MARKET_DATA = (
     "with latest trade, quote, Greeks, implied volatility, and open interest). "
     "Symbols are plain tickers (e.g. 'AAPL', 'SPY'). "
     "For options_chain you can filter by option_type ('call' or 'put'), "
-    "expiration_date (YYYY-MM-DD), strike_gte, and strike_lte. Data reflects "
-    "market hours and may be delayed depending on the Alpaca subscription tier."
+    "expiration_date (YYYY-MM-DD), expiration_date_gte/expiration_date_lte to "
+    "cover a range of expiries, strike_gte, and strike_lte. Data reflects market "
+    "hours and may be delayed depending on the Alpaca subscription tier."
 )
 
 TOOL_PARAM_ALPACA_SYMBOL_DESC = (
@@ -222,9 +223,18 @@ TOOL_PARAM_ALPACA_LIMIT_DESC = (
     "and page with next_page_token if you need more."
 )
 TOOL_PARAM_ALPACA_EXPIRATION_DESC = (
-    "Optional. Options expiration date as YYYY-MM-DD (exact, and it must be a "
-    "date on which contracts actually expire — a weekend returns nothing). For "
-    "options_chain."
+    "Optional. A single options expiration date as YYYY-MM-DD (it must be a date "
+    "on which contracts actually expire — a weekend returns nothing). To cover "
+    "several expiries at once, use expiration_date_gte and expiration_date_lte "
+    "instead. For options_chain."
+)
+TOOL_PARAM_ALPACA_EXPIRATION_GTE_DESC = (
+    "Optional. Earliest expiration date to include, as YYYY-MM-DD. Set this — or "
+    "expiration_date_lte, or both — to sweep a range of expiries rather than "
+    "naming one. For options_chain."
+)
+TOOL_PARAM_ALPACA_EXPIRATION_LTE_DESC = (
+    "Optional. Latest expiration date to include, as YYYY-MM-DD. For options_chain."
 )
 TOOL_PARAM_ALPACA_STRIKE_GTE_DESC = "Optional. Minimum strike price. For options_chain."
 TOOL_PARAM_ALPACA_STRIKE_LTE_DESC = "Optional. Maximum strike price. For options_chain."
