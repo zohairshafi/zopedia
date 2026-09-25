@@ -196,9 +196,9 @@ TOOL_DESC_ALPACA_MARKET_DATA = (
     "for a stock), 'options_chain' (options contracts for an underlying symbol "
     "with latest trade, quote, Greeks, implied volatility, and open interest). "
     "Symbols are plain tickers (e.g. 'AAPL', 'SPY'). "
-    "For options_chain you can filter by expiration_date (YYYY-MM-DD), strike_gte, "
-    "and strike_lte. Data reflects market hours and may be delayed depending on "
-    "the Alpaca subscription tier."
+    "For options_chain you can filter by option_type ('call' or 'put'), "
+    "expiration_date (YYYY-MM-DD), strike_gte, and strike_lte. Data reflects "
+    "market hours and may be delayed depending on the Alpaca subscription tier."
 )
 
 TOOL_PARAM_ALPACA_SYMBOL_DESC = (
@@ -215,13 +215,16 @@ TOOL_PARAM_ALPACA_TIMEFRAME_DESC = (
     "1Month. Defaults to 1Day."
 )
 TOOL_PARAM_ALPACA_LIMIT_DESC = (
-    "Max number of results to return (default 10, max 1000). For options_chain "
-    "the effective cap is 25 per call — use filters to narrow."
+    "Max number of results to return. There is no default — omit it and you get "
+    "as much as the endpoint allows. The ceilings are Alpaca's own: 10000 for "
+    "'bars', 1000 for 'options_chain'. A liquid ticker's full options chain is "
+    "thousands of contracts, so use the filters below to keep the result focused, "
+    "and page with next_page_token if you need more."
 )
 TOOL_PARAM_ALPACA_EXPIRATION_DESC = (
-    "Optional. Options expiration date in YYYY-MM-DD (exact), or use start/end "
-    "date bounds via 'expiration_date_gte:expiration_date_lte' style ranges if "
-    "supported. For options_chain."
+    "Optional. Options expiration date as YYYY-MM-DD (exact, and it must be a "
+    "date on which contracts actually expire — a weekend returns nothing). For "
+    "options_chain."
 )
 TOOL_PARAM_ALPACA_STRIKE_GTE_DESC = "Optional. Minimum strike price. For options_chain."
 TOOL_PARAM_ALPACA_STRIKE_LTE_DESC = "Optional. Maximum strike price. For options_chain."
@@ -231,7 +234,11 @@ TOOL_PARAM_ALPACA_START_DESC = (
 TOOL_PARAM_ALPACA_END_DESC = (
     "Optional. End date for 'bars' (YYYY-MM-DD) or 'alpaca_news' (YYYY-MM-DD)."
 )
-TOOL_PARAM_ALPACA_OPTION_TYPE_DESC = "Optional. Filter options_chain to 'call' or 'put' contracts."
+TOOL_PARAM_ALPACA_OPTION_TYPE_DESC = (
+    "Optional. Filter options_chain to 'call' or 'put' contracts. Set it when you "
+    "want only one side: without it the whole chain comes back unfiltered, and a "
+    "page of it may contain none of the side you are after."
+)
 TOOL_PARAM_ALPACA_PAGE_TOKEN_DESC = (
     "Optional. Pagination token from a previous response's next_page_token, to "
     "fetch the next page of results."

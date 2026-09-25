@@ -382,7 +382,8 @@ async def _research_alpaca_tool(
             symbol,
             data_type,
             timeframe=str(args.get("timeframe") or "1Day"),
-            limit=int(args.get("limit") or 10),
+            # None means "use the endpoint's maximum" — not an invented 10.
+            limit=(int(args["limit"]) if args.get("limit") is not None else None),
             expiration_date=(args.get("expiration_date") or None),
             strike_gte=(float(args["strike_gte"]) if args.get("strike_gte") is not None else None),
             strike_lte=(float(args["strike_lte"]) if args.get("strike_lte") is not None else None),

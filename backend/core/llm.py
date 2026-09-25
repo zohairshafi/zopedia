@@ -966,7 +966,7 @@ async def execute_alpaca_market_data(
     symbol: str,
     data_type: str,
     timeframe: str = "1Day",
-    limit: int = 10,
+    limit: int | None = None,
     expiration_date: str | None = None,
     strike_gte: float | None = None,
     strike_lte: float | None = None,
@@ -988,10 +988,16 @@ async def execute_alpaca_market_data(
     if not symbol:
         return json.dumps({"error": "Alpaca: symbol is required."})
 
-    try:
-        limit = max(1, min(int(limit or 10), 1000))
-    except (TypeError, ValueError):
-        limit = 10
+    # No arbitrary ceiling: the caller decides how much to look at, and omitting
+    # `limit` means "as much as the endpoint allows" rather than an invented
+    # small default. The only ceilings applied below are Alpaca's own documented
+    # maxima (verified against the live API): stock bars 10000, option snapshots
+    # 1000. Exceeding those returns a 400 — it does not return more data.
+    if limit is not None:
+        try:
+            limit = max(1, int(limit))
+        except (TypeError, ValueError):
+            limit = None
 
     try:
         if data_type == "quote":
@@ -1015,7 +1021,11 @@ async def execute_alpaca_market_data(
         if data_type == "bars":
             # GET /v2/stocks/{symbol}/bars — historical OHLCV bars.
             url = f"{_ALPACA_DATA_BASE_URL}/v2/stocks/{symbol}/bars"
-            params = {"timeframe": str(timeframe or "1Day"), "limit": limit}
+            # 10000 is Alpaca's own maximum for this endpoint (confirmed: 20000
+            # returns a 400). Use the caller's limit below that; if the caller
+            # expressed no preference, take the maximum rather than a guess.
+            bars_limit = 10000 if limit is None else min(limit, 10000)
+            params = {"timeframe": str(timeframe or "1Day"), "limit": bars_limit}
             if start:
                 params["start"] = str(start)
             if end:
@@ -1028,6 +1038,10 @@ async def execute_alpaca_market_data(
                 "symbol": symbol,
                 "type": "bars",
                 "timeframe": params["timeframe"],
+                # Echo the filters actually sent. When a caller upstream drops an
+                # argument, this is the only place that becomes visible — the
+                # same silent drop is what hid option_type for so long.
+                "filters_applied": {k: v for k, v in params.items() if k != "limit"},
                 "bars": bars,  # each bar: t, o, h, l, c, v, n (OHLCV + trades + timestamp)
                 "count": len(bars),
             }, default=str)
@@ -1063,10 +1077,14 @@ async def execute_alpaca_market_data(
             # underlying_symbol is a PATH param (e.g. AAPL). Default feed is
             # 'opra' if subscribed, else 'indicative' — don't force it.
             url = f"{_ALPACA_DATA_BASE_URL}/v1beta1/options/snapshots/{symbol}"
-            # Options snapshots are large — keep the default cap low so the
-            # model gets a focused slice; surface next_page_token for more.
-            chain_limit = min(limit, 25)
-            params = {"limit": chain_limit}
+            # No artificial cap. Alpaca documents no ordering for this response,
+            # but it is reproducibly calls-first: unfiltered at limit=5/25/50/1000
+            # the results were calls only, and at 1000 there were 513 calls before
+            # the first put. So a small unfiltered page reads as "there are no
+            # puts", which is exactly the wrong conclusion a model drew from a
+            # 25-row cap. Alpaca's own maximum here is 1000; use the caller's
+            # limit up to that, or the maximum if they gave none.
+            params = {"limit": 1000 if limit is None else min(limit, 1000)}
             if expiration_date:
                 params["expiration_date"] = str(expiration_date)
             if strike_gte is not None:
@@ -1104,6 +1122,11 @@ async def execute_alpaca_market_data(
             return json.dumps({
                 "underlying": symbol,
                 "type": "options_chain",
+                # Echo what was actually sent. When a caller upstream drops an
+                # argument, this is the only place it becomes visible: without
+                # it, a model asking for puts and silently getting calls saw
+                # nothing wrong and concluded puts were unavailable.
+                "filters_applied": {k: v for k, v in params.items() if k not in ("limit", "page_token")},
                 "count": len(items),
                 "next_page_token": data.get("next_page_token"),
                 "options": items,
