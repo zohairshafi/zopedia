@@ -86,8 +86,20 @@ app = modal.App("zopedia", image=image)
     cpu=1,
     scaledown_window=3600,
     timeout=7200,
+    # Pin to a single container. This app keeps authoritative state in two
+    # places that are per-container: the interactive-pause dicts in
+    # routes/chat.py, and a SQLite file on the volume — and nothing in the
+    # backend ever calls volume.reload(), so a second container would read a
+    # permanently stale snapshot. Modal's own volume-backed examples use this
+    # same idiom (see run_jupyter.py / vscode.py: `max_containers=1 if volume`).
+    max_containers=1,
 )
-@modal.concurrent(max_inputs=10)
+# max_inputs must leave room for the answer to an interactive pause: the SSE
+# stream holds its input for the whole turn, and the user's answer arrives as a
+# SEPARATE request. At 10, a handful of paused or abandoned streams could fill
+# the container and strand that answer until the 600s deadline expires — which
+# looks identical to the bug this is meant to fix.
+@modal.concurrent(max_inputs=32)
 @modal.asgi_app()
 def serve():
     import sys
