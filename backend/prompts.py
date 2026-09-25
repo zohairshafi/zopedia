@@ -217,10 +217,12 @@ TOOL_PARAM_ALPACA_TIMEFRAME_DESC = (
 )
 TOOL_PARAM_ALPACA_LIMIT_DESC = (
     "Max number of results to return. There is no default — omit it and you get "
-    "as much as the endpoint allows. The ceilings are Alpaca's own: 10000 for "
-    "'bars', 1000 for 'options_chain'. A liquid ticker's full options chain is "
-    "thousands of contracts, so use the filters below to keep the result focused, "
-    "and page with next_page_token if you need more."
+    "as much as the endpoint allows (Alpaca's own ceilings: 10000 for 'bars', "
+    "1000 for 'options_chain'). Choose this deliberately rather than omitting it: "
+    "one 1000-contract options page is roughly 550 KB of JSON, and a liquid "
+    "underlying's whole chain runs to several thousand contracts. Use the filters "
+    "below to keep the result small, and to cover a long range fetch it a page at "
+    "a time with page_token instead of in one request."
 )
 TOOL_PARAM_ALPACA_EXPIRATION_DESC = (
     "Optional. A single options expiration date as YYYY-MM-DD (it must be a date "
@@ -231,10 +233,12 @@ TOOL_PARAM_ALPACA_EXPIRATION_DESC = (
 TOOL_PARAM_ALPACA_EXPIRATION_GTE_DESC = (
     "Optional. Earliest expiration date to include, as YYYY-MM-DD. Set this — or "
     "expiration_date_lte, or both — to sweep a range of expiries rather than "
-    "naming one. For options_chain."
+    "naming one. Keep the range tight and pair it with option_type and a strike "
+    "band: a wide open range pulls the entire chain. For options_chain."
 )
 TOOL_PARAM_ALPACA_EXPIRATION_LTE_DESC = (
-    "Optional. Latest expiration date to include, as YYYY-MM-DD. For options_chain."
+    "Optional. Latest expiration date to include, as YYYY-MM-DD. See "
+    "expiration_date_gte for keeping a range readable. For options_chain."
 )
 TOOL_PARAM_ALPACA_STRIKE_GTE_DESC = "Optional. Minimum strike price. For options_chain."
 TOOL_PARAM_ALPACA_STRIKE_LTE_DESC = "Optional. Maximum strike price. For options_chain."
@@ -251,7 +255,9 @@ TOOL_PARAM_ALPACA_OPTION_TYPE_DESC = (
 )
 TOOL_PARAM_ALPACA_PAGE_TOKEN_DESC = (
     "Optional. Pagination token from a previous response's next_page_token, to "
-    "fetch the next page of results."
+    "fetch the next page of results. This is the right way to cover a long expiry "
+    "range or a large chain: keep limit modest, pass this token back, and keep "
+    "going while next_page_token comes back non-empty."
 )
 
 TOOL_DESC_ALPACA_NEWS = (
