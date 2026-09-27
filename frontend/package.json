@@ -14,7 +14,7 @@
     "preview:client": "vite preview --mode client --outDir dist-client",
     "ios:sync": "npm run build:client && npx cap sync ios",
     "ios:open": "npx cap open ios",
-    "ios:build": "npm run build:client && npx cap sync ios && cd ios && xcodebuild -project 'Zopedia Client.xcodeproj' -scheme 'Zopedia Client' -configuration Release -allowProvisioningUpdates",
+    "ios:build": "npm run ios:sync && env -i HOME=\"$HOME\" USER=\"$USER\" PATH=\"/usr/bin:/bin:/usr/sbin:/sbin:/Applications/Xcode.app/Contents/Developer/usr/bin\" DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Release -destination 'generic/platform=iOS' -allowProvisioningUpdates build",
     "ios:assets": "npx @capacitor/assets generate --ios --iconBackgroundColor '#1a1b1e' --iconBackgroundColorDark '#1a1b1e'",
     "lint": "eslint .",
     "preview": "vite preview",
