@@ -34,7 +34,19 @@ def _get_conn() -> sqlite3.Connection:
     return conn
 
 
+# The DB this module has already created its schema in. The DDL below is
+# idempotent, but it still opens a write transaction and commits, and
+# `_ensure_tables` is called from nearly every function in this module — so the
+# read-only poll for pending approvals was taking the SQLite write lock several
+# times per request. Keyed on the path rather than a bare boolean: the path is
+# fixed per process in production, but a different DB must still get its schema.
+_tables_ready_for: str | None = None
+
+
 def _ensure_tables() -> None:
+    global _tables_ready_for
+    if _tables_ready_for == _DB_PATH:
+        return
     conn = _get_conn()
     try:
         conn.execute("""
@@ -105,6 +117,7 @@ def _ensure_tables() -> None:
             ON pending_trade_approvals(username, status, created_at)
         """)
         conn.commit()
+        _tables_ready_for = _DB_PATH
     finally:
         conn.close()
 
@@ -466,9 +479,21 @@ def _approval_row_to_dict(row: sqlite3.Row) -> dict:
 def list_pending_approvals(
     username: str, include_resolved: bool = False, limit: int = 100
 ) -> list[dict]:
-    """Pending approvals for a user, newest first. Expires overdue rows first."""
-    expire_stale_approvals(username)
-    _ensure_tables()
+    """Pending approvals for a user, newest first.
+
+    Deliberately a read: this backs the endpoint the client polls, so it must not
+    take the write lock. Overdue rows are excluded by the query instead of by
+    sweeping them first — the stored status catches up on the next write, and
+    `claim_pending_approval` re-checks `expires_at` inside its own statement, so
+    an expired row cannot be approved in the interval.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    if include_resolved:
+        # Only this view sweeps. It is not what the client polls, so it can
+        # afford the write that keeps stored statuses accurate; the pending view
+        # excludes overdue rows with the query filter instead. Sweep before
+        # opening the read connection so the two never interleave.
+        expire_stale_approvals(username)
     conn = _get_conn()
     try:
         if include_resolved:
@@ -480,9 +505,9 @@ def list_pending_approvals(
         else:
             rows = conn.execute(
                 """SELECT * FROM pending_trade_approvals
-                   WHERE username = ? AND status = 'pending'
+                   WHERE username = ? AND status = 'pending' AND expires_at > ?
                    ORDER BY created_at DESC LIMIT ?""",
-                (username, limit),
+                (username, now, limit),
             ).fetchall()
         return [_approval_row_to_dict(r) for r in rows]
     finally:
@@ -579,14 +604,18 @@ def resolve_pending_approval(
 
 
 def count_pending_approvals(username: str) -> int:
-    expire_stale_approvals(username)
-    _ensure_tables()
+    """How many approvals are still awaiting a decision.
+
+    A read, for the same reason as `list_pending_approvals` — the client polls
+    this on the same endpoint.
+    """
+    now = datetime.now(timezone.utc).isoformat()
     conn = _get_conn()
     try:
         row = conn.execute(
             """SELECT COUNT(*) AS c FROM pending_trade_approvals
-               WHERE username = ? AND status = 'pending'""",
-            (username,),
+               WHERE username = ? AND status = 'pending' AND expires_at > ?""",
+            (username, now),
         ).fetchone()
         return int(row["c"]) if row else 0
     finally:

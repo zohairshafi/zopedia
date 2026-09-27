@@ -23,7 +23,9 @@ import type { PendingTradeApproval } from "../types";
  * items were created while the app was closed — hence the poll and the
  * visibilitychange refetch.
  */
-const POLL_MS = 60_000;
+// Same five-minute cadence as the sidebar poller — see use-pending-approvals.
+// Focus refetches cover the "I just came back to the app" case immediately.
+const POLL_MS = 5 * 60_000;
 
 function fmtAmount(order: PendingTradeApproval["order"]): string {
   if (order.qty != null) {

@@ -7,7 +7,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { listPendingApprovals } from "../api/trading-api";
 import type { PendingTradeApproval } from "../types";
 
-const POLL_MS = 60_000;
+// Five minutes rather than one: this queue only changes when a scheduled
+// research run proposes an order, which happens a few times a day at most. A 60s
+// poll also kept the server container permanently warm (scaledown_window is an
+// hour) and made each request contend for the SQLite write lock, for no benefit.
+const POLL_MS = 5 * 60_000;
 
 /**
  * Orders queued by research runs, kept fresh in the background.

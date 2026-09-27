@@ -75,6 +75,45 @@ def test_expired_approval_drops_out_of_the_pending_list(store):
     assert len(all_rows) == 1 and all_rows[0]["status"] == "expired"
 
 
+def test_listing_and_counting_do_not_write(store):
+    """The polled read paths must take no write lock.
+
+    Both are hit by the client on a timer, and they used to sweep expired rows
+    and re-run DDL before every SELECT — so a read-only poll opened a write
+    transaction several times per request. Expiry is enforced by the query and
+    re-checked by `claim_pending_approval`, so neither sweep is needed here.
+    """
+    import sqlite3
+
+    approval_id = store.create_pending_approval("zohair", ORDER, ttl_seconds=-1)
+
+    # Overdue rows are still excluded from both views...
+    assert store.list_pending_approvals("zohair") == []
+    assert store.count_pending_approvals("zohair") == 0
+
+    # ...but reading them did not rewrite the row. That stored value is the
+    # evidence the read took no write lock; a sweep would have set it 'expired'.
+    conn = sqlite3.connect(store._DB_PATH)
+    try:
+        status = conn.execute(
+            "SELECT status FROM pending_trade_approvals WHERE id = ?", (approval_id,)
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    assert status == "pending"
+
+    # Safety never depended on the sweep: the claim still refuses it.
+    assert store.claim_pending_approval(approval_id, "zohair") is None
+
+
+def test_the_resolved_view_still_sweeps(store):
+    """The non-polled view keeps stored statuses truthful."""
+    store.create_pending_approval("zohair", ORDER, ttl_seconds=-1)
+    rows = store.list_pending_approvals("zohair", include_resolved=True)
+
+    assert len(rows) == 1 and rows[0]["status"] == "expired"
+
+
 def test_approvals_are_scoped_to_the_owning_user(store):
     approval_id = store.create_pending_approval("zohair", ORDER)
     assert store.get_pending_approval(approval_id, "someone-else") is None
