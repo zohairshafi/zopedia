@@ -366,6 +366,36 @@ def _resolve_model(requested: Optional[str]) -> str:
     return _LLM_MODEL or r or "default"
 
 
+def _strip_replayed_reasoning(messages: list[dict]) -> list[dict]:
+    """Drop assistant reasoning traces from the incoming conversation history.
+
+    `reasoning_content` is per-turn output, not conversation context. The client
+    replays it (chat-adapter.ts: "DeepSeek-style upstream APIs can consume
+    assistant reasoning traces"), and a model's reasoning for a turn routinely
+    quotes the instructions it was given that turn.
+
+    That is how the final-answer instruction leaks. CHAT_SYNTHESIS_PROMPT ("DO
+    NOT use any more tools") is injected as a *user* message for the answer phase
+    only, so the model's reasoning for that turn says things like "the user's
+    last message: ... DO NOT use any more tools". Replayed as history on the next
+    turn, the model reads its own past reasoning as an instruction from the user
+    and stops calling tools — which is exactly the reported symptom after five or
+    six exchanges.
+
+    Verified against the stored history (80 threads, 904 messages): every stale
+    copy of that instruction lived in a `reasoning` part and none in message
+    text, so dropping the field removes the leak completely.
+
+    Only inbound history is stripped. The tool-calling loop deliberately adds
+    reasoning_content to messages it builds within a single request, and that is
+    legitimate.
+    """
+    for message in messages:
+        if message.get("role") == "assistant":
+            message.pop("reasoning_content", None)
+    return messages
+
+
 def _extract_last_user_query(messages: list[dict]) -> str:
     for msg in reversed(messages):
         if msg.get("role") == "user":
@@ -921,7 +951,9 @@ async def openai_chat_completions(request: Request):
     except Exception:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid JSON body.")
 
-    messages: list[dict] = body.get("messages", [])
+    # Strip before anything else touches them: reasoning_content from a previous
+    # turn can carry that turn's "stop using tools" instruction back to the model.
+    messages: list[dict] = _strip_replayed_reasoning(body.get("messages", []))
     model = body.get("model")
     temperature = float(body.get("temperature", 0.7))
     max_tokens = int(body.get("max_tokens", 100000))
