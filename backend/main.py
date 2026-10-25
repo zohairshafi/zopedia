@@ -36,6 +36,7 @@ def _env_bool(name: str, default: bool = False) -> bool:
 
 _AUTH_DISABLED = _env_bool("ZOPEDIA_AUTH_DISABLED", True)
 _PORT = int(os.getenv("ZOPEDIA_PORT", "8000"))
+_HOST = os.getenv("ZOPEDIA_HOST", "0.0.0.0").strip()
 _FRONTEND_DIR = Path(_env_str("ZOPEDIA_FRONTEND_DIR", str(Path(__file__).parent.parent / "frontend" / "dist")))
 
 # Apply stored wiki env overrides before anything else
@@ -952,5 +953,5 @@ npm run build</pre>
 if __name__ == "__main__":
     import uvicorn
 
-    logger.info("Starting Zopedia on port %d", _PORT)
-    uvicorn.run("main:app", host="0.0.0.0", port=_PORT, reload=False)
+    logger.info("Starting Zopedia on %s:%d", _HOST, _PORT)
+    uvicorn.run("main:app", host=_HOST, port=_PORT, reload=False)
