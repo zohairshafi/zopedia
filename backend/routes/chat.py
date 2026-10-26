@@ -12,6 +12,7 @@ Tool-calling architecture:
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 import os
@@ -409,6 +410,64 @@ def _extract_last_user_query(messages: list[dict]) -> str:
                         parts.append(part.get("text", ""))
                 return " ".join(parts)
     return ""
+
+
+def _image_mime_from_base64(data: str) -> str:
+    """Best-effort MIME for raw base64 (clients strip the data-URL prefix)."""
+    try:
+        head = base64.b64decode(data[:24], validate=False)
+    except Exception:
+        return "image/jpeg"
+    if head.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if head.startswith(b"GIF87a") or head.startswith(b"GIF89a"):
+        return "image/gif"
+    if head.startswith(b"RIFF") and head[8:12] == b"WEBP":
+        return "image/webp"
+    return "image/jpeg"
+
+
+def _attach_image_to_last_user_message(messages: list[dict], image_base64: Optional[str]) -> None:
+    """Attach the current turn's image as an OpenAI-compatible multimodal part.
+
+    Clients send `image_base64` beside `messages`, whose content is text-only.
+    Without this conversion the field was parsed by nobody and every image
+    attachment was silently dropped (web client included).
+    """
+    if not image_base64:
+        return
+    raw = image_base64.strip()
+    if not raw:
+        return
+
+    if raw.startswith("data:"):
+        header, _, raw = raw.partition(",")
+        if not raw:
+            return
+        mime = header[5:].split(";", 1)[0] or "image/jpeg"
+    else:
+        mime = _image_mime_from_base64(raw)
+
+    for message in reversed(messages):
+        if message.get("role") != "user":
+            continue
+        content = message.get("content")
+        if isinstance(content, str):
+            text = content
+        elif isinstance(content, list):
+            if any(isinstance(p, dict) and p.get("type") == "image_url" for p in content):
+                return
+            text = " ".join(
+                p.get("text", "") for p in content
+                if isinstance(p, dict) and p.get("type") == "text"
+            )
+        else:
+            return
+        message["content"] = [
+            {"type": "text", "text": text},
+            {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{raw}"}},
+        ]
+        return
 
 
 def _inject_rag_context(messages: list[dict], query: str) -> tuple[list[dict], Optional[str]]:
@@ -940,6 +999,77 @@ async def _resolve_tool_calls_stream(
 # ── Standard chat/completions ──────────────────────────────────────
 
 
+async def _legacy_stream(
+    messages: list[dict],
+    model: str,
+    temperature: float,
+    max_tokens: int,
+    thinking: dict | None,
+):
+    """SSE stream for the no-tool-retrieval path.
+
+    This branch previously returned None for `stream: true`, so FastAPI replied
+    with a literal `null` body and the client saw an empty stream. It mirrors
+    the final-answer phase of the tool path: reasoning/content chunks, usage,
+    an error frame, and the [DONE] terminator. Tool retrieval is off, so there
+    is no tool phase; history persistence is left to the client.
+    """
+    chunk_id = f"chatcmpl-{int(time.time())}"
+    created = int(time.time())
+
+    async for event in chat_completions_stream(
+        messages,
+        model=model,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        tools=None,
+        tool_choice=None,
+        thinking=thinking,
+    ):
+        etype = event.get("type")
+        if etype == "reasoning":
+            payload = {
+                "id": chunk_id,
+                "object": "chat.completion.chunk",
+                "created": created,
+                "model": model,
+                "choices": [{
+                    "index": 0,
+                    "delta": {"reasoning_content": event["content"]},
+                    "finish_reason": None,
+                }],
+            }
+            yield f"data: {json.dumps(payload)}\n\n"
+        elif etype == "text":
+            payload = {
+                "id": chunk_id,
+                "object": "chat.completion.chunk",
+                "created": created,
+                "model": model,
+                "choices": [{
+                    "index": 0,
+                    "delta": {"content": event["content"]},
+                    "finish_reason": None,
+                }],
+            }
+            yield f"data: {json.dumps(payload)}\n\n"
+        elif etype == "usage":
+            payload = {
+                "id": chunk_id,
+                "object": "chat.completion.chunk",
+                "created": created,
+                "model": model,
+                "choices": [],
+                "usage": event["usage"],
+            }
+            yield f"data: {json.dumps(payload)}\n\n"
+        elif etype == "error":
+            message = event.get("message") or event.get("content") or "stream error"
+            yield f"data: {json.dumps({'error': message})}\n\n"
+
+    yield "data: [DONE]\n\n"
+
+
 @router.post("/chat/completions")
 async def openai_chat_completions(request: Request):
     """OpenAI-compatible chat completions via upstream API, with wiki RAG injection or tool retrieval."""
@@ -970,6 +1100,8 @@ async def openai_chat_completions(request: Request):
     session_id = body.get("session_id") or None
     assistant_message_id = body.get("assistant_message_id") or None
     parent_id = body.get("parent_id") or None
+    image_base64 = body.get("image_base64") or ""
+    _attach_image_to_last_user_message(messages, image_base64)
 
     # Build thinking param for upstream API.  When reasoning_effort is
     # set the frontend wants effort-based reasoning; otherwise a simple
@@ -1384,6 +1516,18 @@ async def openai_chat_completions(request: Request):
     else:
         if query:
             messages, _ = _inject_rag_context(messages, query)
+
+        if stream:
+            return StreamingResponse(
+                _legacy_stream(
+                    messages,
+                    resolved_model,
+                    temperature,
+                    max_tokens,
+                    thinking,
+                ),
+                media_type="text/event-stream",
+            )
 
     # ── Non-streaming final response ───────────────────────────────
 
