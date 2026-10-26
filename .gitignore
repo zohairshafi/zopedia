@@ -31,3 +31,11 @@ SESSION_CONTEXT.md
 build/
 dist/
 .venv-packaging-intel-conda/
+
+# Native iOS
+ios-native/**/xcuserdata/
+ios-native/**/*.xcuserstate
+ios-native/build/
+ios-native/DerivedData/
+ios-native/.swiftpm/
+ios-native/**/.build/

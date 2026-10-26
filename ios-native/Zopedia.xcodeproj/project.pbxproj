@@ -1,0 +1,498 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		1AFDAB76CED53571ED53CFBD /* ComposerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85C6E2D563A6CF6C91FB309B /* ComposerView.swift */; };
+		1B913AB9877F4A34662A7352 /* AppEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2FE37E93408BB373CE963653 /* AppEnvironment.swift */; };
+		2870B675F3CB169611CC3291 /* AttachmentProcessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF6C9974E79834EA05657EE5 /* AttachmentProcessor.swift */; };
+		29028B88DEC56BC4D30C678D /* ChatListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EDA5945B96177998F363496 /* ChatListView.swift */; };
+		3CAD4B83F89E128BC8875780 /* MessageRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 689547B19AE8D81A6E7AF93F /* MessageRow.swift */; };
+		598A2378399114D854D52633 /* ConnectView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFE2140F67E5B6689A671676 /* ConnectView.swift */; };
+		6C258CF63B242CCDEFB60DA9 /* ChatViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4D291618D6C62BA7B7B31CF /* ChatViewModel.swift */; };
+		73A563C74CD5CD6294D77192 /* ZopediaKit in Frameworks */ = {isa = PBXBuildFile; productRef = 9FB37CB3E4E85B974114BFA4 /* ZopediaKit */; };
+		7EFD4EEC053D828EF1EE0F86 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 05CD0AD17078E74F3A66DBE9 /* PrivacyInfo.xcprivacy */; };
+		8C9FD29BC47CA59E7B53B313 /* ChangePasswordView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 614C130156A1F13775CD97A6 /* ChangePasswordView.swift */; };
+		98DE1695344576CC7C6D382E /* WikiSearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7860210141233B1971AF00D4 /* WikiSearchView.swift */; };
+		99B18C0C74985FA694CC705F /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66EE7DBCDB61DE5E02281B3B /* RootView.swift */; };
+		B521327ED1E5CEF16E72BB8D /* WikiReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36E94008B3A6BAE0CA077B15 /* WikiReaderView.swift */; };
+		B673F268C17D84A41803ADDA /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 36EF00A03EBE45F0E8591BCA /* Assets.xcassets */; };
+		C867AC5B282E6C735E881FE9 /* MainView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6685BE703670C419880E4EFB /* MainView.swift */; };
+		C8FEDD5A21420290C9CDC3A0 /* ZopediaApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCCA96DBB1F605CD6BB94B29 /* ZopediaApp.swift */; };
+		DE79025412BC99CB70280404 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = F7578F0D1005D4F33245DF63 /* MarkdownUI */; };
+		E4BCAF540CB88FF8016F00B3 /* ToolCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CF05FDB31660401750B150C /* ToolCardView.swift */; };
+		F3F0A75592CC076152E830FF /* WikiUploadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C43FE32802C02EB62B84DEC /* WikiUploadView.swift */; };
+		F74F7DB54FEE0EB14BB3E9A2 /* WikiHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F175E20638A079593E253AE4 /* WikiHomeView.swift */; };
+		F925F7CFFBB3655B8D6B672E /* ChatDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31734DF68A3628EB9A046DDC /* ChatDetailView.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		05CD0AD17078E74F3A66DBE9 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		2FE37E93408BB373CE963653 /* AppEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppEnvironment.swift; sourceTree = "<group>"; };
+		31734DF68A3628EB9A046DDC /* ChatDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatDetailView.swift; sourceTree = "<group>"; };
+		36E94008B3A6BAE0CA077B15 /* WikiReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WikiReaderView.swift; sourceTree = "<group>"; };
+		36EF00A03EBE45F0E8591BCA /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		4CF05FDB31660401750B150C /* ToolCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolCardView.swift; sourceTree = "<group>"; };
+		5EDA5945B96177998F363496 /* ChatListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatListView.swift; sourceTree = "<group>"; };
+		614C130156A1F13775CD97A6 /* ChangePasswordView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChangePasswordView.swift; sourceTree = "<group>"; };
+		6685BE703670C419880E4EFB /* MainView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainView.swift; sourceTree = "<group>"; };
+		66EE7DBCDB61DE5E02281B3B /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
+		689547B19AE8D81A6E7AF93F /* MessageRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageRow.swift; sourceTree = "<group>"; };
+		7860210141233B1971AF00D4 /* WikiSearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WikiSearchView.swift; sourceTree = "<group>"; };
+		85C6E2D563A6CF6C91FB309B /* ComposerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerView.swift; sourceTree = "<group>"; };
+		8C43FE32802C02EB62B84DEC /* WikiUploadView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WikiUploadView.swift; sourceTree = "<group>"; };
+		BF6C9974E79834EA05657EE5 /* AttachmentProcessor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttachmentProcessor.swift; sourceTree = "<group>"; };
+		C4D291618D6C62BA7B7B31CF /* ChatViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatViewModel.swift; sourceTree = "<group>"; };
+		CCCA96DBB1F605CD6BB94B29 /* ZopediaApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZopediaApp.swift; sourceTree = "<group>"; };
+		EFE2140F67E5B6689A671676 /* ConnectView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectView.swift; sourceTree = "<group>"; };
+		F175E20638A079593E253AE4 /* WikiHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WikiHomeView.swift; sourceTree = "<group>"; };
+		F31587ECC177CED06A87F348 /* ZopediaKit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = ZopediaKit; path = ZopediaKit; sourceTree = SOURCE_ROOT; };
+		FF3384F257762C5220425951 /* Zopedia.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Zopedia.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		CA8F43638297B7913FA572E7 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				73A563C74CD5CD6294D77192 /* ZopediaKit in Frameworks */,
+				DE79025412BC99CB70280404 /* MarkdownUI in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		2E5817833252DE5610F351C5 /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				F31587ECC177CED06A87F348 /* ZopediaKit */,
+			);
+			name = Packages;
+			sourceTree = "<group>";
+		};
+		38D787675EEBB2BEA2614E85 = {
+			isa = PBXGroup;
+			children = (
+				2E5817833252DE5610F351C5 /* Packages */,
+				D227FD9908838DE095573418 /* Zopedia */,
+				CF1C93FAA686AF16F2D5DDF8 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		520AD31AA4F26C9322E0D9E6 /* Features */ = {
+			isa = PBXGroup;
+			children = (
+				B4499C926FBB18E451D313ED /* Auth */,
+				F2B39E8FDDD55812B484EFE4 /* Chat */,
+				9959578292353A8780C4683F /* Connect */,
+				C2E917EC0B318E29353E292C /* Main */,
+				675AEF2C77B4980E61157F40 /* Wiki */,
+			);
+			path = Features;
+			sourceTree = "<group>";
+		};
+		675AEF2C77B4980E61157F40 /* Wiki */ = {
+			isa = PBXGroup;
+			children = (
+				F175E20638A079593E253AE4 /* WikiHomeView.swift */,
+				36E94008B3A6BAE0CA077B15 /* WikiReaderView.swift */,
+				7860210141233B1971AF00D4 /* WikiSearchView.swift */,
+				8C43FE32802C02EB62B84DEC /* WikiUploadView.swift */,
+			);
+			path = Wiki;
+			sourceTree = "<group>";
+		};
+		9959578292353A8780C4683F /* Connect */ = {
+			isa = PBXGroup;
+			children = (
+				EFE2140F67E5B6689A671676 /* ConnectView.swift */,
+			);
+			path = Connect;
+			sourceTree = "<group>";
+		};
+		A21200E6CD797F86D0A41570 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				36EF00A03EBE45F0E8591BCA /* Assets.xcassets */,
+				05CD0AD17078E74F3A66DBE9 /* PrivacyInfo.xcprivacy */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		B4499C926FBB18E451D313ED /* Auth */ = {
+			isa = PBXGroup;
+			children = (
+				614C130156A1F13775CD97A6 /* ChangePasswordView.swift */,
+			);
+			path = Auth;
+			sourceTree = "<group>";
+		};
+		C2E917EC0B318E29353E292C /* Main */ = {
+			isa = PBXGroup;
+			children = (
+				6685BE703670C419880E4EFB /* MainView.swift */,
+			);
+			path = Main;
+			sourceTree = "<group>";
+		};
+		CF1C93FAA686AF16F2D5DDF8 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				FF3384F257762C5220425951 /* Zopedia.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		D227FD9908838DE095573418 /* Zopedia */ = {
+			isa = PBXGroup;
+			children = (
+				2FE37E93408BB373CE963653 /* AppEnvironment.swift */,
+				66EE7DBCDB61DE5E02281B3B /* RootView.swift */,
+				CCCA96DBB1F605CD6BB94B29 /* ZopediaApp.swift */,
+				520AD31AA4F26C9322E0D9E6 /* Features */,
+				A21200E6CD797F86D0A41570 /* Resources */,
+			);
+			path = Zopedia;
+			sourceTree = "<group>";
+		};
+		F2B39E8FDDD55812B484EFE4 /* Chat */ = {
+			isa = PBXGroup;
+			children = (
+				BF6C9974E79834EA05657EE5 /* AttachmentProcessor.swift */,
+				31734DF68A3628EB9A046DDC /* ChatDetailView.swift */,
+				5EDA5945B96177998F363496 /* ChatListView.swift */,
+				C4D291618D6C62BA7B7B31CF /* ChatViewModel.swift */,
+				85C6E2D563A6CF6C91FB309B /* ComposerView.swift */,
+				689547B19AE8D81A6E7AF93F /* MessageRow.swift */,
+				4CF05FDB31660401750B150C /* ToolCardView.swift */,
+			);
+			path = Chat;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		77AE0B4235E71D5C345233F7 /* Zopedia */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 7E88B94FD7C55DC4286C3581 /* Build configuration list for PBXNativeTarget "Zopedia" */;
+			buildPhases = (
+				1AA282DBF39367F97F295772 /* Sources */,
+				FE798F3AFF8E7DFBAD085D14 /* Resources */,
+				CA8F43638297B7913FA572E7 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Zopedia;
+			packageProductDependencies = (
+				9FB37CB3E4E85B974114BFA4 /* ZopediaKit */,
+				F7578F0D1005D4F33245DF63 /* MarkdownUI */,
+			);
+			productName = Zopedia;
+			productReference = FF3384F257762C5220425951 /* Zopedia.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		BC70AA55B49C646384162A1F /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					77AE0B4235E71D5C345233F7 = {
+						DevelopmentTeam = 6NHRH72J3M;
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = BD371B604643F8003A87D984 /* Build configuration list for PBXProject "Zopedia" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 38D787675EEBB2BEA2614E85;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				A0606FD6F116B4CD6A1AB1C9 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */,
+				FBAED95793AC2ABF2BBFAA5F /* XCLocalSwiftPackageReference "ZopediaKit" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = CF1C93FAA686AF16F2D5DDF8 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				77AE0B4235E71D5C345233F7 /* Zopedia */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		FE798F3AFF8E7DFBAD085D14 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B673F268C17D84A41803ADDA /* Assets.xcassets in Resources */,
+				7EFD4EEC053D828EF1EE0F86 /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		1AA282DBF39367F97F295772 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1B913AB9877F4A34662A7352 /* AppEnvironment.swift in Sources */,
+				2870B675F3CB169611CC3291 /* AttachmentProcessor.swift in Sources */,
+				8C9FD29BC47CA59E7B53B313 /* ChangePasswordView.swift in Sources */,
+				F925F7CFFBB3655B8D6B672E /* ChatDetailView.swift in Sources */,
+				29028B88DEC56BC4D30C678D /* ChatListView.swift in Sources */,
+				6C258CF63B242CCDEFB60DA9 /* ChatViewModel.swift in Sources */,
+				1AFDAB76CED53571ED53CFBD /* ComposerView.swift in Sources */,
+				598A2378399114D854D52633 /* ConnectView.swift in Sources */,
+				C867AC5B282E6C735E881FE9 /* MainView.swift in Sources */,
+				3CAD4B83F89E128BC8875780 /* MessageRow.swift in Sources */,
+				99B18C0C74985FA694CC705F /* RootView.swift in Sources */,
+				E4BCAF540CB88FF8016F00B3 /* ToolCardView.swift in Sources */,
+				F74F7DB54FEE0EB14BB3E9A2 /* WikiHomeView.swift in Sources */,
+				B521327ED1E5CEF16E72BB8D /* WikiReaderView.swift in Sources */,
+				98DE1695344576CC7C6D382E /* WikiSearchView.swift in Sources */,
+				F3F0A75592CC076152E830FF /* WikiUploadView.swift in Sources */,
+				C8FEDD5A21420290C9CDC3A0 /* ZopediaApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		1F3DFD6EA3E136CECD9A63A1 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Zopedia/Resources/Zopedia.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Zopedia/Resources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.zopedia.client;
+				PRODUCT_NAME = Zopedia;
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		4AB8F5D5951CF8AC1E728BC7 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Zopedia/Resources/Zopedia.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Zopedia/Resources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.zopedia.client;
+				PRODUCT_NAME = Zopedia;
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		A58132D0D63D96B30CED1291 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = 6NHRH72J3M;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		AF41F0EE5AA299FCB2CFAFB2 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = 6NHRH72J3M;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		7E88B94FD7C55DC4286C3581 /* Build configuration list for PBXNativeTarget "Zopedia" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1F3DFD6EA3E136CECD9A63A1 /* Debug */,
+				4AB8F5D5951CF8AC1E728BC7 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		BD371B604643F8003A87D984 /* Build configuration list for PBXProject "Zopedia" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A58132D0D63D96B30CED1291 /* Debug */,
+				AF41F0EE5AA299FCB2CFAFB2 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		FBAED95793AC2ABF2BBFAA5F /* XCLocalSwiftPackageReference "ZopediaKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ZopediaKit;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		A0606FD6F116B4CD6A1AB1C9 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/gonzalezreal/swift-markdown-ui";
+			requirement = {
+				kind = exactVersion;
+				version = 2.4.1;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		9FB37CB3E4E85B974114BFA4 /* ZopediaKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ZopediaKit;
+		};
+		F7578F0D1005D4F33245DF63 /* MarkdownUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A0606FD6F116B4CD6A1AB1C9 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */;
+			productName = MarkdownUI;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = BC70AA55B49C646384162A1F /* Project object */;
+}

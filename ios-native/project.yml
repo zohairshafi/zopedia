@@ -1,0 +1,45 @@
+name: Zopedia
+options:
+  bundleIdPrefix: com.zopedia
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    DEVELOPMENT_TEAM: 6NHRH72J3M
+    CODE_SIGN_STYLE: Automatic
+    IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+packages:
+  ZopediaKit:
+    path: ZopediaKit
+  MarkdownUI:
+    url: https://github.com/gonzalezreal/swift-markdown-ui
+    version: 2.4.1
+targets:
+  Zopedia:
+    type: application
+    platform: iOS
+    sources:
+      - path: Zopedia
+        excludes:
+          - "Resources/Info.plist"
+          - "Resources/Zopedia.entitlements"
+    dependencies:
+      - package: ZopediaKit
+        product: ZopediaKit
+      - package: MarkdownUI
+        product: MarkdownUI
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.zopedia.client
+        PRODUCT_NAME: Zopedia
+        INFOPLIST_FILE: Zopedia/Resources/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGN_ENTITLEMENTS: Zopedia/Resources/Zopedia.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SUPPORTS_MACCATALYST: NO
+        ENABLE_USER_SCRIPT_SANDBOXING: YES
+    scheme:
+      gatherCoverageData: false
