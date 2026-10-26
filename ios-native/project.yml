@@ -30,6 +30,9 @@ targets:
         product: ZopediaKit
       - package: MarkdownUI
         product: MarkdownUI
+    configFiles:
+      Debug: Config/Version.xcconfig
+      Release: Config/Version.xcconfig
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.zopedia.client

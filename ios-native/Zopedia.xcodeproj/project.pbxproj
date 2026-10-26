@@ -38,6 +38,7 @@
 		36EF00A03EBE45F0E8591BCA /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		4CF05FDB31660401750B150C /* ToolCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolCardView.swift; sourceTree = "<group>"; };
 		5EDA5945B96177998F363496 /* ChatListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatListView.swift; sourceTree = "<group>"; };
+		5F6C63788176CD2A2175D969 /* Version.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Version.xcconfig; sourceTree = "<group>"; };
 		614C130156A1F13775CD97A6 /* ChangePasswordView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChangePasswordView.swift; sourceTree = "<group>"; };
 		6685BE703670C419880E4EFB /* MainView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainView.swift; sourceTree = "<group>"; };
 		66EE7DBCDB61DE5E02281B3B /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
@@ -78,6 +79,7 @@
 		38D787675EEBB2BEA2614E85 = {
 			isa = PBXGroup;
 			children = (
+				CD2C5A68D853821E96B9B280 /* Config */,
 				2E5817833252DE5610F351C5 /* Packages */,
 				D227FD9908838DE095573418 /* Zopedia */,
 				CF1C93FAA686AF16F2D5DDF8 /* Products */,
@@ -138,6 +140,14 @@
 				6685BE703670C419880E4EFB /* MainView.swift */,
 			);
 			path = Main;
+			sourceTree = "<group>";
+		};
+		CD2C5A68D853821E96B9B280 /* Config */ = {
+			isa = PBXGroup;
+			children = (
+				5F6C63788176CD2A2175D969 /* Version.xcconfig */,
+			);
+			path = Config;
 			sourceTree = "<group>";
 		};
 		CF1C93FAA686AF16F2D5DDF8 /* Products */ = {
@@ -278,6 +288,7 @@
 /* Begin XCBuildConfiguration section */
 		1F3DFD6EA3E136CECD9A63A1 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 5F6C63788176CD2A2175D969 /* Version.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = Zopedia/Resources/Zopedia.entitlements;
@@ -299,6 +310,7 @@
 		};
 		4AB8F5D5951CF8AC1E728BC7 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 5F6C63788176CD2A2175D969 /* Version.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = Zopedia/Resources/Zopedia.entitlements;
