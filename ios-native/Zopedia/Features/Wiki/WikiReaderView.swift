@@ -21,9 +21,11 @@ struct WikiReaderView: View {
                             WikiLinkPreprocessor.stripFrontmatter(content)
                         )
                     )
+                    .markdownTheme(.zopedia)
                     .textSelection(.enabled)
                     .padding()
                 }
+                .background(ZTheme.background)
             } else if isLoading {
                 ProgressView()
             } else if let errorMessage {

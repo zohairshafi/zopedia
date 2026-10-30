@@ -7,51 +7,79 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		05F18EA9ACC2F14A2A57028C /* ResearchHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7E456360DDD1C4FA0002C01 /* ResearchHomeView.swift */; };
+		10738FD7DE685B315F1F4111 /* ChatOptionsBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78953B963F15FDA05977A2A6 /* ChatOptionsBar.swift */; };
+		141A15E3689F9D219A4251FF /* ToolPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE1BD8C1C3DCCE7D4131AFD4 /* ToolPresentation.swift */; };
 		1AFDAB76CED53571ED53CFBD /* ComposerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85C6E2D563A6CF6C91FB309B /* ComposerView.swift */; };
 		1B913AB9877F4A34662A7352 /* AppEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2FE37E93408BB373CE963653 /* AppEnvironment.swift */; };
+		1FC72A3EEF12AB43A3F1744C /* ZTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 615CD624E52DC0B42D2757F2 /* ZTheme.swift */; };
 		2870B675F3CB169611CC3291 /* AttachmentProcessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF6C9974E79834EA05657EE5 /* AttachmentProcessor.swift */; };
-		29028B88DEC56BC4D30C678D /* ChatListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EDA5945B96177998F363496 /* ChatListView.swift */; };
+		2CDC77D9FF0CB4DD46C8810C /* ChatOptionsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3887CA41B5743E612057CDDF /* ChatOptionsStore.swift */; };
+		2E07784A8FCEFA608DE005FD /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14BBE25FC924C693B4F80607 /* SettingsView.swift */; };
 		3CAD4B83F89E128BC8875780 /* MessageRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 689547B19AE8D81A6E7AF93F /* MessageRow.swift */; };
 		598A2378399114D854D52633 /* ConnectView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFE2140F67E5B6689A671676 /* ConnectView.swift */; };
 		6C258CF63B242CCDEFB60DA9 /* ChatViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4D291618D6C62BA7B7B31CF /* ChatViewModel.swift */; };
 		73A563C74CD5CD6294D77192 /* ZopediaKit in Frameworks */ = {isa = PBXBuildFile; productRef = 9FB37CB3E4E85B974114BFA4 /* ZopediaKit */; };
 		7EFD4EEC053D828EF1EE0F86 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 05CD0AD17078E74F3A66DBE9 /* PrivacyInfo.xcprivacy */; };
+		81B362F95BB225B22B796DB1 /* ToolStatusPill.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA136A366236F2E4664B523C /* ToolStatusPill.swift */; };
 		8C9FD29BC47CA59E7B53B313 /* ChangePasswordView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 614C130156A1F13775CD97A6 /* ChangePasswordView.swift */; };
-		98DE1695344576CC7C6D382E /* WikiSearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7860210141233B1971AF00D4 /* WikiSearchView.swift */; };
+		90BFA0D48F53775B44B9346C /* MaintenanceSchedulesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE990AF702B9C94B39BD5C7A /* MaintenanceSchedulesView.swift */; };
+		90C7786B1A92A33D528E0FA5 /* ChatStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E42C9D84B729E51B62EC521 /* ChatStore.swift */; };
+		93F9FA7CD9980D7C5EE6A329 /* ResearchViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28261A05A6BDC8B1328940D9 /* ResearchViewModel.swift */; };
 		99B18C0C74985FA694CC705F /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66EE7DBCDB61DE5E02281B3B /* RootView.swift */; };
+		AA76A0C8C380B4CB57E7BDCF /* ChatSidebarList.swift in Sources */ = {isa = PBXBuildFile; fileRef = 225D97D1E83FBF634FC9909C /* ChatSidebarList.swift */; };
+		AB04BFA7A0F0B6CE3D317B45 /* MarkdownTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5164D48E1EF03AA46F06FC50 /* MarkdownTheme.swift */; };
 		B521327ED1E5CEF16E72BB8D /* WikiReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36E94008B3A6BAE0CA077B15 /* WikiReaderView.swift */; };
 		B673F268C17D84A41803ADDA /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 36EF00A03EBE45F0E8591BCA /* Assets.xcassets */; };
 		C867AC5B282E6C735E881FE9 /* MainView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6685BE703670C419880E4EFB /* MainView.swift */; };
+		C86F9D122EA16E2116F5899F /* ChatHistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 530C9E38A4405E87B3C08E36 /* ChatHistoryView.swift */; };
 		C8FEDD5A21420290C9CDC3A0 /* ZopediaApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCCA96DBB1F605CD6BB94B29 /* ZopediaApp.swift */; };
+		D88760B420024C86F4A98F52 /* WikiEnvView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BEB40652EF37B896EF650DE1 /* WikiEnvView.swift */; };
 		DE79025412BC99CB70280404 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = F7578F0D1005D4F33245DF63 /* MarkdownUI */; };
+		E42ADF399A65DF07DAFEF81F /* ResearchSetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F371BD5D3499AAE817FBAA38 /* ResearchSetupView.swift */; };
 		E4BCAF540CB88FF8016F00B3 /* ToolCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CF05FDB31660401750B150C /* ToolCardView.swift */; };
 		F3F0A75592CC076152E830FF /* WikiUploadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C43FE32802C02EB62B84DEC /* WikiUploadView.swift */; };
+		F4A3BD651037D7B18459DFEA /* ResearchRunView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C28E080B72FD5B3FF03384AF /* ResearchRunView.swift */; };
 		F74F7DB54FEE0EB14BB3E9A2 /* WikiHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F175E20638A079593E253AE4 /* WikiHomeView.swift */; };
 		F925F7CFFBB3655B8D6B672E /* ChatDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31734DF68A3628EB9A046DDC /* ChatDetailView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		05CD0AD17078E74F3A66DBE9 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		14BBE25FC924C693B4F80607 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		225D97D1E83FBF634FC9909C /* ChatSidebarList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatSidebarList.swift; sourceTree = "<group>"; };
+		28261A05A6BDC8B1328940D9 /* ResearchViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResearchViewModel.swift; sourceTree = "<group>"; };
 		2FE37E93408BB373CE963653 /* AppEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppEnvironment.swift; sourceTree = "<group>"; };
 		31734DF68A3628EB9A046DDC /* ChatDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatDetailView.swift; sourceTree = "<group>"; };
 		36E94008B3A6BAE0CA077B15 /* WikiReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WikiReaderView.swift; sourceTree = "<group>"; };
 		36EF00A03EBE45F0E8591BCA /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		3887CA41B5743E612057CDDF /* ChatOptionsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatOptionsStore.swift; sourceTree = "<group>"; };
 		4CF05FDB31660401750B150C /* ToolCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolCardView.swift; sourceTree = "<group>"; };
-		5EDA5945B96177998F363496 /* ChatListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatListView.swift; sourceTree = "<group>"; };
+		5164D48E1EF03AA46F06FC50 /* MarkdownTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownTheme.swift; sourceTree = "<group>"; };
+		530C9E38A4405E87B3C08E36 /* ChatHistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatHistoryView.swift; sourceTree = "<group>"; };
 		5F6C63788176CD2A2175D969 /* Version.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Version.xcconfig; sourceTree = "<group>"; };
 		614C130156A1F13775CD97A6 /* ChangePasswordView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChangePasswordView.swift; sourceTree = "<group>"; };
+		615CD624E52DC0B42D2757F2 /* ZTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZTheme.swift; sourceTree = "<group>"; };
 		6685BE703670C419880E4EFB /* MainView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainView.swift; sourceTree = "<group>"; };
 		66EE7DBCDB61DE5E02281B3B /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		689547B19AE8D81A6E7AF93F /* MessageRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageRow.swift; sourceTree = "<group>"; };
-		7860210141233B1971AF00D4 /* WikiSearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WikiSearchView.swift; sourceTree = "<group>"; };
+		78953B963F15FDA05977A2A6 /* ChatOptionsBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatOptionsBar.swift; sourceTree = "<group>"; };
 		85C6E2D563A6CF6C91FB309B /* ComposerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerView.swift; sourceTree = "<group>"; };
 		8C43FE32802C02EB62B84DEC /* WikiUploadView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WikiUploadView.swift; sourceTree = "<group>"; };
+		8E42C9D84B729E51B62EC521 /* ChatStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatStore.swift; sourceTree = "<group>"; };
+		AE990AF702B9C94B39BD5C7A /* MaintenanceSchedulesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaintenanceSchedulesView.swift; sourceTree = "<group>"; };
+		BEB40652EF37B896EF650DE1 /* WikiEnvView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WikiEnvView.swift; sourceTree = "<group>"; };
 		BF6C9974E79834EA05657EE5 /* AttachmentProcessor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttachmentProcessor.swift; sourceTree = "<group>"; };
+		C28E080B72FD5B3FF03384AF /* ResearchRunView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResearchRunView.swift; sourceTree = "<group>"; };
 		C4D291618D6C62BA7B7B31CF /* ChatViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatViewModel.swift; sourceTree = "<group>"; };
+		C7E456360DDD1C4FA0002C01 /* ResearchHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResearchHomeView.swift; sourceTree = "<group>"; };
+		CA136A366236F2E4664B523C /* ToolStatusPill.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolStatusPill.swift; sourceTree = "<group>"; };
 		CCCA96DBB1F605CD6BB94B29 /* ZopediaApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZopediaApp.swift; sourceTree = "<group>"; };
 		EFE2140F67E5B6689A671676 /* ConnectView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectView.swift; sourceTree = "<group>"; };
 		F175E20638A079593E253AE4 /* WikiHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WikiHomeView.swift; sourceTree = "<group>"; };
 		F31587ECC177CED06A87F348 /* ZopediaKit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = ZopediaKit; path = ZopediaKit; sourceTree = SOURCE_ROOT; };
+		F371BD5D3499AAE817FBAA38 /* ResearchSetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResearchSetupView.swift; sourceTree = "<group>"; };
+		FE1BD8C1C3DCCE7D4131AFD4 /* ToolPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolPresentation.swift; sourceTree = "<group>"; };
 		FF3384F257762C5220425951 /* Zopedia.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Zopedia.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -68,6 +96,16 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		210573EF442B422C4CCBB520 /* Theme */ = {
+			isa = PBXGroup;
+			children = (
+				5164D48E1EF03AA46F06FC50 /* MarkdownTheme.swift */,
+				FE1BD8C1C3DCCE7D4131AFD4 /* ToolPresentation.swift */,
+				615CD624E52DC0B42D2757F2 /* ZTheme.swift */,
+			);
+			path = Theme;
+			sourceTree = "<group>";
+		};
 		2E5817833252DE5610F351C5 /* Packages */ = {
 			isa = PBXGroup;
 			children = (
@@ -86,6 +124,17 @@
 			);
 			sourceTree = "<group>";
 		};
+		3B507164437AC3746654B5E6 /* Research */ = {
+			isa = PBXGroup;
+			children = (
+				C7E456360DDD1C4FA0002C01 /* ResearchHomeView.swift */,
+				C28E080B72FD5B3FF03384AF /* ResearchRunView.swift */,
+				F371BD5D3499AAE817FBAA38 /* ResearchSetupView.swift */,
+				28261A05A6BDC8B1328940D9 /* ResearchViewModel.swift */,
+			);
+			path = Research;
+			sourceTree = "<group>";
+		};
 		520AD31AA4F26C9322E0D9E6 /* Features */ = {
 			isa = PBXGroup;
 			children = (
@@ -93,6 +142,8 @@
 				F2B39E8FDDD55812B484EFE4 /* Chat */,
 				9959578292353A8780C4683F /* Connect */,
 				C2E917EC0B318E29353E292C /* Main */,
+				3B507164437AC3746654B5E6 /* Research */,
+				E61A6CA2453E5F9F4BD770AC /* Settings */,
 				675AEF2C77B4980E61157F40 /* Wiki */,
 			);
 			path = Features;
@@ -103,7 +154,6 @@
 			children = (
 				F175E20638A079593E253AE4 /* WikiHomeView.swift */,
 				36E94008B3A6BAE0CA077B15 /* WikiReaderView.swift */,
-				7860210141233B1971AF00D4 /* WikiSearchView.swift */,
 				8C43FE32802C02EB62B84DEC /* WikiUploadView.swift */,
 			);
 			path = Wiki;
@@ -166,8 +216,19 @@
 				CCCA96DBB1F605CD6BB94B29 /* ZopediaApp.swift */,
 				520AD31AA4F26C9322E0D9E6 /* Features */,
 				A21200E6CD797F86D0A41570 /* Resources */,
+				210573EF442B422C4CCBB520 /* Theme */,
 			);
 			path = Zopedia;
+			sourceTree = "<group>";
+		};
+		E61A6CA2453E5F9F4BD770AC /* Settings */ = {
+			isa = PBXGroup;
+			children = (
+				AE990AF702B9C94B39BD5C7A /* MaintenanceSchedulesView.swift */,
+				14BBE25FC924C693B4F80607 /* SettingsView.swift */,
+				BEB40652EF37B896EF650DE1 /* WikiEnvView.swift */,
+			);
+			path = Settings;
 			sourceTree = "<group>";
 		};
 		F2B39E8FDDD55812B484EFE4 /* Chat */ = {
@@ -175,11 +236,16 @@
 			children = (
 				BF6C9974E79834EA05657EE5 /* AttachmentProcessor.swift */,
 				31734DF68A3628EB9A046DDC /* ChatDetailView.swift */,
-				5EDA5945B96177998F363496 /* ChatListView.swift */,
+				530C9E38A4405E87B3C08E36 /* ChatHistoryView.swift */,
+				78953B963F15FDA05977A2A6 /* ChatOptionsBar.swift */,
+				3887CA41B5743E612057CDDF /* ChatOptionsStore.swift */,
+				225D97D1E83FBF634FC9909C /* ChatSidebarList.swift */,
+				8E42C9D84B729E51B62EC521 /* ChatStore.swift */,
 				C4D291618D6C62BA7B7B31CF /* ChatViewModel.swift */,
 				85C6E2D563A6CF6C91FB309B /* ComposerView.swift */,
 				689547B19AE8D81A6E7AF93F /* MessageRow.swift */,
 				4CF05FDB31660401750B150C /* ToolCardView.swift */,
+				CA136A366236F2E4664B523C /* ToolStatusPill.swift */,
 			);
 			path = Chat;
 			sourceTree = "<group>";
@@ -267,18 +333,32 @@
 				2870B675F3CB169611CC3291 /* AttachmentProcessor.swift in Sources */,
 				8C9FD29BC47CA59E7B53B313 /* ChangePasswordView.swift in Sources */,
 				F925F7CFFBB3655B8D6B672E /* ChatDetailView.swift in Sources */,
-				29028B88DEC56BC4D30C678D /* ChatListView.swift in Sources */,
+				C86F9D122EA16E2116F5899F /* ChatHistoryView.swift in Sources */,
+				10738FD7DE685B315F1F4111 /* ChatOptionsBar.swift in Sources */,
+				2CDC77D9FF0CB4DD46C8810C /* ChatOptionsStore.swift in Sources */,
+				AA76A0C8C380B4CB57E7BDCF /* ChatSidebarList.swift in Sources */,
+				90C7786B1A92A33D528E0FA5 /* ChatStore.swift in Sources */,
 				6C258CF63B242CCDEFB60DA9 /* ChatViewModel.swift in Sources */,
 				1AFDAB76CED53571ED53CFBD /* ComposerView.swift in Sources */,
 				598A2378399114D854D52633 /* ConnectView.swift in Sources */,
 				C867AC5B282E6C735E881FE9 /* MainView.swift in Sources */,
+				90BFA0D48F53775B44B9346C /* MaintenanceSchedulesView.swift in Sources */,
+				AB04BFA7A0F0B6CE3D317B45 /* MarkdownTheme.swift in Sources */,
 				3CAD4B83F89E128BC8875780 /* MessageRow.swift in Sources */,
+				05F18EA9ACC2F14A2A57028C /* ResearchHomeView.swift in Sources */,
+				F4A3BD651037D7B18459DFEA /* ResearchRunView.swift in Sources */,
+				E42ADF399A65DF07DAFEF81F /* ResearchSetupView.swift in Sources */,
+				93F9FA7CD9980D7C5EE6A329 /* ResearchViewModel.swift in Sources */,
 				99B18C0C74985FA694CC705F /* RootView.swift in Sources */,
+				2E07784A8FCEFA608DE005FD /* SettingsView.swift in Sources */,
 				E4BCAF540CB88FF8016F00B3 /* ToolCardView.swift in Sources */,
+				141A15E3689F9D219A4251FF /* ToolPresentation.swift in Sources */,
+				81B362F95BB225B22B796DB1 /* ToolStatusPill.swift in Sources */,
+				D88760B420024C86F4A98F52 /* WikiEnvView.swift in Sources */,
 				F74F7DB54FEE0EB14BB3E9A2 /* WikiHomeView.swift in Sources */,
 				B521327ED1E5CEF16E72BB8D /* WikiReaderView.swift in Sources */,
-				98DE1695344576CC7C6D382E /* WikiSearchView.swift in Sources */,
 				F3F0A75592CC076152E830FF /* WikiUploadView.swift in Sources */,
+				1FC72A3EEF12AB43A3F1744C /* ZTheme.swift in Sources */,
 				C8FEDD5A21420290C9CDC3A0 /* ZopediaApp.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

@@ -25,7 +25,18 @@ final class AppEnvironment {
     private(set) var chat: ChatService?
     private(set) var wiki: WikiService?
     private(set) var attachments: AttachmentService?
+    private(set) var research: ResearchService?
+    private(set) var periodicResearch: PeriodicResearchService?
+    private(set) var trading: TradingService?
+    private(set) var maintenance: MaintenanceService?
+    private(set) var wikiEnv: WikiEnvService?
     private(set) var cache: ThreadCache?
+
+    let chatOptions = ChatOptionsStore()
+
+    var canManageAdvanced: Bool {
+        permissions?.isAdmin == true || health?.authDisabled == true
+    }
 
     var errorMessage: String?
     var isBusy = false
@@ -169,6 +180,11 @@ final class AppEnvironment {
         chat = nil
         wiki = nil
         attachments = nil
+        research = nil
+        periodicResearch = nil
+        trading = nil
+        maintenance = nil
+        wikiEnv = nil
         cache = nil
         health = nil
         permissions = nil
@@ -216,6 +232,11 @@ final class AppEnvironment {
         chat = ChatService(client: client)
         wiki = WikiService(client: client)
         attachments = AttachmentService(client: client)
+        research = ResearchService(client: client)
+        periodicResearch = PeriodicResearchService(client: client)
+        trading = TradingService(client: client)
+        maintenance = MaintenanceService(client: client)
+        wikiEnv = WikiEnvService(client: client)
 
         do {
             cache = try ThreadCache(

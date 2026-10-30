@@ -10,34 +10,74 @@ struct WikiUploadView: View {
 
     @State private var showFileImporter = false
     @State private var isUploading = false
-    @State private var results: [String] = []
+    @State private var results: [UploadResult] = []
     @State private var errorMessage: String?
     @State private var urlText = ""
+
+    private struct UploadResult: Identifiable {
+        let id = UUID()
+        let name: String
+        let message: String
+        let success: Bool
+    }
+
+    private var canUpload: Bool {
+        app.permissions?.canUploadFiles ?? true
+    }
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("Files") {
-                    Button("Choose files") {
-                        showFileImporter = true
+                if !canUpload {
+                    Section {
+                        Text("This account does not have permission to upload files.")
+                            .font(.callout)
+                            .foregroundStyle(ZTheme.destructive)
                     }
-                    .disabled(isUploading)
-
-                    Text("Markdown, text, PDF, Office, HTML, CSV, EPUB, images, audio, or zip.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
 
-                Section("Ingest a URL") {
+                Section("Files") {
+                    Button {
+                        showFileImporter = true
+                    } label: {
+                        VStack(spacing: 8) {
+                            Image(systemName: "arrow.up.doc")
+                                .font(.title2)
+                                .foregroundStyle(ZTheme.primary)
+                            Text("Choose files")
+                                .font(.headline)
+                                .foregroundStyle(ZTheme.foreground)
+                            Text("Markdown, text, PDF, Office, HTML, CSV, EPUB, images, audio, or zip.")
+                                .font(.caption)
+                                .foregroundStyle(ZTheme.mutedForeground)
+                                .multilineTextAlignment(.center)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 20)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isUploading || !canUpload)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .strokeBorder(
+                                ZTheme.border,
+                                style: StrokeStyle(lineWidth: 2, dash: [6])
+                            )
+                    }
+                }
+
+                Section("or ingest a URL") {
                     TextField("https://…", text: $urlText)
                         .keyboardType(.URL)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
 
-                    Button("Ingest") {
+                    Button {
                         Task { await ingestURL() }
+                    } label: {
+                        Label("Ingest", systemImage: "link")
                     }
-                    .disabled(urlText.trimmed.isEmpty || isUploading)
+                    .disabled(urlText.trimmed.isEmpty || isUploading || !canUpload)
                 }
 
                 if isUploading {
@@ -49,20 +89,34 @@ struct WikiUploadView: View {
                 if let errorMessage {
                     Section {
                         Text(errorMessage)
-                            .foregroundStyle(.red)
+                            .foregroundStyle(ZTheme.destructive)
                     }
                 }
 
                 if !results.isEmpty {
                     Section("Results") {
-                        ForEach(results, id: \.self) { result in
-                            Text(result)
-                                .font(.callout)
+                        ForEach(results) { result in
+                            HStack(alignment: .top, spacing: 8) {
+                                Image(systemName: result.success
+                                    ? "checkmark.circle.fill"
+                                    : "xmark.circle")
+                                    .foregroundStyle(result.success ? ZTheme.primary : ZTheme.destructive)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(result.name)
+                                        .font(.callout)
+                                        .foregroundStyle(ZTheme.foreground)
+                                    Text(result.message)
+                                        .font(.caption)
+                                        .foregroundStyle(ZTheme.mutedForeground)
+                                }
+                            }
                         }
                     }
                 }
             }
-            .navigationTitle("Add to wiki")
+            .scrollContentBackground(.hidden)
+            .background(ZTheme.background)
+            .navigationTitle("Upload to wiki")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
@@ -85,6 +139,10 @@ struct WikiUploadView: View {
     }
 
     private func upload(_ urls: [URL]) async {
+        guard canUpload else {
+            errorMessage = "This account does not have permission to upload files."
+            return
+        }
         guard let attachments = app.attachments else {
             errorMessage = "Not connected to a server."
             return
@@ -108,7 +166,11 @@ struct WikiUploadView: View {
                     data: data
                 ))
             } catch {
-                results.append("\(url.lastPathComponent): \(error.localizedDescription)")
+                results.append(UploadResult(
+                    name: url.lastPathComponent,
+                    message: error.localizedDescription,
+                    success: false
+                ))
             }
         }
 
@@ -116,9 +178,11 @@ struct WikiUploadView: View {
 
         do {
             let response = try await attachments.uploadFiles(files)
-            results.append(contentsOf: response.uploaded.map { "Uploaded \($0)" })
+            results.append(contentsOf: response.uploaded.map {
+                UploadResult(name: $0, message: "Uploaded", success: true)
+            })
             results.append(contentsOf: response.failed.map {
-                "\($0.filename): \($0.reason)"
+                UploadResult(name: $0.filename, message: $0.reason, success: false)
             })
             await onUploaded()
         } catch {
@@ -128,6 +192,10 @@ struct WikiUploadView: View {
     }
 
     private func ingestURL() async {
+        guard canUpload else {
+            errorMessage = "This account does not have permission to upload files."
+            return
+        }
         guard let wiki = app.wiki else { return }
         let value = urlText.trimmed
         guard value.lowercased().hasPrefix("http://")
@@ -138,15 +206,22 @@ struct WikiUploadView: View {
 
         isUploading = true
         errorMessage = nil
-        results = []
         defer { isUploading = false }
 
         do {
             let response = try await wiki.ingest(url: value)
             if response.status == "already_ingested" {
-                results.append("Already ingested.")
+                results.append(UploadResult(
+                    name: value,
+                    message: "Already ingested.",
+                    success: true
+                ))
             } else {
-                results.append("Ingested \(response.processedFiles) item(s).")
+                results.append(UploadResult(
+                    name: value,
+                    message: "Ingested \(response.processedFiles) item(s).",
+                    success: true
+                ))
             }
             urlText = ""
             await onUploaded()

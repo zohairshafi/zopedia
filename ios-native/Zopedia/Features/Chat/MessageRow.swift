@@ -24,18 +24,29 @@ struct MessageRow: View {
         }
     }
 
-    private var toolParts: [ToolCallPart] {
-        guard case .parts(let parts) = message.content else { return [] }
-        return parts.compactMap { part in
-            if case .tool(let tool) = part { return tool }
-            return nil
+    private var parts: [MessagePart] {
+        switch message.content {
+        case .text(let text):
+            return [.text(text)]
+        case .parts(let parts):
+            return parts
+        case .object:
+            return []
         }
+    }
+
+    private var timestamp: String? {
+        guard message.createdAt.timeIntervalSince1970 > 0 else { return nil }
+        if Calendar.current.isDateInToday(message.createdAt) {
+            return message.createdAt.formatted(date: .omitted, time: .shortened)
+        }
+        return message.createdAt.formatted(date: .abbreviated, time: .shortened)
     }
 
     private var userBubble: some View {
         HStack {
             Spacer(minLength: 48)
-            VStack(alignment: .trailing, spacing: 6) {
+            VStack(alignment: .trailing, spacing: 4) {
                 if let name = message.localImageName, let image = localImage(named: name) {
                     Image(uiImage: image)
                         .resizable()
@@ -48,12 +59,25 @@ struct MessageRow: View {
                 if !message.visibleText.isEmpty, !isImagePlaceholderOnly {
                     Text(message.visibleText)
                         .textSelection(.enabled)
+                        .foregroundStyle(ZTheme.foreground)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 10)
                         .background(
-                            Color.accentColor.opacity(0.14),
-                            in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            ZTheme.userBubble,
+                            in: UnevenRoundedRectangle(
+                                topLeadingRadius: ZTheme.bubbleRadius,
+                                bottomLeadingRadius: ZTheme.bubbleRadius,
+                                bottomTrailingRadius: ZTheme.bubbleRadius,
+                                topTrailingRadius: 4,
+                                style: .continuous
+                            )
                         )
+                }
+
+                if let timestamp {
+                    Text(timestamp)
+                        .font(.caption2)
+                        .foregroundStyle(ZTheme.mutedForeground)
                 }
             }
         }
@@ -74,45 +98,83 @@ struct MessageRow: View {
                 DisclosureGroup(isExpanded: $showReasoning) {
                     Text(reasoning)
                         .font(.callout)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(ZTheme.mutedForeground)
                         .textSelection(.enabled)
-                        .padding(.top, 6)
+                        .padding(10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(ZTheme.muted, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                 } label: {
                     Label(
-                        isStreaming ? "Thinking…" : "Reasoning",
-                        systemImage: "brain"
+                        isStreaming ? "Thinking…" : "Thought",
+                        systemImage: "lightbulb"
                     )
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(ZTheme.mutedForeground)
                 }
                 .onAppear {
                     if isStreaming { showReasoning = true }
                 }
             }
 
-            ForEach(toolParts, id: \.toolCallID) { tool in
-                ToolCardView(
-                    tool: tool,
-                    fallbackSessionID: sessionID,
-                    onAnswer: onAnswer,
-                    onDecision: onDecision
-                )
+            ForEach(Array(parts.enumerated()), id: \.offset) { _, part in
+                switch part {
+                case .text(let text):
+                    textBlock(text)
+                case .tool(let tool):
+                    ToolCardView(
+                        tool: tool,
+                        fallbackSessionID: sessionID,
+                        onAnswer: onAnswer,
+                        onDecision: onDecision
+                    )
+                case .reasoning, .unknown:
+                    EmptyView()
+                }
             }
 
-            if !message.visibleText.isEmpty {
-                Markdown(message.visibleText)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            if !isStreaming, let timestamp {
+                Text(timestamp)
+                    .font(.caption2)
+                    .foregroundStyle(ZTheme.mutedForeground)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    @ViewBuilder
+    private func textBlock(_ text: String) -> some View {
+        if text.isEmpty {
+            EmptyView()
+        } else if isStreaming {
+            // MarkdownUI re-parses the whole message on every delta, which is what
+            // made streaming jitter. Plain text keeps the stream smooth; formatting
+            // appears when the message completes.
+            Text(text)
+                .font(.body)
+                .foregroundStyle(ZTheme.foreground)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            Markdown(WikiLinkPreprocessor.preprocess(text))
+                .markdownTheme(.zopedia)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
     private var systemBlock: some View {
-        Text(message.visibleText)
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .textSelection(.enabled)
-            .frame(maxWidth: .infinity, alignment: .leading)
+        VStack(alignment: .leading, spacing: 4) {
+            Text(message.visibleText)
+                .font(.caption)
+                .foregroundStyle(ZTheme.mutedForeground)
+                .textSelection(.enabled)
+
+            if let timestamp {
+                Text(timestamp)
+                    .font(.caption2)
+                    .foregroundStyle(ZTheme.mutedForeground)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

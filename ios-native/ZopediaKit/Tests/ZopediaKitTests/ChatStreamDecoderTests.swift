@@ -17,6 +17,15 @@ final class ChatStreamDecoderTests: XCTestCase {
         XCTAssertEqual(try ChatStreamDecoder.decode(payload), .toolStatus("Thinking..."))
     }
 
+    func testToolStatusFromChatRouterTextField() throws {
+        // routes/chat.py emits `text`, not `content`.
+        let payload = #"{"type":"tool_status","text":"Searching web: CPI"}"#
+        XCTAssertEqual(
+            try ChatStreamDecoder.decode(payload),
+            .toolStatus("Searching web: CPI")
+        )
+    }
+
     func testToolStart() throws {
         let payload = #"{"type":"tool_start","tool_name":"ask_user_question","tool_call_id":"c1","arguments":{"question":"Pick","options":["a","b"]}}"#
         guard case .toolStart(let start) = try ChatStreamDecoder.decode(payload) else {

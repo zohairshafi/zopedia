@@ -7,6 +7,8 @@ public struct APIRequest: Sendable {
     public var body: Data?
     public var contentType: String?
     public var requiresAuth: Bool
+    /// Overrides the default 60 s request timeout.
+    public var timeout: TimeInterval?
 
     public init(
         method: String = "GET",
@@ -14,7 +16,8 @@ public struct APIRequest: Sendable {
         query: [URLQueryItem] = [],
         body: Data? = nil,
         contentType: String? = nil,
-        requiresAuth: Bool = true
+        requiresAuth: Bool = true,
+        timeout: TimeInterval? = nil
     ) {
         self.method = method
         self.path = path
@@ -22,6 +25,7 @@ public struct APIRequest: Sendable {
         self.body = body
         self.contentType = contentType
         self.requiresAuth = requiresAuth
+        self.timeout = timeout
     }
 }
 
@@ -107,6 +111,17 @@ public actor APIClient {
         try await request(method: "POST", path: path, body: body, requiresAuth: requiresAuth)
     }
 
+    /// POST with no body. `timeout` is for actions that block server-side.
+    public func post<Response: Decodable>(
+        _ path: String,
+        timeout: TimeInterval? = nil
+    ) async throws -> Response {
+        let data = try await send(
+            APIRequest(method: "POST", path: path, timeout: timeout)
+        )
+        return try decode(data)
+    }
+
     public func patch<Body: Encodable, Response: Decodable>(
         _ path: String,
         body: Body
@@ -171,25 +186,21 @@ public actor APIClient {
         }
     }
 
-    /// Stream chat events. A 401 triggers one refresh and a retry.
-    public func streamChat(_ chat: ChatRequest) -> AsyncThrowingStream<ChatStreamEvent, Error> {
+    /// Stream `data:` payloads from an SSE endpoint. A 401 triggers one refresh
+    /// and a retry. `[DONE]` is yielded to the caller before the stream ends.
+    public func streamSSEPayloads(
+        _ request: APIRequest,
+        timeout: TimeInterval = 600
+    ) -> AsyncThrowingStream<String, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 var didRetry = false
                 while true {
                     do {
-                        let body = try JSONEncoder().encode(chat)
-                        var urlRequest = try makeRequest(
-                            APIRequest(
-                                method: "POST",
-                                path: "v1/chat/completions",
-                                body: body,
-                                contentType: "application/json"
-                            )
-                        )
+                        var urlRequest = try makeRequest(request)
                         urlRequest.setValue("text/event-stream", forHTTPHeaderField: "Accept")
-                        urlRequest.timeoutInterval = 600
-                        if let token = await auth.accessToken {
+                        urlRequest.timeoutInterval = timeout
+                        if request.requiresAuth, let token = await auth.accessToken {
                             urlRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
                         }
 
@@ -198,7 +209,7 @@ public actor APIClient {
                             throw APIError.transport("The server returned a non-HTTP response.")
                         }
 
-                        if http.statusCode == 401, !didRetry {
+                        if http.statusCode == 401, request.requiresAuth, !didRetry {
                             _ = try await auth.refreshIfNeeded()
                             didRetry = true
                             continue
@@ -217,9 +228,8 @@ public actor APIClient {
                         var sawDone = false
                         for try await line in bytes.lines {
                             guard let payload = SSEParser.dataPayload(from: line) else { continue }
-                            guard let event = try ChatStreamDecoder.decode(payload) else { continue }
-                            continuation.yield(event)
-                            if event == .done {
+                            continuation.yield(payload)
+                            if payload == "[DONE]" {
                                 sawDone = true
                                 break
                             }
@@ -246,13 +256,51 @@ public actor APIClient {
         }
     }
 
+    /// Stream chat events.
+    public func streamChat(_ chat: ChatRequest) -> AsyncThrowingStream<ChatStreamEvent, Error> {
+        let body: Data
+        do {
+            body = try JSONEncoder().encode(chat)
+        } catch {
+            return AsyncThrowingStream { continuation in
+                continuation.finish(throwing: APIError.decoding("Could not encode the chat request."))
+            }
+        }
+
+        let payloads = streamSSEPayloads(
+            APIRequest(
+                method: "POST",
+                path: "v1/chat/completions",
+                body: body,
+                contentType: "application/json"
+            ),
+            timeout: 600
+        )
+
+        return AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    for try await payload in payloads {
+                        guard let event = try ChatStreamDecoder.decode(payload) else { continue }
+                        continuation.yield(event)
+                        if event == .done { break }
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
     private func makeRequest(_ request: APIRequest) throws -> URLRequest {
         guard let url = baseURL.zopediaURL(path: request.path, query: request.query) else {
             throw APIError.invalidURL
         }
         var urlRequest = URLRequest(url: url)
         urlRequest.httpMethod = request.method
-        urlRequest.timeoutInterval = 60
+        urlRequest.timeoutInterval = request.timeout ?? 60
         if let contentType = request.contentType {
             urlRequest.setValue(contentType, forHTTPHeaderField: "Content-Type")
         }

@@ -24,7 +24,11 @@ public enum ChatStreamDecoder {
         if let type = object["type"] as? String {
             switch type {
             case "tool_status":
-                return .toolStatus(object["content"] as? String ?? "")
+                // The chat router emits `text`; older frames used `content`.
+                let status = (object["text"] as? String)
+                    ?? (object["content"] as? String)
+                    ?? ""
+                return .toolStatus(status)
             case "tool_start":
                 guard let name = object["tool_name"] as? String,
                       let callID = object["tool_call_id"] as? String else {

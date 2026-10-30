@@ -9,14 +9,8 @@ struct WikiHomeView: View {
     @Environment(AppEnvironment.self) private var app
     @Environment(\.horizontalSizeClass) private var sizeClass
 
-    private enum Mode: String, CaseIterable, Identifiable {
-        case browse = "Browse"
-        case search = "Search"
+    @Binding var pendingPath: String?
 
-        var id: String { rawValue }
-    }
-
-    @State private var mode: Mode = .browse
     @State private var path = NavigationPath()
     @State private var selection: WikiPageRef?
     @State private var files: WikiFilesResponse?
@@ -25,6 +19,7 @@ struct WikiHomeView: View {
     @State private var filter = ""
     @State private var sortRecent = false
     @State private var showUpload = false
+    @State private var expanded: Set<String> = []
 
     var body: some View {
         Group {
@@ -56,46 +51,75 @@ struct WikiHomeView: View {
                 }
             }
         }
+        .onChange(of: pendingPath) { _, value in
+            openPending(value)
+        }
+        .onAppear {
+            openPending(pendingPath)
+            if files == nil {
+                Task { await load() }
+            }
+        }
     }
 
     @ViewBuilder
     private func sidebar(selectionMode: Bool) -> some View {
         VStack(spacing: 0) {
-            Picker("Mode", selection: $mode) {
-                ForEach(Mode.allCases) { mode in
-                    Text(mode.rawValue).tag(mode)
-                }
-            }
-            .pickerStyle(.segmented)
-            .padding(.horizontal)
-            .padding(.bottom, 8)
+            header
 
             if let errorMessage {
                 Text(errorMessage)
                     .font(.callout)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(ZTheme.destructive)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal)
                     .padding(.bottom, 6)
             }
 
-            switch mode {
-            case .browse:
-                browseView(selectionMode: selectionMode)
-            case .search:
-                WikiSearchView { page in
-                    open(page, selectionMode: selectionMode)
-                }
-            }
+            browseView(selectionMode: selectionMode)
         }
+        .background(ZTheme.background)
         .navigationTitle("Wiki")
-        .toolbar { wikiToolbar }
         .sheet(isPresented: $showUpload) {
             WikiUploadView {
                 await load()
             }
         }
-        .task { await load() }
+    }
+
+    private var header: some View {
+        HStack(spacing: 8) {
+            Button {
+                showUpload = true
+            } label: {
+                Label("Upload", systemImage: "square.and.arrow.up")
+                    .font(.subheadline.weight(.medium))
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(ZTheme.primary)
+            .disabled(app.permissions?.canUploadFiles == false)
+            .accessibilityHint("Upload files or ingest a URL into the wiki")
+
+            Spacer()
+
+            Menu {
+                Picker("Sort", selection: $sortRecent) {
+                    Text("Name").tag(false)
+                    Text("Recent").tag(true)
+                }
+
+                Divider()
+
+                Button("Expand all") { expandAll() }
+                Button("Collapse all") { expanded.removeAll() }
+            } label: {
+                Image(systemName: "arrow.up.arrow.down")
+                    .foregroundStyle(ZTheme.mutedForeground)
+            }
+            .accessibilityLabel("Sort and expand wiki sections")
+        }
+        .padding(.horizontal)
+        .padding(.bottom, 8)
     }
 
     @ViewBuilder
@@ -121,7 +145,9 @@ struct WikiHomeView: View {
                     }
                 }
             }
-            .listStyle(.insetGrouped)
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .background(ZTheme.background)
             .searchable(text: $filter, prompt: "Filter pages")
             .refreshable { await load() }
         }
@@ -133,22 +159,48 @@ struct WikiHomeView: View {
             if let directory = files.directories[name] {
                 let entries = filtered(directory.files)
                 if !entries.isEmpty {
-                    Section(name.capitalized) {
+                    DisclosureGroup(isExpanded: expansionBinding(for: name)) {
                         ForEach(entries) { entry in
                             pageRow(entry, selectionMode: selectionMode)
                         }
+                    } label: {
+                        sectionHeader(
+                            name.capitalized,
+                            count: isFiltering ? entries.count : directory.files.count
+                        )
                     }
+                    .listRowBackground(ZTheme.background)
                 }
             }
         }
 
         let roots = filtered(files.rootFiles)
         if !roots.isEmpty {
-            Section("Root") {
+            DisclosureGroup(isExpanded: expansionBinding(for: "root")) {
                 ForEach(roots) { entry in
                     pageRow(entry, selectionMode: selectionMode)
                 }
+            } label: {
+                sectionHeader(
+                    "Root",
+                    count: isFiltering ? roots.count : files.rootFiles.count
+                )
             }
+            .listRowBackground(ZTheme.background)
+        }
+    }
+
+    private func sectionHeader(_ title: String, count: Int) -> some View {
+        HStack(spacing: 8) {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(ZTheme.foreground)
+            Text("\(count)")
+                .font(.caption2)
+                .foregroundStyle(ZTheme.mutedForeground)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(ZTheme.muted, in: Capsule())
         }
     }
 
@@ -158,35 +210,36 @@ struct WikiHomeView: View {
         if selectionMode {
             WikiRow(entry: entry)
                 .tag(ref)
+                .listRowBackground(ZTheme.background)
         } else {
             NavigationLink(value: ref) {
                 WikiRow(entry: entry)
             }
+            .listRowBackground(ZTheme.background)
         }
     }
 
-    @ToolbarContentBuilder
-    private var wikiToolbar: some ToolbarContent {
-        ToolbarItem(placement: .topBarLeading) {
-            Menu {
-                Picker("Sort", selection: $sortRecent) {
-                    Text("Name").tag(false)
-                    Text("Recent").tag(true)
+    private var isFiltering: Bool {
+        !filter.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func expansionBinding(for key: String) -> Binding<Bool> {
+        Binding(
+            get: { isFiltering || expanded.contains(key) },
+            set: { isOpen in
+                if isOpen {
+                    expanded.insert(key)
+                } else {
+                    expanded.remove(key)
                 }
-            } label: {
-                Image(systemName: "arrow.up.arrow.down")
             }
-            .accessibilityLabel("Sort pages")
-        }
-        ToolbarItem(placement: .topBarTrailing) {
-            Button {
-                showUpload = true
-            } label: {
-                Image(systemName: "square.and.arrow.up")
-            }
-            .disabled(app.permissions?.canUploadFiles == false)
-            .accessibilityLabel("Add to wiki")
-        }
+        )
+    }
+
+    private func expandAll() {
+        guard let files else { return }
+        expanded = Set(files.directories.keys)
+        expanded.insert("root")
     }
 
     private func orderedDirectories(in files: WikiFilesResponse) -> [String] {
@@ -220,6 +273,12 @@ struct WikiHomeView: View {
             result.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
         }
         return result
+    }
+
+    private func openPending(_ value: String?) {
+        guard let value else { return }
+        open(value, selectionMode: sizeClass == .regular)
+        pendingPath = nil
     }
 
     private func open(_ page: String, selectionMode: Bool) {
@@ -256,11 +315,12 @@ private struct WikiRow: View {
         VStack(alignment: .leading, spacing: 3) {
             Text(entry.name)
                 .lineLimit(1)
+                .foregroundStyle(ZTheme.foreground)
 
             if !entry.preview.isEmpty {
                 Text(entry.preview)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(ZTheme.mutedForeground)
                     .lineLimit(2)
             }
 
@@ -271,7 +331,7 @@ private struct WikiRow: View {
                 Text(entry.modifiedDate, format: .dateTime.year().month().day())
             }
             .font(.caption2)
-            .foregroundStyle(.tertiary)
+            .foregroundStyle(ZTheme.mutedForeground.opacity(0.8))
         }
         .padding(.vertical, 2)
     }

@@ -37,17 +37,11 @@ struct ComposerView: View {
 
     var body: some View {
         VStack(spacing: 6) {
-            if model.isStreaming, let status = model.toolStatus, !status.isEmpty {
-                Text(status)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal)
-            }
-
             if hasAttachment || attachmentError != nil || attachmentInfo != nil || isPreparing {
                 attachmentRow
             }
+
+            ChatOptionsBar(options: app.chatOptions)
 
             HStack(alignment: .bottom, spacing: 8) {
                 Menu {
@@ -64,6 +58,7 @@ struct ComposerView: View {
                 } label: {
                     Image(systemName: "paperclip")
                         .font(.title3)
+                        .foregroundStyle(ZTheme.mutedForeground)
                         .frame(width: 34, height: 34)
                 }
                 .disabled(model.isStreaming || isPreparing)
@@ -71,21 +66,28 @@ struct ComposerView: View {
 
                 TextField("Message", text: $model.draft, axis: .vertical)
                     .lineLimit(1...6)
+                    .foregroundStyle(ZTheme.foreground)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 9)
                     .background(
-                        Color.secondary.opacity(0.10),
+                        ZTheme.muted,
                         in: RoundedRectangle(cornerRadius: 18, style: .continuous)
                     )
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .stroke(ZTheme.border, lineWidth: 1)
+                    }
                     .disabled(model.isStreaming)
 
                 if model.isStreaming {
                     Button("Stop") { model.stopWaiting() }
                         .buttonStyle(.bordered)
+                        .tint(ZTheme.primary)
                 } else {
                     Button(action: send) {
                         Image(systemName: "arrow.up.circle.fill")
                             .font(.title2)
+                            .foregroundStyle(canSend ? ZTheme.primary : ZTheme.mutedForeground)
                     }
                     .disabled(!canSend)
                     .accessibilityLabel("Send")
@@ -94,7 +96,7 @@ struct ComposerView: View {
             .padding(.horizontal)
         }
         .padding(.vertical, 8)
-        .background(.bar)
+        .background(ZTheme.background)
         .photosPicker(isPresented: $showPhotoPicker, selection: $photoItem, matching: .images)
         .onChange(of: photoItem) { _, item in
             Task { await loadPhoto(item) }

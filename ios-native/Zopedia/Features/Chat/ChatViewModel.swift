@@ -12,7 +12,9 @@ final class ChatViewModel {
 
     private(set) var messages: [ChatMessage] = []
     private(set) var liveMessage: ChatMessage?
+    private(set) var liveRevision = 0
     private(set) var toolStatus: String?
+    private(set) var toolStatusSince: Date?
     private(set) var isStreaming = false
     private(set) var isLoading = true
     private(set) var errorMessage: String?
@@ -25,11 +27,19 @@ final class ChatViewModel {
         !isStreaming && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    /// Completed messages plus the in-flight one, in a single list so SwiftUI
+    /// keeps the assistant row's identity when the stream finishes.
+    var displayMessages: [ChatMessage] {
+        var result = messages
+        if let liveMessage { result.append(liveMessage) }
+        return result
+    }
+
     private let app: AppEnvironment
     private var isNewThread: Bool
     private var assembler = ChatStreamAssembler()
     private var streamTask: Task<Void, Never>?
-    private var lastPublish = Date.distantPast
+    private var publishTask: Task<Void, Never>?
     private var firstUserText: String?
     private var currentUserMessageID: String?
     private var assistantMessageID: String?
@@ -235,19 +245,25 @@ final class ChatViewModel {
         assembler = ChatStreamAssembler()
         partialAppended = false
         toolStatus = nil
+        toolStatusSince = nil
         errorMessage = nil
         isStreaming = true
-        publish(force: true)
+        publishNow()
 
         let outgoing = messages.map {
             OutgoingMessage(role: $0.role.rawValue, content: $0.visibleText)
         }
+        let options = app.chatOptions
         let request = ChatRequest(
             messages: outgoing,
+            enabledTools: options.enabledTools,
             sessionID: thread.id,
             assistantMessageID: assistantID,
             parentID: parentID,
-            imageBase64: imageBase64
+            imageBase64: imageBase64,
+            reasoningEffort: options.reasoningEffort,
+            enableThinking: options.enableThinking,
+            maxTokens: nil
         )
 
         streamTask = Task { @MainActor [weak self] in
@@ -272,31 +288,63 @@ final class ChatViewModel {
 
         switch event {
         case .toolStatus(let status):
+            if status != toolStatus {
+                toolStatusSince = Date()
+            }
             toolStatus = status
         case .error(let message):
             errorMessage = message
+        case .toolStart, .toolEnd:
+            schedulePublish(immediate: true)
+        case .textDelta, .reasoningDelta:
+            schedulePublish(immediate: false)
         default:
             break
         }
-        publish(force: false)
     }
 
-    private func publish(force: Bool) {
+    /// Text deltas arrive far faster than a phone can re-render Markdown. Coalesce
+    /// them; tool events publish immediately so cards show up without a lag.
+    private func schedulePublish(immediate: Bool) {
+        guard assistantMessageID != nil, isStreaming else { return }
+
+        if immediate {
+            publishTask?.cancel()
+            publishTask = nil
+            publishNow()
+            return
+        }
+
+        guard publishTask == nil else { return }
+        publishTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 100_000_000)
+            guard !Task.isCancelled, let self else { return }
+            self.publishTask = nil
+            self.publishNow()
+        }
+    }
+
+    private func publishNow() {
         guard let assistantMessageID, isStreaming else { return }
-        let now = Date()
-        if !force && now.timeIntervalSince(lastPublish) < 0.05 { return }
-        lastPublish = now
         liveMessage = assembler.message(
             id: assistantMessageID,
             parentID: currentUserMessageID,
             createdAt: assistantCreatedAt
         )
+        liveRevision &+= 1
+    }
+
+    private func cancelScheduledPublish() {
+        publishTask?.cancel()
+        publishTask = nil
     }
 
     private func finish() async {
         streamTask = nil
+        cancelScheduledPublish()
         isStreaming = false
         toolStatus = nil
+        toolStatusSince = nil
 
         guard assembler.hasContent, let assistantMessageID else {
             liveMessage = nil
@@ -332,8 +380,10 @@ final class ChatViewModel {
 
     private func stopCleanly() {
         streamTask = nil
+        cancelScheduledPublish()
         isStreaming = false
         toolStatus = nil
+        toolStatusSince = nil
         appendPartialIfNeeded()
 
         if isBackgroundSuspended {
@@ -347,8 +397,10 @@ final class ChatViewModel {
 
     private func fail(_ error: Error) {
         streamTask = nil
+        cancelScheduledPublish()
         isStreaming = false
         toolStatus = nil
+        toolStatusSince = nil
         appendPartialIfNeeded()
 
         if let apiError = error as? APIError, apiError == .streamLost {
@@ -421,20 +473,41 @@ final class ChatViewModel {
                 merged.reasoningContent = local.reasoningContent
             }
 
-            if case .parts(let localParts) = local.content, case .text = merged.content {
-                var parts: [MessagePart] = localParts.filter {
-                    if case .tool = $0 { return true }
-                    return false
-                }
-                if !merged.visibleText.isEmpty {
-                    parts.append(.text(merged.visibleText))
-                }
-                if !parts.isEmpty {
-                    merged.content = .parts(parts)
+            if case .parts(let localParts) = local.content, case .text(let remoteText) = merged.content {
+                let localText = local.visibleText
+                if remoteText == localText || remoteText.isEmpty {
+                    merged.content = local.content
+                } else if remoteText.count > localText.count {
+                    // The server's fallback persisted only text after a background
+                    // completion. Keep the local tool positions and put the longer
+                    // text where the first text segment was.
+                    merged.content = Self.replacingText(in: localParts, with: remoteText)
+                } else {
+                    merged.content = local.content
                 }
             }
             return merged
         }
+    }
+
+    /// Replace every text segment with one authoritative text segment,
+    /// preserving the positions of tool parts relative to the first segment.
+    private static func replacingText(in parts: [MessagePart], with text: String) -> MessageContent {
+        let firstTextIndex = parts.firstIndex { part in
+            if case .text = part { return true }
+            return false
+        }
+        var result = parts.filter { part in
+            if case .text = part { return false }
+            return true
+        }
+        let index = min(firstTextIndex ?? result.count, result.count)
+        result.insert(.text(text), at: index)
+
+        if result.count == 1, case .text = result[0] {
+            return .text(text)
+        }
+        return .parts(result)
     }
 
     private func hasRecoveredAnswer(in newMessages: [ChatMessage]) -> Bool {

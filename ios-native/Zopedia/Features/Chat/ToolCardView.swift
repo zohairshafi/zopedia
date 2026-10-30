@@ -11,6 +11,10 @@ struct ToolCardView: View {
     @State private var submitted = false
     @State private var decided = false
 
+    private var appearance: ToolAppearance {
+        ToolPresentation.appearance(for: tool.toolName)
+    }
+
     var body: some View {
         switch tool.toolName {
         case "ask_user_question":
@@ -33,32 +37,31 @@ struct ToolCardView: View {
     }
 
     private var askCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label("Question", systemImage: "questionmark.bubble")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+        card {
             Text(question)
                 .font(.callout)
+                .foregroundStyle(ZTheme.foreground)
 
             if isComplete || submitted {
                 Text(askOutcome)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(ZTheme.mutedForeground)
             } else {
                 ForEach(Array(options.enumerated()), id: \.offset) { _, option in
                     Button(option) { submit(option) }
                         .buttonStyle(.bordered)
+                        .tint(ZTheme.primary)
                 }
                 HStack {
                     TextField("Type an answer", text: $freeText)
                         .textFieldStyle(.roundedBorder)
                     Button("Send") { submit(freeText) }
+                        .buttonStyle(.borderedProminent)
+                        .tint(ZTheme.primary)
                         .disabled(freeText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
         }
-        .padding(12)
-        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
     }
 
     private var askOutcome: String {
@@ -84,17 +87,15 @@ struct ToolCardView: View {
     // MARK: - alpaca_trade
 
     private var tradeCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label("Trade approval", systemImage: "chart.line.uptrend.xyaxis")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+        card {
             Text(orderSummary)
                 .font(.headline)
+                .foregroundStyle(ZTheme.foreground)
 
             if let rationale = args["rationale"]?.stringValue, !rationale.isEmpty {
                 Text(rationale)
                     .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(ZTheme.mutedForeground)
             }
 
             if args["market_open"]?.boolValue == false {
@@ -106,18 +107,17 @@ struct ToolCardView: View {
             if isComplete || decided {
                 Text(tradeOutcome)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(ZTheme.mutedForeground)
             } else {
                 HStack {
                     Button("Approve") { decide(true) }
                         .buttonStyle(.borderedProminent)
+                        .tint(ZTheme.primary)
                     Button("Reject", role: .destructive) { decide(false) }
                         .buttonStyle(.bordered)
                 }
             }
         }
-        .padding(12)
-        .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
     }
 
     private var orderSummary: String {
@@ -152,29 +152,115 @@ struct ToolCardView: View {
     // MARK: - generic
 
     private var genericCard: some View {
-        DisclosureGroup {
-            VStack(alignment: .leading, spacing: 8) {
-                if let value = tool.args, !value.prettyPrinted.isEmpty {
-                    Text(value.prettyPrinted)
-                        .font(.system(.caption, design: .monospaced))
-                        .textSelection(.enabled)
-                }
-                if let result = tool.result, !result.isEmpty {
-                    Divider()
-                    Text(result)
-                        .font(.system(.caption, design: .monospaced))
-                        .textSelection(.enabled)
-                        .lineLimit(20)
-                }
+        card {
+            if let sql = sqlResult {
+                SQLResultTable(result: sql)
             }
-            .padding(.top, 6)
-        } label: {
-            Label(tool.toolName, systemImage: "wrench.and.screwdriver")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+
+            DisclosureGroup {
+                VStack(alignment: .leading, spacing: 8) {
+                    if let query = args["query"]?.stringValue, !query.isEmpty {
+                        Text(query)
+                            .font(.system(.caption2, design: .monospaced))
+                            .foregroundStyle(ZTheme.mutedForeground)
+                            .textSelection(.enabled)
+                    }
+                    if let value = tool.args, !value.prettyPrinted.isEmpty {
+                        Text(value.prettyPrinted)
+                            .font(.system(.caption2, design: .monospaced))
+                            .foregroundStyle(ZTheme.mutedForeground)
+                            .textSelection(.enabled)
+                    }
+                    if let result = tool.result, !result.isEmpty {
+                        Divider().overlay(ZTheme.border)
+                        Text(result)
+                            .font(.system(.caption2, design: .monospaced))
+                            .foregroundStyle(ZTheme.mutedForeground)
+                            .textSelection(.enabled)
+                            .lineLimit(20)
+                    }
+                }
+                .padding(.top, 6)
+            } label: {
+                Text("Details")
+                    .font(.caption)
+                    .foregroundStyle(ZTheme.mutedForeground)
+            }
+        }
+    }
+
+    private func card<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Image(systemName: appearance.icon)
+                Text(appearance.title)
+                    .font(.caption.weight(.medium))
+                Spacer()
+                statusBadge
+            }
+            .foregroundStyle(ZTheme.mutedForeground)
+
+            content()
         }
         .padding(12)
-        .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
+        .background(ZTheme.muted, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(ZTheme.border, lineWidth: 1)
+        }
+    }
+
+    @ViewBuilder
+    private var statusBadge: some View {
+        if isComplete {
+            if ToolPresentation.resultFailed(tool.result) {
+                Image(systemName: "xmark.circle")
+                    .foregroundStyle(ZTheme.destructive)
+            } else {
+                Image(systemName: "checkmark.square")
+                    .foregroundStyle(ZTheme.primary)
+            }
+        } else {
+            ProgressView()
+                .controlSize(.mini)
+        }
+    }
+
+    // MARK: - SQL result
+
+    fileprivate struct SQLResult {
+        let columns: [String]
+        let rows: [[String: JSONValue]]
+        let rowCount: Int
+        let truncated: Bool
+    }
+
+    private var sqlResult: SQLResult? {
+        guard tool.toolName == "execute_sql_query",
+              let result = tool.result,
+              let data = result.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let columns = object["columns"] as? [String],
+              let rawRows = object["rows"] as? [[String: Any]] else {
+            return nil
+        }
+
+        let rows = rawRows.map { rawRow in
+            var converted: [String: JSONValue] = [:]
+            for (key, value) in rawRow {
+                if let json = try? JSONValue(any: value) {
+                    converted[key] = json
+                }
+            }
+            return converted
+        }
+
+        return SQLResult(
+            columns: columns,
+            rows: rows,
+            rowCount: object["row_count"] as? Int ?? rows.count,
+            truncated: object["truncated"] as? Bool ?? false
+        )
     }
 
     // MARK: - Helpers
@@ -209,5 +295,81 @@ struct ToolCardView: View {
         if let integer = value.intValue { return String(integer) }
         if case .double(let double) = value { return String(double) }
         return nil
+    }
+}
+
+private struct SQLResultTable: View {
+    let result: ToolCardView.SQLResult
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ScrollView(.horizontal, showsIndicators: true) {
+                Grid(alignment: .leading, horizontalSpacing: 0, verticalSpacing: 0) {
+                    GridRow {
+                        ForEach(result.columns, id: \.self) { column in
+                            cell(Text(column).fontWeight(.semibold), header: true)
+                        }
+                    }
+
+                    ForEach(Array(result.rows.enumerated()), id: \.offset) { _, row in
+                        GridRow {
+                            ForEach(result.columns, id: \.self) { column in
+                                cell(valueText(row[column]), header: false)
+                            }
+                        }
+                    }
+                }
+            }
+
+            HStack {
+                Text("\(result.rowCount) row\(result.rowCount == 1 ? "" : "s")\(result.truncated ? " (truncated)" : "")")
+                Spacer()
+            }
+            .font(.caption2)
+            .foregroundStyle(ZTheme.mutedForeground)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(ZTheme.muted)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(ZTheme.border, lineWidth: 1)
+        }
+    }
+
+    private func cell(_ text: Text, header: Bool) -> some View {
+        text
+            .font(.caption2)
+            .lineLimit(1)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .frame(minWidth: 70, maxWidth: 220, alignment: .leading)
+            .background(header ? ZTheme.muted : Color.clear)
+            .overlay(alignment: .bottom) {
+                Rectangle()
+                    .fill(ZTheme.border)
+                    .frame(height: 1)
+            }
+    }
+
+    private func valueText(_ value: JSONValue?) -> Text {
+        guard let value else {
+            return Text("NULL").italic().foregroundColor(ZTheme.mutedForeground)
+        }
+        switch value {
+        case .null:
+            return Text("NULL").italic().foregroundColor(ZTheme.mutedForeground)
+        case .string(let text):
+            return Text(text)
+        case .int(let number):
+            return Text(String(number))
+        case .double(let number):
+            return Text(String(number))
+        case .bool(let flag):
+            return Text(flag ? "true" : "false")
+        case .array, .object:
+            return Text(value.prettyPrinted)
+        }
     }
 }

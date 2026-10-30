@@ -51,7 +51,7 @@ final class ChatStreamAssemblerTests: XCTestCase {
         XCTAssertNil(message.reasoningContent)
     }
 
-    func testMessageKeepsReasoningAndToolParts() {
+    func testMessageKeepsReasoningAndParts() {
         var assembler = ChatStreamAssembler()
         assembler.apply(.reasoningDelta("why"))
         assembler.apply(.toolStart(ToolStart(name: "t", callID: "c1", arguments: .null)))
@@ -64,8 +64,47 @@ final class ChatStreamAssemblerTests: XCTestCase {
         guard case .parts(let parts) = message.content else {
             return XCTFail("expected parts")
         }
-        XCTAssertEqual(parts.count, 3)
+        XCTAssertEqual(parts.count, 2)
+        XCTAssertEqual(parts[0], .tool(ToolCallPart(
+            toolCallID: "c1", toolName: "t", args: .null, result: "r"
+        )))
+        XCTAssertEqual(parts[1], .text("answer"))
         XCTAssertEqual(message.visibleText, "answer")
+    }
+
+    func testPartsPreserveStreamOrder() throws {
+        var assembler = ChatStreamAssembler()
+        assembler.apply(.textDelta("Before."))
+        assembler.apply(.toolStart(ToolStart(name: "t", callID: "c1", arguments: .null)))
+        assembler.apply(.toolEnd(ToolEnd(name: "t", callID: "c1", result: "r")))
+        assembler.apply(.textDelta("After."))
+
+        let message = assembler.message(id: "m1", parentID: nil, createdAt: Date())
+        guard case .parts(let parts) = message.content else {
+            return XCTFail("expected parts")
+        }
+
+        XCTAssertEqual(parts.count, 3)
+        XCTAssertEqual(parts[0], .text("Before."))
+        if case .tool(let tool) = parts[1] {
+            XCTAssertEqual(tool.toolCallID, "c1")
+            XCTAssertEqual(tool.result, "r")
+        } else {
+            XCTFail("expected the tool between the text segments")
+        }
+        XCTAssertEqual(parts[2], .text("After."))
+        XCTAssertEqual(assembler.text, "Before.After.")
+    }
+
+    func testReasoningDeltasDoNotBreakTextRuns() {
+        var assembler = ChatStreamAssembler()
+        assembler.apply(.textDelta("one"))
+        assembler.apply(.reasoningDelta("why"))
+        assembler.apply(.textDelta("two"))
+
+        XCTAssertEqual(assembler.parts.count, 1)
+        XCTAssertEqual(assembler.text, "onetwo")
+        XCTAssertEqual(assembler.reasoning, "why")
     }
 
     func testErrorAndDoneFlags() {
