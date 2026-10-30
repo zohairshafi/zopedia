@@ -23,14 +23,31 @@ final class ChatStore {
     }
 
     func load(forceRefresh: Bool) async {
-        if let cache = app.cache {
-            threads = await cache.cachedThreads()
+        let cache = app.cache
+        let cached: [ChatThread]
+        if let cache {
+            cached = await cache.cachedThreads()
+            threads = cached
+        } else {
+            cached = []
         }
         isLoading = threads.isEmpty
         defer { isLoading = false }
 
         do {
-            threads = try await app.refreshThreads()
+            let remote = try await app.refreshThreads()
+            let remoteIDs = Set(remote.map(\.id))
+            // Chats the user chose not to log exist only on this device.
+            // Replace the index dropped them; put them back.
+            let localOnly = cached.filter { !remoteIDs.contains($0.id) }
+            if let cache {
+                for thread in localOnly {
+                    if let stored = await cache.loadThread(thread.id) {
+                        await cache.saveThread(thread, messages: stored.messages)
+                    }
+                }
+            }
+            threads = (remote + localOnly).sorted { $0.updatedAt > $1.updatedAt }
             if let fresh = threads.first(where: { $0.id == activeThread.id }) {
                 activeThread = fresh
             }
@@ -79,17 +96,21 @@ final class ChatStore {
 
         do {
             try await chat.renameThread(id: thread.id, title: value)
-            await cache.updateTitle(threadID: thread.id, title: value)
-            if let position = threads.firstIndex(where: { $0.id == thread.id }) {
-                threads[position].title = value
-                if activeThread.id == thread.id {
-                    activeThread = threads[position]
-                }
-            }
-            errorMessage = nil
+        } catch let error as APIError where Self.isNotFound(error) {
+            // Local-only thread; rename it on this device only.
         } catch {
             errorMessage = "Could not rename: \(Self.message(for: error))"
+            return
         }
+
+        await cache.updateTitle(threadID: thread.id, title: value)
+        if let position = threads.firstIndex(where: { $0.id == thread.id }) {
+            threads[position].title = value
+            if activeThread.id == thread.id {
+                activeThread = threads[position]
+            }
+        }
+        errorMessage = nil
     }
 
     func delete(_ thread: ChatThread) async {
@@ -97,18 +118,22 @@ final class ChatStore {
 
         do {
             try await chat.deleteThread(id: thread.id)
-            await cache.deleteThread(thread.id)
-            threads.removeAll { $0.id == thread.id }
-            if newThreadID == thread.id {
-                newThreadID = nil
-            }
-            if activeThread.id == thread.id {
-                startNewChat()
-            }
-            errorMessage = nil
+        } catch let error as APIError where Self.isNotFound(error) {
+            // Local-only thread; delete it on this device only.
         } catch {
             errorMessage = "Could not delete: \(Self.message(for: error))"
+            return
         }
+
+        await cache.deleteThread(thread.id)
+        threads.removeAll { $0.id == thread.id }
+        if newThreadID == thread.id {
+            newThreadID = nil
+        }
+        if activeThread.id == thread.id {
+            startNewChat()
+        }
+        errorMessage = nil
     }
 
     private static func makeLocalThread() -> ChatThread {
@@ -119,6 +144,13 @@ final class ChatStore {
             updatedAt: Date(),
             messageCount: 0
         )
+    }
+
+    private static func isNotFound(_ error: APIError) -> Bool {
+        if case .http(let status, _) = error {
+            return status == 404
+        }
+        return false
     }
 
     private static func message(for error: Error) -> String {

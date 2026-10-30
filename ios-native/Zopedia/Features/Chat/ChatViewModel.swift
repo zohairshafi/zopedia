@@ -51,8 +51,12 @@ final class ChatViewModel {
         messages.last(where: { $0.role == .assistant })?.id
     }
 
+    var isLogging: Bool {
+        app.chatOptions.isLogging(threadID: thread.id)
+    }
+
     private var savesHistory: Bool {
-        (app.permissions?.canSaveChatHistory ?? true) && app.chatOptions.logChatHistory
+        (app.permissions?.canSaveChatHistory ?? true) && isLogging
     }
 
     private let app: AppEnvironment
@@ -106,8 +110,10 @@ final class ChatViewModel {
             errorMessage = nil
         } catch let error as APIError {
             if case .http(let status, _) = error, status == 404 {
-                allMessages = []
-                rebuildVisiblePath()
+                // A local-only thread has no server row yet; keep the cache.
+                if allMessages.isEmpty {
+                    rebuildVisiblePath()
+                }
             } else if error != .cancelled {
                 errorMessage = errorText(error)
             }
@@ -467,11 +473,52 @@ final class ChatViewModel {
             }
         }
 
+        if title == "New Chat",
+           !savesHistory,
+           let userText = firstUserText,
+           !userText.isEmpty {
+            title = TitleSanitizer.fallback(from: userText)
+        }
+
         let updated = snapshot(messageCount: allMessages.count)
         await app.cache?.saveThread(updated, messages: allMessages)
         onThreadUpdated?(updated)
 
         await maybeGenerateTitle(assistantText: final.visibleText)
+    }
+
+    /// Log or stop logging the whole thread. Enabling backfills the current
+    /// device transcript so the server copy is complete.
+    func setLogging(_ logging: Bool) async {
+        guard app.permissions?.canSaveChatHistory ?? true else {
+            errorMessage = "This account cannot save chat history."
+            return
+        }
+        guard !isStreaming else { return }
+
+        if logging {
+            guard let chat = app.chat else { return }
+            app.chatOptions.setLogging(true, threadID: thread.id)
+            guard !allMessages.isEmpty else { return }
+            do {
+                _ = try await chat.saveThread(
+                    id: thread.id,
+                    title: title,
+                    messages: allMessages
+                )
+                isNewThread = false
+                didSaveThread = true
+                let updated = snapshot(messageCount: allMessages.count)
+                await app.cache?.saveThread(updated, messages: allMessages)
+                onThreadUpdated?(updated)
+                errorMessage = nil
+            } catch {
+                app.chatOptions.setLogging(false, threadID: thread.id)
+                errorMessage = "Could not log this chat: \(errorText(error))"
+            }
+        } else {
+            app.chatOptions.setLogging(false, threadID: thread.id)
+        }
     }
 
     private func stopCleanly() {

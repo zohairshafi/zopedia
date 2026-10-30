@@ -41,10 +41,9 @@ final class ChatOptionsStore {
     var alpacaTrade: Bool {
         didSet { defaults.set(alpacaTrade, forKey: Keys.alpacaTrade) }
     }
-    /// Local opt-out from server-side chat history. The server permission
-    /// is checked separately.
-    var logChatHistory: Bool {
-        didSet { defaults.set(logChatHistory, forKey: Keys.logChatHistory) }
+    /// Threads the user has explicitly chosen to log on the server.
+    var loggedThreadIDs: Set<String> {
+        didSet { defaults.set(Array(loggedThreadIDs), forKey: Keys.loggedThreads) }
     }
 
     @ObservationIgnored private let defaults: UserDefaults
@@ -56,7 +55,19 @@ final class ChatOptionsStore {
         database = defaults.bool(forKey: Keys.database)
         alpacaData = defaults.bool(forKey: Keys.alpacaData)
         alpacaTrade = defaults.bool(forKey: Keys.alpacaTrade)
-        logChatHistory = defaults.object(forKey: Keys.logChatHistory) as? Bool ?? true
+        loggedThreadIDs = Set(defaults.stringArray(forKey: Keys.loggedThreads) ?? [])
+    }
+
+    func isLogging(threadID: String) -> Bool {
+        loggedThreadIDs.contains(threadID)
+    }
+
+    func setLogging(_ logging: Bool, threadID: String) {
+        if logging {
+            loggedThreadIDs.insert(threadID)
+        } else {
+            loggedThreadIDs.remove(threadID)
+        }
     }
 
     var enabledTools: [String] {
@@ -91,7 +102,7 @@ final class ChatOptionsStore {
         static let database = "zopedia.chat.database"
         static let alpacaData = "zopedia.chat.alpacaData"
         static let alpacaTrade = "zopedia.chat.alpacaTrade"
-        static let logChatHistory = "zopedia.chat.logChatHistory"
+        static let loggedThreads = "zopedia.chat.loggedThreads"
     }
 
     private static func code(for thinking: Thinking) -> String {

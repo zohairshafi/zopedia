@@ -25,6 +25,7 @@
 		7EFD4EEC053D828EF1EE0F86 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 05CD0AD17078E74F3A66DBE9 /* PrivacyInfo.xcprivacy */; };
 		81B362F95BB225B22B796DB1 /* ToolStatusPill.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA136A366236F2E4664B523C /* ToolStatusPill.swift */; };
 		8C9FD29BC47CA59E7B53B313 /* ChangePasswordView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 614C130156A1F13775CD97A6 /* ChangePasswordView.swift */; };
+		8F3C7CC86FBFE629ED0C46BB /* TabBarTapObserver.swift in Sources */ = {isa = PBXBuildFile; fileRef = D92F103AA45E56542FD752F3 /* TabBarTapObserver.swift */; };
 		90BFA0D48F53775B44B9346C /* MaintenanceSchedulesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE990AF702B9C94B39BD5C7A /* MaintenanceSchedulesView.swift */; };
 		90C7786B1A92A33D528E0FA5 /* ChatStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E42C9D84B729E51B62EC521 /* ChatStore.swift */; };
 		93F9FA7CD9980D7C5EE6A329 /* ResearchViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28261A05A6BDC8B1328940D9 /* ResearchViewModel.swift */; };
@@ -81,6 +82,7 @@
 		C7E456360DDD1C4FA0002C01 /* ResearchHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResearchHomeView.swift; sourceTree = "<group>"; };
 		CA136A366236F2E4664B523C /* ToolStatusPill.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolStatusPill.swift; sourceTree = "<group>"; };
 		CCCA96DBB1F605CD6BB94B29 /* ZopediaApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZopediaApp.swift; sourceTree = "<group>"; };
+		D92F103AA45E56542FD752F3 /* TabBarTapObserver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabBarTapObserver.swift; sourceTree = "<group>"; };
 		EFE2140F67E5B6689A671676 /* ConnectView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectView.swift; sourceTree = "<group>"; };
 		F175E20638A079593E253AE4 /* WikiHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WikiHomeView.swift; sourceTree = "<group>"; };
 		F31587ECC177CED06A87F348 /* ZopediaKit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = ZopediaKit; path = ZopediaKit; sourceTree = SOURCE_ROOT; };
@@ -196,6 +198,7 @@
 			isa = PBXGroup;
 			children = (
 				6685BE703670C419880E4EFB /* MainView.swift */,
+				D92F103AA45E56542FD752F3 /* TabBarTapObserver.swift */,
 			);
 			path = Main;
 			sourceTree = "<group>";
@@ -361,6 +364,7 @@
 				99B18C0C74985FA694CC705F /* RootView.swift in Sources */,
 				2E07784A8FCEFA608DE005FD /* SettingsView.swift in Sources */,
 				EFB2706A48A6CCC77B9FC27E /* ShareSheet.swift in Sources */,
+				8F3C7CC86FBFE629ED0C46BB /* TabBarTapObserver.swift in Sources */,
 				E4BCAF540CB88FF8016F00B3 /* ToolCardView.swift in Sources */,
 				141A15E3689F9D219A4251FF /* ToolPresentation.swift in Sources */,
 				81B362F95BB225B22B796DB1 /* ToolStatusPill.swift in Sources */,

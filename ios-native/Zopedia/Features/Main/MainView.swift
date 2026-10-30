@@ -74,6 +74,7 @@ struct MainView: View {
                 .tag(AppTab.settings)
         }
         .tint(ZTheme.primary)
+        .background(TabBarTapObserver())
         .environment(\.openURL, OpenURLAction { url in
             if let path = WikiLinkPreprocessor.pagePath(from: url) {
                 wikiPendingPath = path

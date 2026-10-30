@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 import ZopediaKit
 
@@ -65,6 +66,25 @@ struct ChatDetailView: View {
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 Menu {
+                    if let model {
+                        Button {
+                            Task { await model.setLogging(!model.isLogging) }
+                        } label: {
+                            Label(
+                                model.isLogging ? "Stop logging this chat" : "Log this chat",
+                                systemImage: model.isLogging
+                                    ? "checkmark.circle.fill"
+                                    : "circle"
+                            )
+                        }
+                        .disabled(
+                            model.isStreaming
+                                || app.permissions?.canSaveChatHistory == false
+                        )
+
+                        Divider()
+                    }
+
                     Button {
                         exportHTML()
                     } label: {
@@ -267,8 +287,15 @@ struct ChatDetailView: View {
                 .padding()
                 .frame(maxWidth: 820)
                 .frame(maxWidth: .infinity)
+                .background(ScrollToTopDisabler())
             }
             .scrollDismissesKeyboard(.interactively)
+            .onReceive(NotificationCenter.default.publisher(for: .chatScrollToBottom)) { _ in
+                isFollowing = true
+                withAnimation(.easeOut(duration: 0.2)) {
+                    proxy.scrollTo("bottom", anchor: .bottom)
+                }
+            }
             .coordinateSpace(name: "chatScroll")
             .background(
                 GeometryReader { geometry in
