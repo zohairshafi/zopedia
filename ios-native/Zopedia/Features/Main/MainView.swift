@@ -83,6 +83,9 @@ struct MainView: View {
             }
             return .systemAction
         })
+        .onReceive(NotificationCenter.default.publisher(for: .selectChatTab)) { _ in
+            tab = .chat
+        }
         .onChange(of: sizeClass) { _, newValue in
             if newValue == .regular, tab == .history {
                 tab = .chat
