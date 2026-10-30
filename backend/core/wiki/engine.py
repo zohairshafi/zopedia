@@ -11305,7 +11305,9 @@ class LLMWikiEngine:
 
         # Replace existing resources:/resource: line, or append
         if re.search(r"^resources?\s*:", front, flags=re.M):
-            front = re.sub(r"^resources?\s*:.*$", new_line, front, flags=re.M)
+            # A function replacement keeps backslashes in titles literal; as a
+            # template, yaml's \uXXXX escapes raise "bad escape \u".
+            front = re.sub(r"^resources?\s*:.*$", lambda _match: new_line, front, flags=re.M)
         else:
             front = front.rstrip() + f"\n{new_line}\n"
 
