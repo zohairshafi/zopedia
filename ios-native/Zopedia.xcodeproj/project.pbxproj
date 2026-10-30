@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		05F18EA9ACC2F14A2A57028C /* ResearchHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7E456360DDD1C4FA0002C01 /* ResearchHomeView.swift */; };
 		10738FD7DE685B315F1F4111 /* ChatOptionsBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78953B963F15FDA05977A2A6 /* ChatOptionsBar.swift */; };
+		122C7ADA3538C7987A1CF061 /* ZTabBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8D343C650C1D6DAD5A749EC /* ZTabBar.swift */; };
 		141A15E3689F9D219A4251FF /* ToolPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE1BD8C1C3DCCE7D4131AFD4 /* ToolPresentation.swift */; };
 		1AFDAB76CED53571ED53CFBD /* ComposerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85C6E2D563A6CF6C91FB309B /* ComposerView.swift */; };
 		1B913AB9877F4A34662A7352 /* AppEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2FE37E93408BB373CE963653 /* AppEnvironment.swift */; };
@@ -16,6 +17,7 @@
 		2870B675F3CB169611CC3291 /* AttachmentProcessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF6C9974E79834EA05657EE5 /* AttachmentProcessor.swift */; };
 		2CDC77D9FF0CB4DD46C8810C /* ChatOptionsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3887CA41B5743E612057CDDF /* ChatOptionsStore.swift */; };
 		2E07784A8FCEFA608DE005FD /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14BBE25FC924C693B4F80607 /* SettingsView.swift */; };
+		2ECE507CCD30970AA73D7E41 /* ZMarkdown.swift in Sources */ = {isa = PBXBuildFile; fileRef = 706CAE303C055B438B68333D /* ZMarkdown.swift */; };
 		34D6FCE058EE6EEA71108936 /* TouchActionButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4355690C4C4294C7CEC948B7 /* TouchActionButton.swift */; };
 		3CAD4B83F89E128BC8875780 /* MessageRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 689547B19AE8D81A6E7AF93F /* MessageRow.swift */; };
 		598A2378399114D854D52633 /* ConnectView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFE2140F67E5B6689A671676 /* ConnectView.swift */; };
@@ -25,15 +27,17 @@
 		7EFD4EEC053D828EF1EE0F86 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 05CD0AD17078E74F3A66DBE9 /* PrivacyInfo.xcprivacy */; };
 		81B362F95BB225B22B796DB1 /* ToolStatusPill.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA136A366236F2E4664B523C /* ToolStatusPill.swift */; };
 		8C9FD29BC47CA59E7B53B313 /* ChangePasswordView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 614C130156A1F13775CD97A6 /* ChangePasswordView.swift */; };
-		8F3C7CC86FBFE629ED0C46BB /* TabBarTapObserver.swift in Sources */ = {isa = PBXBuildFile; fileRef = D92F103AA45E56542FD752F3 /* TabBarTapObserver.swift */; };
 		90BFA0D48F53775B44B9346C /* MaintenanceSchedulesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE990AF702B9C94B39BD5C7A /* MaintenanceSchedulesView.swift */; };
 		90C7786B1A92A33D528E0FA5 /* ChatStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E42C9D84B729E51B62EC521 /* ChatStore.swift */; };
 		93F9FA7CD9980D7C5EE6A329 /* ResearchViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28261A05A6BDC8B1328940D9 /* ResearchViewModel.swift */; };
+		96CE82751D99C21C66CE46F1 /* SwiftMath in Frameworks */ = {isa = PBXBuildFile; productRef = 794D45B48199E9521077B224 /* SwiftMath */; };
 		99B18C0C74985FA694CC705F /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66EE7DBCDB61DE5E02281B3B /* RootView.swift */; };
 		AA76A0C8C380B4CB57E7BDCF /* ChatSidebarList.swift in Sources */ = {isa = PBXBuildFile; fileRef = 225D97D1E83FBF634FC9909C /* ChatSidebarList.swift */; };
 		AB04BFA7A0F0B6CE3D317B45 /* MarkdownTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5164D48E1EF03AA46F06FC50 /* MarkdownTheme.swift */; };
+		AC00F5D014E4D70BFEBCF0AA /* WikiUploadMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBE9B4075D1F55DF901D511A /* WikiUploadMonitor.swift */; };
 		B521327ED1E5CEF16E72BB8D /* WikiReaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36E94008B3A6BAE0CA077B15 /* WikiReaderView.swift */; };
 		B673F268C17D84A41803ADDA /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 36EF00A03EBE45F0E8591BCA /* Assets.xcassets */; };
+		BDB0AD26CB45E71819C8A92F /* WindowBackground.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD66F484605E4D73ABFCD6AB /* WindowBackground.swift */; };
 		C867AC5B282E6C735E881FE9 /* MainView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6685BE703670C419880E4EFB /* MainView.swift */; };
 		C86F9D122EA16E2116F5899F /* ChatHistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 530C9E38A4405E87B3C08E36 /* ChatHistoryView.swift */; };
 		C8FEDD5A21420290C9CDC3A0 /* ZopediaApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCCA96DBB1F605CD6BB94B29 /* ZopediaApp.swift */; };
@@ -68,6 +72,7 @@
 		6685BE703670C419880E4EFB /* MainView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainView.swift; sourceTree = "<group>"; };
 		66EE7DBCDB61DE5E02281B3B /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		689547B19AE8D81A6E7AF93F /* MessageRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageRow.swift; sourceTree = "<group>"; };
+		706CAE303C055B438B68333D /* ZMarkdown.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZMarkdown.swift; sourceTree = "<group>"; };
 		78953B963F15FDA05977A2A6 /* ChatOptionsBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatOptionsBar.swift; sourceTree = "<group>"; };
 		85C6E2D563A6CF6C91FB309B /* ComposerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerView.swift; sourceTree = "<group>"; };
 		87740AC51DBDDA53EE4C0C46 /* ShareSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareSheet.swift; sourceTree = "<group>"; };
@@ -75,18 +80,20 @@
 		8E42C9D84B729E51B62EC521 /* ChatStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatStore.swift; sourceTree = "<group>"; };
 		913F302A9151837B7865A904 /* ZopediaLogo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZopediaLogo.swift; sourceTree = "<group>"; };
 		AE990AF702B9C94B39BD5C7A /* MaintenanceSchedulesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaintenanceSchedulesView.swift; sourceTree = "<group>"; };
+		BD66F484605E4D73ABFCD6AB /* WindowBackground.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowBackground.swift; sourceTree = "<group>"; };
 		BEB40652EF37B896EF650DE1 /* WikiEnvView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WikiEnvView.swift; sourceTree = "<group>"; };
 		BF6C9974E79834EA05657EE5 /* AttachmentProcessor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttachmentProcessor.swift; sourceTree = "<group>"; };
 		C28E080B72FD5B3FF03384AF /* ResearchRunView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResearchRunView.swift; sourceTree = "<group>"; };
 		C4D291618D6C62BA7B7B31CF /* ChatViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatViewModel.swift; sourceTree = "<group>"; };
 		C7E456360DDD1C4FA0002C01 /* ResearchHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResearchHomeView.swift; sourceTree = "<group>"; };
 		CA136A366236F2E4664B523C /* ToolStatusPill.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolStatusPill.swift; sourceTree = "<group>"; };
+		CBE9B4075D1F55DF901D511A /* WikiUploadMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WikiUploadMonitor.swift; sourceTree = "<group>"; };
 		CCCA96DBB1F605CD6BB94B29 /* ZopediaApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZopediaApp.swift; sourceTree = "<group>"; };
-		D92F103AA45E56542FD752F3 /* TabBarTapObserver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabBarTapObserver.swift; sourceTree = "<group>"; };
 		EFE2140F67E5B6689A671676 /* ConnectView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectView.swift; sourceTree = "<group>"; };
 		F175E20638A079593E253AE4 /* WikiHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WikiHomeView.swift; sourceTree = "<group>"; };
 		F31587ECC177CED06A87F348 /* ZopediaKit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = ZopediaKit; path = ZopediaKit; sourceTree = SOURCE_ROOT; };
 		F371BD5D3499AAE817FBAA38 /* ResearchSetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResearchSetupView.swift; sourceTree = "<group>"; };
+		F8D343C650C1D6DAD5A749EC /* ZTabBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZTabBar.swift; sourceTree = "<group>"; };
 		FE1BD8C1C3DCCE7D4131AFD4 /* ToolPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolPresentation.swift; sourceTree = "<group>"; };
 		FF3384F257762C5220425951 /* Zopedia.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Zopedia.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -98,6 +105,7 @@
 			files = (
 				73A563C74CD5CD6294D77192 /* ZopediaKit in Frameworks */,
 				DE79025412BC99CB70280404 /* MarkdownUI in Frameworks */,
+				96CE82751D99C21C66CE46F1 /* SwiftMath in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -110,6 +118,8 @@
 				5164D48E1EF03AA46F06FC50 /* MarkdownTheme.swift */,
 				FE1BD8C1C3DCCE7D4131AFD4 /* ToolPresentation.swift */,
 				4355690C4C4294C7CEC948B7 /* TouchActionButton.swift */,
+				BD66F484605E4D73ABFCD6AB /* WindowBackground.swift */,
+				706CAE303C055B438B68333D /* ZMarkdown.swift */,
 				913F302A9151837B7865A904 /* ZopediaLogo.swift */,
 				615CD624E52DC0B42D2757F2 /* ZTheme.swift */,
 			);
@@ -164,6 +174,7 @@
 			children = (
 				F175E20638A079593E253AE4 /* WikiHomeView.swift */,
 				36E94008B3A6BAE0CA077B15 /* WikiReaderView.swift */,
+				CBE9B4075D1F55DF901D511A /* WikiUploadMonitor.swift */,
 				8C43FE32802C02EB62B84DEC /* WikiUploadView.swift */,
 			);
 			path = Wiki;
@@ -198,7 +209,7 @@
 			isa = PBXGroup;
 			children = (
 				6685BE703670C419880E4EFB /* MainView.swift */,
-				D92F103AA45E56542FD752F3 /* TabBarTapObserver.swift */,
+				F8D343C650C1D6DAD5A749EC /* ZTabBar.swift */,
 			);
 			path = Main;
 			sourceTree = "<group>";
@@ -281,6 +292,7 @@
 			packageProductDependencies = (
 				9FB37CB3E4E85B974114BFA4 /* ZopediaKit */,
 				F7578F0D1005D4F33245DF63 /* MarkdownUI */,
+				794D45B48199E9521077B224 /* SwiftMath */,
 			);
 			productName = Zopedia;
 			productReference = FF3384F257762C5220425951 /* Zopedia.app */;
@@ -312,6 +324,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				A0606FD6F116B4CD6A1AB1C9 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */,
+				CE4250D90A667E6FA99C44C0 /* XCRemoteSwiftPackageReference "SwiftMath" */,
 				FBAED95793AC2ABF2BBFAA5F /* XCLocalSwiftPackageReference "ZopediaKit" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -364,7 +377,6 @@
 				99B18C0C74985FA694CC705F /* RootView.swift in Sources */,
 				2E07784A8FCEFA608DE005FD /* SettingsView.swift in Sources */,
 				EFB2706A48A6CCC77B9FC27E /* ShareSheet.swift in Sources */,
-				8F3C7CC86FBFE629ED0C46BB /* TabBarTapObserver.swift in Sources */,
 				E4BCAF540CB88FF8016F00B3 /* ToolCardView.swift in Sources */,
 				141A15E3689F9D219A4251FF /* ToolPresentation.swift in Sources */,
 				81B362F95BB225B22B796DB1 /* ToolStatusPill.swift in Sources */,
@@ -372,7 +384,11 @@
 				D88760B420024C86F4A98F52 /* WikiEnvView.swift in Sources */,
 				F74F7DB54FEE0EB14BB3E9A2 /* WikiHomeView.swift in Sources */,
 				B521327ED1E5CEF16E72BB8D /* WikiReaderView.swift in Sources */,
+				AC00F5D014E4D70BFEBCF0AA /* WikiUploadMonitor.swift in Sources */,
 				F3F0A75592CC076152E830FF /* WikiUploadView.swift in Sources */,
+				BDB0AD26CB45E71819C8A92F /* WindowBackground.swift in Sources */,
+				2ECE507CCD30970AA73D7E41 /* ZMarkdown.swift in Sources */,
+				122C7ADA3538C7987A1CF061 /* ZTabBar.swift in Sources */,
 				1FC72A3EEF12AB43A3F1744C /* ZTheme.swift in Sources */,
 				C8FEDD5A21420290C9CDC3A0 /* ZopediaApp.swift in Sources */,
 				66CA623C904E819C67C63DA4 /* ZopediaLogo.swift in Sources */,
@@ -588,9 +604,22 @@
 				version = 2.4.1;
 			};
 		};
+		CE4250D90A667E6FA99C44C0 /* XCRemoteSwiftPackageReference "SwiftMath" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/mgriebling/SwiftMath";
+			requirement = {
+				kind = exactVersion;
+				version = 1.7.3;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		794D45B48199E9521077B224 /* SwiftMath */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CE4250D90A667E6FA99C44C0 /* XCRemoteSwiftPackageReference "SwiftMath" */;
+			productName = SwiftMath;
+		};
 		9FB37CB3E4E85B974114BFA4 /* ZopediaKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = ZopediaKit;

@@ -15,7 +15,14 @@ public enum WikiLinkPreprocessor {
 
         result = replacing(result, pattern: wikiLinkPattern) { groups in
             let reference = groups[1]
-            return "[\(reference)](\(link(for: resolvePath(reference))))"
+            // The vault uses Obsidian-style aliases: [[path|label]].
+            let parts = reference.split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false)
+            let target = String(parts[0]).trimmingCharacters(in: .whitespacesAndNewlines)
+            let label = parts.count > 1
+                ? String(parts[1]).trimmingCharacters(in: .whitespacesAndNewlines)
+                : target
+            guard !target.isEmpty else { return nil }
+            return "[\(label.isEmpty ? target : label)](\(link(for: resolvePath(target))))"
         }
 
         result = replacing(result, pattern: pagePathPattern, options: [.caseInsensitive]) { groups in
@@ -55,11 +62,27 @@ public enum WikiLinkPreprocessor {
     }
 
     public static func pagePath(from url: URL) -> String? {
-        guard url.scheme == "zopedia", url.host == "wiki",
-              let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
-            return nil
+        let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+
+        if url.scheme == "zopedia", url.host == "wiki" {
+            return components?.queryItems?.first(where: { $0.name == "path" })?.value
         }
-        return components.queryItems?.first(where: { $0.name == "path" })?.value
+
+        // Markdown copied from the web can point at the server's wiki-file
+        // route. Treat it as an in-app wiki link instead of opening Safari.
+        if components?.path.hasSuffix("/api/inference/wiki-file") == true {
+            return components?.queryItems?.first(where: { $0.name == "path" })?.value
+        }
+
+        // Relative links inside a page: [text](concepts/inflation.md).
+        if url.scheme == nil {
+            let path = url.path
+            if path.lowercased().hasSuffix(".md") {
+                return path
+            }
+        }
+
+        return nil
     }
 
     /// Drop the leading YAML frontmatter block, if present.

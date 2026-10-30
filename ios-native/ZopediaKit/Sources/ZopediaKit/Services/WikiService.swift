@@ -37,7 +37,8 @@ public struct WikiService: Sendable {
     public func ingest(url: String) async throws -> WikiIngestResponse {
         try await client.post(
             "api/inference/wiki/ingest",
-            body: WikiIngestBody(sourcePath: url, maxPendingRawFiles: 0)
+            body: WikiIngestBody(sourcePath: url, maxPendingRawFiles: 0),
+            timeout: 1800
         )
     }
 }

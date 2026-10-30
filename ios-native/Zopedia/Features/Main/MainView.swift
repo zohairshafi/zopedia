@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import ZopediaKit
 
 enum AppTab: Hashable {
@@ -16,6 +17,7 @@ struct MainView: View {
     @State private var tab: AppTab = .chat
     @State private var store: ChatStore?
     @State private var wikiPendingPath: String?
+    @State private var keyboardVisible = false
 
     var body: some View {
         Group {
@@ -40,6 +42,7 @@ struct MainView: View {
     private func tabs(_ store: ChatStore) -> some View {
         TabView(selection: $tab) {
             ChatTabView(store: store)
+                .toolbar(.hidden, for: .tabBar)
                 .tabItem {
                     Label("Chat", systemImage: "bubble.left.and.text.bubble.right")
                 }
@@ -49,6 +52,7 @@ struct MainView: View {
                 ChatHistoryView(store: store) {
                     tab = .chat
                 }
+                .toolbar(.hidden, for: .tabBar)
                 .tabItem {
                     Label("History", systemImage: "clock.arrow.circlepath")
                 }
@@ -56,25 +60,32 @@ struct MainView: View {
             }
 
             WikiHomeView(pendingPath: $wikiPendingPath)
+                .toolbar(.hidden, for: .tabBar)
                 .tabItem {
                     Label("Wiki", systemImage: "books.vertical")
                 }
                 .tag(AppTab.wiki)
 
             ResearchHomeView()
+                .toolbar(.hidden, for: .tabBar)
                 .tabItem {
                     Label("Research", systemImage: "flask")
                 }
                 .tag(AppTab.research)
 
             SettingsView()
+                .toolbar(.hidden, for: .tabBar)
                 .tabItem {
                     Label("Settings", systemImage: "gearshape")
                 }
                 .tag(AppTab.settings)
         }
         .tint(ZTheme.primary)
-        .background(TabBarTapObserver())
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if !keyboardVisible {
+                ZTabBar(selection: $tab, showsHistory: sizeClass == .compact)
+            }
+        }
         .environment(\.openURL, OpenURLAction { url in
             if let path = WikiLinkPreprocessor.pagePath(from: url) {
                 wikiPendingPath = path
@@ -83,6 +94,16 @@ struct MainView: View {
             }
             return .systemAction
         })
+        .onReceive(
+            NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)
+        ) { _ in
+            keyboardVisible = true
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)
+        ) { _ in
+            keyboardVisible = false
+        }
         .onChange(of: sizeClass) { _, newValue in
             if newValue == .regular, tab == .history {
                 tab = .chat

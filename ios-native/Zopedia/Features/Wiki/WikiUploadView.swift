@@ -6,23 +6,41 @@ struct WikiUploadView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(AppEnvironment.self) private var app
 
-    let onUploaded: () async -> Void
-
     @State private var showFileImporter = false
-    @State private var isUploading = false
-    @State private var results: [UploadResult] = []
+    @State private var pendingFiles: [PendingUpload] = []
+    @State private var preparingCount = 0
     @State private var errorMessage: String?
     @State private var urlText = ""
 
-    private struct UploadResult: Identifiable {
+    private struct PendingUpload: Identifiable {
         let id = UUID()
         let name: String
-        let message: String
-        let success: Bool
+        let mimeType: String
+        let data: Data
+
+        var uploadFile: UploadFile {
+            UploadFile(name: name, mimeType: mimeType, data: data)
+        }
+    }
+
+    private struct PreparedFile: Sendable {
+        let name: String
+        let mimeType: String
+        let data: Data
     }
 
     private var canUpload: Bool {
         app.permissions?.canUploadFiles ?? true
+    }
+
+    private var trimmedURL: String {
+        urlText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var canSubmit: Bool {
+        canUpload
+            && preparingCount == 0
+            && (!pendingFiles.isEmpty || !trimmedURL.isEmpty)
     }
 
     var body: some View {
@@ -56,7 +74,7 @@ struct WikiUploadView: View {
                         .padding(.vertical, 20)
                     }
                     .buttonStyle(.plain)
-                    .disabled(isUploading || !canUpload)
+                    .disabled(preparingCount > 0 || !canUpload)
                     .overlay {
                         RoundedRectangle(cornerRadius: 12, style: .continuous)
                             .strokeBorder(
@@ -64,26 +82,43 @@ struct WikiUploadView: View {
                                 style: StrokeStyle(lineWidth: 2, dash: [6])
                             )
                     }
+
+                    ForEach(pendingFiles) { file in
+                        HStack(spacing: 10) {
+                            Image(systemName: "doc")
+                                .foregroundStyle(ZTheme.mutedForeground)
+                            Text(file.name)
+                                .font(.callout)
+                                .foregroundStyle(ZTheme.foreground)
+                                .lineLimit(1)
+                            Spacer()
+                            Button {
+                                pendingFiles.removeAll { $0.id == file.id }
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundStyle(ZTheme.mutedForeground)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Remove \(file.name)")
+                        }
+                    }
+
+                    if preparingCount > 0 {
+                        HStack(spacing: 8) {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text("Preparing files…")
+                                .font(.callout)
+                                .foregroundStyle(ZTheme.mutedForeground)
+                        }
+                    }
                 }
 
-                Section("or ingest a URL") {
+                Section("or add a URL") {
                     TextField("https://…", text: $urlText)
                         .keyboardType(.URL)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
-
-                    Button {
-                        Task { await ingestURL() }
-                    } label: {
-                        Label("Ingest", systemImage: "link")
-                    }
-                    .disabled(urlText.trimmed.isEmpty || isUploading || !canUpload)
-                }
-
-                if isUploading {
-                    Section {
-                        ProgressView()
-                    }
                 }
 
                 if let errorMessage {
@@ -92,35 +127,17 @@ struct WikiUploadView: View {
                             .foregroundStyle(ZTheme.destructive)
                     }
                 }
-
-                if !results.isEmpty {
-                    Section("Results") {
-                        ForEach(results) { result in
-                            HStack(alignment: .top, spacing: 8) {
-                                Image(systemName: result.success
-                                    ? "checkmark.circle.fill"
-                                    : "xmark.circle")
-                                    .foregroundStyle(result.success ? ZTheme.primary : ZTheme.destructive)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(result.name)
-                                        .font(.callout)
-                                        .foregroundStyle(ZTheme.foreground)
-                                    Text(result.message)
-                                        .font(.caption)
-                                        .foregroundStyle(ZTheme.mutedForeground)
-                                }
-                            }
-                        }
-                    }
-                }
             }
             .scrollContentBackground(.hidden)
             .background(ZTheme.background)
-            .navigationTitle("Upload to wiki")
+            .navigationTitle("Add to wiki")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
+                    Button("Add to Wiki") {
+                        submit()
+                    }
+                    .disabled(!canSubmit)
                 }
             }
             .fileImporter(
@@ -130,7 +147,7 @@ struct WikiUploadView: View {
             ) { result in
                 switch result {
                 case .success(let urls):
-                    Task { await upload(urls) }
+                    prepare(urls)
                 case .failure(let error):
                     errorMessage = error.localizedDescription
                 }
@@ -138,101 +155,75 @@ struct WikiUploadView: View {
         }
     }
 
-    private func upload(_ urls: [URL]) async {
+    private func prepare(_ urls: [URL]) {
         guard canUpload else {
             errorMessage = "This account does not have permission to upload files."
             return
         }
-        guard let attachments = app.attachments else {
-            errorMessage = "Not connected to a server."
-            return
-        }
-
-        isUploading = true
         errorMessage = nil
-        results = []
-        defer { isUploading = false }
+        preparingCount += 1
 
-        var files: [UploadFile] = []
-        for url in urls {
-            let accessing = url.startAccessingSecurityScopedResource()
-            defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+        Task {
+            let loaded = await Task.detached(priority: .userInitiated) { () -> ([PreparedFile], [String]) in
+                var files: [PreparedFile] = []
+                var failures: [String] = []
 
-            do {
-                let data = try Data(contentsOf: url)
-                files.append(UploadFile(
-                    name: url.lastPathComponent,
-                    mimeType: mimeType(for: url),
-                    data: data
-                ))
-            } catch {
-                results.append(UploadResult(
-                    name: url.lastPathComponent,
-                    message: error.localizedDescription,
-                    success: false
-                ))
+                for url in urls {
+                    let accessing = url.startAccessingSecurityScopedResource()
+                    defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+
+                    do {
+                        let data = try Data(contentsOf: url)
+                        files.append(PreparedFile(
+                            name: url.lastPathComponent,
+                            mimeType: UTType(filenameExtension: url.pathExtension)?
+                                .preferredMIMEType ?? "application/octet-stream",
+                            data: data
+                        ))
+                    } catch {
+                        failures.append("\(url.lastPathComponent): \(error.localizedDescription)")
+                    }
+                }
+                return (files, failures)
+            }.value
+
+            pendingFiles.append(contentsOf: loaded.0.map {
+                PendingUpload(name: $0.name, mimeType: $0.mimeType, data: $0.data)
+            })
+            if !loaded.1.isEmpty {
+                errorMessage = loaded.1.joined(separator: "\n")
             }
-        }
-
-        guard !files.isEmpty else { return }
-
-        do {
-            let response = try await attachments.uploadFiles(files)
-            results.append(contentsOf: response.uploaded.map {
-                UploadResult(name: $0, message: "Uploaded", success: true)
-            })
-            results.append(contentsOf: response.failed.map {
-                UploadResult(name: $0.filename, message: $0.reason, success: false)
-            })
-            await onUploaded()
-        } catch {
-            errorMessage = (error as? LocalizedError)?.errorDescription
-                ?? error.localizedDescription
+            preparingCount -= 1
         }
     }
 
-    private func ingestURL() async {
+    private func submit() {
         guard canUpload else {
             errorMessage = "This account does not have permission to upload files."
             return
         }
-        guard let wiki = app.wiki else { return }
-        let value = urlText.trimmed
-        guard value.lowercased().hasPrefix("http://")
-                || value.lowercased().hasPrefix("https://") else {
+
+        let url = trimmedURL
+        if !url.isEmpty,
+           !url.lowercased().hasPrefix("http://"),
+           !url.lowercased().hasPrefix("https://") {
             errorMessage = "Enter an http:// or https:// URL."
             return
         }
 
-        isUploading = true
-        errorMessage = nil
-        defer { isUploading = false }
-
-        do {
-            let response = try await wiki.ingest(url: value)
-            if response.status == "already_ingested" {
-                results.append(UploadResult(
-                    name: value,
-                    message: "Already ingested.",
-                    success: true
-                ))
-            } else {
-                results.append(UploadResult(
-                    name: value,
-                    message: "Ingested \(response.processedFiles) item(s).",
-                    success: true
-                ))
-            }
-            urlText = ""
-            await onUploaded()
-        } catch {
-            errorMessage = (error as? LocalizedError)?.errorDescription
-                ?? error.localizedDescription
+        guard !pendingFiles.isEmpty || !url.isEmpty else { return }
+        guard app.attachments != nil, app.wiki != nil else {
+            errorMessage = "Not connected to a server."
+            return
         }
-    }
 
-    private func mimeType(for url: URL) -> String {
-        UTType(filenameExtension: url.pathExtension)?.preferredMIMEType
-            ?? "application/octet-stream"
+        let files = pendingFiles.map(\.uploadFile)
+        dismiss()
+        app.wikiUploads.submit(
+            files: files,
+            url: url.isEmpty ? nil : url,
+            attachments: app.attachments,
+            wiki: app.wiki
+        )
     }
 }

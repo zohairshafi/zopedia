@@ -88,7 +88,8 @@ public actor APIClient {
         method: String,
         path: String,
         body: Body,
-        requiresAuth: Bool = true
+        requiresAuth: Bool = true,
+        timeout: TimeInterval? = nil
     ) async throws -> Response {
         let encoded = try JSONEncoder().encode(body)
         let data = try await send(
@@ -97,7 +98,8 @@ public actor APIClient {
                 path: path,
                 body: encoded,
                 contentType: "application/json",
-                requiresAuth: requiresAuth
+                requiresAuth: requiresAuth,
+                timeout: timeout
             )
         )
         return try decode(data)
@@ -106,9 +108,16 @@ public actor APIClient {
     public func post<Body: Encodable, Response: Decodable>(
         _ path: String,
         body: Body,
-        requiresAuth: Bool = true
+        requiresAuth: Bool = true,
+        timeout: TimeInterval? = nil
     ) async throws -> Response {
-        try await request(method: "POST", path: path, body: body, requiresAuth: requiresAuth)
+        try await request(
+            method: "POST",
+            path: path,
+            body: body,
+            requiresAuth: requiresAuth,
+            timeout: timeout
+        )
     }
 
     /// POST with no body. `timeout` is for actions that block server-side.
@@ -139,7 +148,8 @@ public actor APIClient {
     public func upload<Response: Decodable>(
         _ path: String,
         body: MultipartBody,
-        requiresAuth: Bool = true
+        requiresAuth: Bool = true,
+        timeout: TimeInterval? = nil
     ) async throws -> Response {
         defer { try? FileManager.default.removeItem(at: body.fileURL) }
 
@@ -148,7 +158,8 @@ public actor APIClient {
                 method: "POST",
                 path: path,
                 contentType: body.contentType,
-                requiresAuth: requiresAuth
+                requiresAuth: requiresAuth,
+                timeout: timeout
             ),
             fromFile: body.fileURL
         )

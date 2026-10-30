@@ -18,6 +18,16 @@ final class WikiTests: XCTestCase {
         )
     }
 
+    func testWikiLinkAliasUsesLabelAndTargetPath() {
+        let output = WikiLinkPreprocessor.preprocess(
+            "[[entities/democratic-republic-of-congo-drc|Democratic Republic of Congo]]"
+        )
+        XCTAssertEqual(
+            output,
+            "[Democratic Republic of Congo](zopedia://wiki?path=entities/democratic-republic-of-congo-drc.md)"
+        )
+    }
+
     func testPlainMarkdownPathBecomesLink() {
         let output = WikiLinkPreprocessor.preprocess("Read concepts/inflation.md now")
         XCTAssertTrue(output.contains("(zopedia://wiki?path=concepts/inflation.md)"))
@@ -44,6 +54,24 @@ final class WikiTests: XCTestCase {
             "concepts/inflation.md"
         )
         XCTAssertNil(WikiLinkPreprocessor.pagePath(from: URL(string: "https://example.com")!))
+    }
+
+    func testPagePathFromServerWikiFileLink() throws {
+        let url = try XCTUnwrap(
+            URL(string: "http://192.168.2.23:8080/api/inference/wiki-file?path=concepts%2Finflation.md")
+        )
+        XCTAssertEqual(
+            WikiLinkPreprocessor.pagePath(from: url),
+            "concepts/inflation.md"
+        )
+    }
+
+    func testPagePathFromRelativeMarkdownLink() throws {
+        let url = try XCTUnwrap(URL(string: "concepts/inflation.md"))
+        XCTAssertEqual(
+            WikiLinkPreprocessor.pagePath(from: url),
+            "concepts/inflation.md"
+        )
     }
 
     func testFrontmatterIsStripped() {

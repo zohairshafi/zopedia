@@ -44,6 +44,6 @@ public struct AttachmentService: Sendable {
             )
         }
         let body = try MultipartFormData.write(parts: parts)
-        return try await client.upload("api/upload", body: body)
+        return try await client.upload("api/upload", body: body, timeout: 600)
     }
 }

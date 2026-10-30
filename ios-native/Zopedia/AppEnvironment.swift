@@ -33,6 +33,7 @@ final class AppEnvironment {
     private(set) var cache: ThreadCache?
 
     let chatOptions = ChatOptionsStore()
+    let wikiUploads = WikiUploadMonitor()
 
     var canManageAdvanced: Bool {
         permissions?.isAdmin == true || health?.authDisabled == true

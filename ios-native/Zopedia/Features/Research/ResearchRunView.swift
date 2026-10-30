@@ -1,4 +1,3 @@
-import MarkdownUI
 import SwiftUI
 import ZopediaKit
 
@@ -259,8 +258,7 @@ struct ResearchRunView: View {
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
-                Markdown(WikiLinkPreprocessor.preprocess(model.report))
-                    .markdownTheme(.zopedia)
+                ZMarkdown(text: model.report)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }

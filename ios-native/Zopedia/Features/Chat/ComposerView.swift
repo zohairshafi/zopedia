@@ -144,14 +144,6 @@ struct ComposerView: View {
         } message: { pdf in
             Text(pdf.name)
         }
-        .toolbar {
-            ToolbarItemGroup(placement: .keyboard) {
-                Spacer()
-                Button("Done") {
-                    isFocused = false
-                }
-            }
-        }
     }
 
     private var attachmentRow: some View {

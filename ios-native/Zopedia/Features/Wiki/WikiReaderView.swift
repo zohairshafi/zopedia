@@ -1,4 +1,3 @@
-import MarkdownUI
 import SwiftUI
 import ZopediaKit
 
@@ -16,13 +15,8 @@ struct WikiReaderView: View {
         Group {
             if let content {
                 ScrollView {
-                    Markdown(
-                        WikiLinkPreprocessor.preprocess(
-                            WikiLinkPreprocessor.stripFrontmatter(content)
-                        )
-                    )
-                    .markdownTheme(.zopedia)
-                    .padding()
+                    ZMarkdown(text: WikiLinkPreprocessor.stripFrontmatter(content))
+                        .padding()
                 }
                 .background(ZTheme.background)
             } else if isLoading {

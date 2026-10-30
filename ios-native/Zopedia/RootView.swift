@@ -16,6 +16,7 @@ struct RootView: View {
                 MainView()
             }
         }
+        .background(WindowBackground())
         .animation(.default, value: app.phase)
     }
 }

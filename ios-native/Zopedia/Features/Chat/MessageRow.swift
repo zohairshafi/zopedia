@@ -1,4 +1,3 @@
-import MarkdownUI
 import SwiftUI
 import ZopediaKit
 
@@ -157,8 +156,7 @@ struct MessageRow: View {
         } else {
             // Do not enable text selection here: SwiftUI ignores the openURL
             // action for links inside selectable Text, which breaks wiki links.
-            Markdown(WikiLinkPreprocessor.preprocess(text))
-                .markdownTheme(.zopedia)
+            ZMarkdown(text: text)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
     }

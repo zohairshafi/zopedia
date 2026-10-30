@@ -71,7 +71,7 @@ struct ChatDetailView: View {
                             Task { await model.setLogging(!model.isLogging) }
                         } label: {
                             Label(
-                                model.isLogging ? "Stop logging this chat" : "Log this chat",
+                                model.isLogging ? "Stop Logging Chat to Wiki" : "Log Chat to Wiki",
                                 systemImage: model.isLogging
                                     ? "checkmark.circle.fill"
                                     : "circle"
@@ -287,7 +287,6 @@ struct ChatDetailView: View {
                 .padding()
                 .frame(maxWidth: 820)
                 .frame(maxWidth: .infinity)
-                .background(ScrollToTopDisabler())
             }
             .scrollDismissesKeyboard(.interactively)
             .onReceive(NotificationCenter.default.publisher(for: .chatScrollToBottom)) { _ in
@@ -370,13 +369,11 @@ struct ChatDetailView: View {
                 viewportHeight = height
             }
             .onPreferenceChange(BottomEdgeKey.self) { bottom in
-                let distance = bottom - viewportHeight
-                if distance <= 40 {
+                // Only track whether we are near the bottom. Growth during a
+                // stream is handled by liveRevision; forcing a scroll here
+                // also undid the system's status-bar scroll-to-top gesture.
+                if bottom - viewportHeight <= 40 {
                     isFollowing = true
-                } else if isFollowing {
-                    // The content grew (streamed text, a table, a tool card).
-                    // Keep the sentinel in view; user drags turn following off.
-                    proxy.scrollTo("bottom", anchor: .bottom)
                 }
             }
             .onChange(of: model.liveRevision) { _, _ in

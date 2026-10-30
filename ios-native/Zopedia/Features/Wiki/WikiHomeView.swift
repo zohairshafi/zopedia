@@ -60,12 +60,62 @@ struct WikiHomeView: View {
                 Task { await load() }
             }
         }
+        .onChange(of: app.wikiUploads.completionID) { _, _ in
+            Task { await load() }
+        }
+        .alert("Could not add to wiki", isPresented: uploadErrorBinding) {
+            Button("OK", role: .cancel) {
+                app.wikiUploads.clearError()
+            }
+        } message: {
+            Text(app.wikiUploads.errorMessage ?? "")
+        }
+    }
+
+    private var uploadErrorBinding: Binding<Bool> {
+        Binding(
+            get: { app.wikiUploads.errorMessage != nil },
+            set: { if !$0 { app.wikiUploads.clearError() } }
+        )
     }
 
     @ViewBuilder
     private func sidebar(selectionMode: Bool) -> some View {
         VStack(spacing: 0) {
             header
+
+            if app.wikiUploads.isWorking {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Adding to wiki…")
+                        .font(.caption)
+                        .foregroundStyle(ZTheme.mutedForeground)
+                    Spacer()
+                }
+                .padding(.horizontal)
+                .padding(.bottom, 6)
+            } else if let message = app.wikiUploads.lastMessage {
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(ZTheme.primary)
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(ZTheme.mutedForeground)
+                    Spacer()
+                    Button {
+                        app.wikiUploads.clearMessage()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.caption)
+                            .foregroundStyle(ZTheme.mutedForeground)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Dismiss")
+                }
+                .padding(.horizontal)
+                .padding(.bottom, 6)
+            }
 
             if let errorMessage {
                 Text(errorMessage)
@@ -81,9 +131,7 @@ struct WikiHomeView: View {
         .background(ZTheme.background)
         .navigationTitle("Wiki")
         .sheet(isPresented: $showUpload) {
-            WikiUploadView {
-                await load()
-            }
+            WikiUploadView()
         }
     }
 

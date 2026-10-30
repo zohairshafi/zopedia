@@ -16,6 +16,9 @@ packages:
   MarkdownUI:
     url: https://github.com/gonzalezreal/swift-markdown-ui
     version: 2.4.1
+  SwiftMath:
+    url: https://github.com/mgriebling/SwiftMath
+    version: 1.7.3
 targets:
   Zopedia:
     type: application
@@ -30,6 +33,8 @@ targets:
         product: ZopediaKit
       - package: MarkdownUI
         product: MarkdownUI
+      - package: SwiftMath
+        product: SwiftMath
     configFiles:
       Debug: Config/Version.xcconfig
       Release: Config/Version.xcconfig
