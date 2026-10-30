@@ -45,6 +45,7 @@ struct ChatHistoryView: View {
                         } label: {
                             Label("Delete", systemImage: "trash")
                         }
+                        .tint(ZTheme.destructive)
                     }
                     .contextMenu {
                         Button("Rename") { beginRename(thread) }

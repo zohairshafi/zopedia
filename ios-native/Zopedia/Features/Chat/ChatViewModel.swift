@@ -3,6 +3,11 @@ import Observation
 import os
 import ZopediaKit
 
+struct ChatBranchInfo: Equatable {
+    let index: Int
+    let count: Int
+}
+
 @MainActor
 @Observable
 final class ChatViewModel {
@@ -10,6 +15,9 @@ final class ChatViewModel {
 
     let thread: ChatThread
 
+    /// Every stored message, including alternate branches.
+    private(set) var allMessages: [ChatMessage] = []
+    /// The single root-to-leaf path currently displayed.
     private(set) var messages: [ChatMessage] = []
     private(set) var liveMessage: ChatMessage?
     private(set) var liveRevision = 0
@@ -35,6 +43,18 @@ final class ChatViewModel {
         return result
     }
 
+    var userMessages: [ChatMessage] {
+        messages.filter { $0.role == .user }
+    }
+
+    var lastVisibleAssistantID: String? {
+        messages.last(where: { $0.role == .assistant })?.id
+    }
+
+    private var savesHistory: Bool {
+        (app.permissions?.canSaveChatHistory ?? true) && app.chatOptions.logChatHistory
+    }
+
     private let app: AppEnvironment
     private var isNewThread: Bool
     private var assembler = ChatStreamAssembler()
@@ -48,6 +68,8 @@ final class ChatViewModel {
     private var isBackgroundSuspended = false
     private var didAttemptTitle = false
     private var didSaveThread = false
+    private var selectedBranches: [String: String] = [:]
+    private var streamingParentID: String?
     private let onThreadUpdated: ((ChatThread) -> Void)?
 
     init(
@@ -65,7 +87,8 @@ final class ChatViewModel {
 
     func load() async {
         if let cache = app.cache, let cached = await cache.loadThread(thread.id) {
-            messages = cached.messages.map { $0.normalized() }
+            allMessages = cached.messages.map { $0.normalized() }
+            rebuildVisiblePath()
             title = cached.thread.title
         }
 
@@ -76,13 +99,15 @@ final class ChatViewModel {
 
         do {
             let response = try await chat.getThread(thread.id)
-            messages = mergeServerMessages(response.messages)
+            allMessages = mergeServerMessages(response.messages)
+            rebuildVisiblePath()
             title = response.thread.title
-            await app.cache?.saveThread(response.thread, messages: messages)
+            await app.cache?.saveThread(response.thread, messages: allMessages)
             errorMessage = nil
         } catch let error as APIError {
             if case .http(let status, _) = error, status == 404 {
-                messages = []
+                allMessages = []
+                rebuildVisiblePath()
             } else if error != .cancelled {
                 errorMessage = errorText(error)
             }
@@ -136,21 +161,26 @@ final class ChatViewModel {
             }
         }
 
-        let now = Date()
+        let parentID = messages.last?.id
         let userMessage = ChatMessage(
             id: UUID().uuidString,
             role: .user,
             content: .text(contentText),
-            createdAt: now,
+            parentID: parentID,
+            createdAt: Date(),
             localImageName: localImageName
         )
-        messages.append(userMessage)
+        allMessages.append(userMessage)
+        if let parentID {
+            selectedBranches[parentID] = userMessage.id
+        }
+        rebuildVisiblePath()
         currentUserMessageID = userMessage.id
         if firstUserText == nil {
             firstUserText = typed.isEmpty ? (attachmentName ?? "Attachment") : typed
         }
 
-        if app.permissions?.canSaveChatHistory ?? true {
+        if savesHistory {
             do {
                 _ = try await chat.appendMessages(
                     threadID: thread.id,
@@ -160,19 +190,77 @@ final class ChatViewModel {
                 if isNewThread {
                     isNewThread = false
                     didSaveThread = true
-                    onThreadUpdated?(snapshot(messageCount: messages.count))
+                    onThreadUpdated?(snapshot(messageCount: allMessages.count))
                 }
             } catch {
                 errorMessage = "Could not save your message: \(errorText(error))"
             }
         }
 
+        let outgoing = messages.map {
+            OutgoingMessage(role: $0.role.rawValue, content: $0.visibleText)
+        }
         startStreaming(
             client: client,
-            text: contentText,
+            outgoing: outgoing,
             parentID: userMessage.id,
             imageBase64: imageBase64
         )
+    }
+
+    /// Create a sibling response for an assistant message and make it the
+    /// selected branch. The previous sibling stays stored and switchable.
+    func regenerate(assistantMessageID id: String) async {
+        guard !isStreaming,
+              let client = app.client,
+              let target = allMessages.first(where: { $0.id == id }),
+              target.role == .assistant,
+              let parentID = target.parentID,
+              let parentIndex = messages.firstIndex(where: { $0.id == parentID }) else {
+            return
+        }
+
+        let outgoing = messages[...parentIndex].map {
+            OutgoingMessage(role: $0.role.rawValue, content: $0.visibleText)
+        }
+        currentUserMessageID = parentID
+        startStreaming(
+            client: client,
+            outgoing: outgoing,
+            parentID: parentID,
+            imageBase64: nil
+        )
+    }
+
+    func branchInfo(for message: ChatMessage) -> ChatBranchInfo? {
+        guard message.role == .assistant,
+              let parent = message.parentID,
+              allMessages.contains(where: { $0.id == message.id }) else {
+            return nil
+        }
+        let siblings = allMessages.filter {
+            $0.role == .assistant && $0.parentID == parent
+        }
+        guard siblings.count > 1,
+              let index = siblings.firstIndex(where: { $0.id == message.id }) else {
+            return nil
+        }
+        return ChatBranchInfo(index: index, count: siblings.count)
+    }
+
+    func selectSibling(of message: ChatMessage, offset: Int) {
+        guard !isStreaming,
+              let parent = message.parentID else { return }
+        let siblings = allMessages.filter {
+            $0.role == .assistant && $0.parentID == parent
+        }
+        guard siblings.count > 1,
+              let index = siblings.firstIndex(where: { $0.id == message.id }) else {
+            return
+        }
+        let next = (index + offset + siblings.count) % siblings.count
+        selectedBranches[parent] = siblings[next].id
+        rebuildVisiblePath()
     }
 
     func stopWaiting() {
@@ -235,12 +323,13 @@ final class ChatViewModel {
 
     private func startStreaming(
         client: APIClient,
-        text: String,
+        outgoing: [OutgoingMessage],
         parentID: String,
         imageBase64: String?
     ) {
         let assistantID = UUID().uuidString
         assistantMessageID = assistantID
+        currentUserMessageID = parentID
         assistantCreatedAt = Date()
         assembler = ChatStreamAssembler()
         partialAppended = false
@@ -248,11 +337,11 @@ final class ChatViewModel {
         toolStatusSince = nil
         errorMessage = nil
         isStreaming = true
+        streamingParentID = parentID
+        selectedBranches[parentID] = assistantID
+        rebuildVisiblePath()
         publishNow()
 
-        let outgoing = messages.map {
-            OutgoingMessage(role: $0.role.rawValue, content: $0.visibleText)
-        }
         let options = app.chatOptions
         let request = ChatRequest(
             messages: outgoing,
@@ -343,11 +432,13 @@ final class ChatViewModel {
         streamTask = nil
         cancelScheduledPublish()
         isStreaming = false
+        streamingParentID = nil
         toolStatus = nil
         toolStatusSince = nil
 
         guard assembler.hasContent, let assistantMessageID else {
             liveMessage = nil
+            rebuildVisiblePath()
             errorMessage = "The model returned an empty response."
             return
         }
@@ -357,23 +448,28 @@ final class ChatViewModel {
             parentID: currentUserMessageID,
             createdAt: assistantCreatedAt
         )
-        messages.append(final)
+        allMessages.append(final)
+        if let parent = currentUserMessageID {
+            selectedBranches[parent] = assistantMessageID
+        }
         liveMessage = nil
+        rebuildVisiblePath()
 
-        if app.permissions?.canSaveChatHistory ?? true, let chat = app.chat {
+        if savesHistory, let chat = app.chat {
             do {
                 _ = try await chat.appendMessages(
                     threadID: thread.id,
                     title: nil,
                     messages: [final]
                 )
-                let updated = snapshot(messageCount: messages.count)
-                await app.cache?.saveThread(updated, messages: messages)
-                onThreadUpdated?(updated)
             } catch {
                 errorMessage = "Answer received, but it could not be saved: \(errorText(error))"
             }
         }
+
+        let updated = snapshot(messageCount: allMessages.count)
+        await app.cache?.saveThread(updated, messages: allMessages)
+        onThreadUpdated?(updated)
 
         await maybeGenerateTitle(assistantText: final.visibleText)
     }
@@ -382,9 +478,11 @@ final class ChatViewModel {
         streamTask = nil
         cancelScheduledPublish()
         isStreaming = false
+        streamingParentID = nil
         toolStatus = nil
         toolStatusSince = nil
         appendPartialIfNeeded()
+        rebuildVisiblePath()
 
         if isBackgroundSuspended {
             isBackgroundSuspended = false
@@ -399,9 +497,11 @@ final class ChatViewModel {
         streamTask = nil
         cancelScheduledPublish()
         isStreaming = false
+        streamingParentID = nil
         toolStatus = nil
         toolStatusSince = nil
         appendPartialIfNeeded()
+        rebuildVisiblePath()
 
         if let apiError = error as? APIError, apiError == .streamLost {
             needsRecovery = true
@@ -423,9 +523,10 @@ final class ChatViewModel {
                 let merged = mergeServerMessages(response.messages)
                 let recovered = hasRecoveredAnswer(in: merged)
 
-                messages = merged
+                allMessages = merged
+                rebuildVisiblePath()
                 title = response.thread.title
-                await app.cache?.saveThread(response.thread, messages: merged)
+                await app.cache?.saveThread(response.thread, messages: allMessages)
 
                 if recovered {
                     needsRecovery = false
@@ -446,9 +547,10 @@ final class ChatViewModel {
     private func refreshQuietly(_ chat: ChatService) async {
         do {
             let response = try await chat.getThread(thread.id)
-            messages = mergeServerMessages(response.messages)
+            allMessages = mergeServerMessages(response.messages)
+            rebuildVisiblePath()
             title = response.thread.title
-            await app.cache?.saveThread(response.thread, messages: messages)
+            await app.cache?.saveThread(response.thread, messages: allMessages)
         } catch {
             // Offline or transient failure: keep the cached view.
         }
@@ -458,36 +560,40 @@ final class ChatViewModel {
     /// tool cards the server's fallback persistence drops.
     private func mergeServerMessages(_ serverMessages: [ChatMessage]) -> [ChatMessage] {
         var localByID: [String: ChatMessage] = [:]
-        for message in messages {
+        for message in allMessages {
             localByID[message.id] = message
         }
+        let remoteIDs = Set(serverMessages.map(\.id))
 
-        return serverMessages.map { remote in
-            var merged = remote.normalized()
-            guard let local = localByID[merged.id] else { return merged }
+        var merged = serverMessages.map { remote in
+            var message = remote.normalized()
+            guard let local = localByID[message.id] else { return message }
 
-            if merged.localImageName == nil {
-                merged.localImageName = local.localImageName
+            if message.localImageName == nil {
+                message.localImageName = local.localImageName
             }
-            if merged.reasoningContent == nil {
-                merged.reasoningContent = local.reasoningContent
+            if message.reasoningContent == nil {
+                message.reasoningContent = local.reasoningContent
             }
 
-            if case .parts(let localParts) = local.content, case .text(let remoteText) = merged.content {
+            if case .parts(let localParts) = local.content, case .text(let remoteText) = message.content {
                 let localText = local.visibleText
                 if remoteText == localText || remoteText.isEmpty {
-                    merged.content = local.content
+                    message.content = local.content
                 } else if remoteText.count > localText.count {
                     // The server's fallback persisted only text after a background
                     // completion. Keep the local tool positions and put the longer
                     // text where the first text segment was.
-                    merged.content = Self.replacingText(in: localParts, with: remoteText)
+                    message.content = Self.replacingText(in: localParts, with: remoteText)
                 } else {
-                    merged.content = local.content
+                    message.content = local.content
                 }
             }
-            return merged
+            return message
         }
+
+        merged.append(contentsOf: allMessages.filter { !remoteIDs.contains($0.id) })
+        return merged
     }
 
     /// Replace every text segment with one authoritative text segment,
@@ -512,12 +618,12 @@ final class ChatViewModel {
 
     private func hasRecoveredAnswer(in newMessages: [ChatMessage]) -> Bool {
         guard let assistantMessageID else {
-            return newMessages.count > messages.count
+            return newMessages.count > allMessages.count
         }
         guard let remote = newMessages.first(where: { $0.id == assistantMessageID }) else {
             return false
         }
-        let localText = messages.first(where: { $0.id == assistantMessageID })?.visibleText ?? ""
+        let localText = allMessages.first(where: { $0.id == assistantMessageID })?.visibleText ?? ""
         return !remote.visibleText.isEmpty && remote.visibleText.count > localText.count
     }
 
@@ -526,12 +632,74 @@ final class ChatViewModel {
               assembler.hasContent,
               let assistantMessageID else { return }
         partialAppended = true
-        messages.append(assembler.message(
+        allMessages.append(assembler.message(
             id: assistantMessageID,
             parentID: currentUserMessageID,
             createdAt: assistantCreatedAt
         ))
+        if let parent = currentUserMessageID {
+            selectedBranches[parent] = assistantMessageID
+        }
         liveMessage = nil
+    }
+
+    /// Rebuild the single visible root-to-leaf path. Legacy messages with no
+    /// parent are chained linearly; explicit parents preserve branches.
+    private func rebuildVisiblePath() {
+        guard !allMessages.isEmpty else {
+            messages = []
+            return
+        }
+
+        let ids = Set(allMessages.map(\.id))
+        var previous: String?
+        for index in allMessages.indices {
+            if index == 0 {
+                allMessages[index].parentID = nil
+            } else if let parent = allMessages[index].parentID, ids.contains(parent) {
+                // Keep an explicit, resolvable parent.
+            } else {
+                allMessages[index].parentID = previous
+            }
+            previous = allMessages[index].id
+        }
+
+        var children: [String: [ChatMessage]] = [:]
+        var roots: [ChatMessage] = []
+        for message in allMessages {
+            if let parent = message.parentID, ids.contains(parent) {
+                children[parent, default: []].append(message)
+            } else {
+                roots.append(message)
+            }
+        }
+
+        for (parent, siblings) in children {
+            if isStreaming, parent == streamingParentID { continue }
+            if let selected = selectedBranches[parent],
+               siblings.contains(where: { $0.id == selected }) {
+                continue
+            }
+            selectedBranches[parent] = siblings.last?.id
+        }
+
+        var path: [ChatMessage] = []
+        var cursor = roots.first
+        var seen = Set<String>()
+        while let message = cursor, !seen.contains(message.id) {
+            seen.insert(message.id)
+            path.append(message)
+            if isStreaming, message.id == streamingParentID { break }
+            let siblings = children[message.id] ?? []
+            guard !siblings.isEmpty else { break }
+            if let selected = selectedBranches[message.id],
+               let match = siblings.first(where: { $0.id == selected }) {
+                cursor = match
+            } else {
+                cursor = siblings.last
+            }
+        }
+        messages = path
     }
 
     private func maybeGenerateTitle(assistantText: String) async {
@@ -540,7 +708,7 @@ final class ChatViewModel {
               let chat = app.chat,
               let userText = firstUserText,
               !userText.isEmpty,
-              app.permissions?.canSaveChatHistory ?? true else { return }
+              savesHistory else { return }
 
         didAttemptTitle = true
         let fallback = TitleSanitizer.fallback(from: userText)
@@ -554,13 +722,13 @@ final class ChatViewModel {
             title = cleaned
             try await chat.renameThread(id: thread.id, title: cleaned)
             await app.cache?.updateTitle(threadID: thread.id, title: cleaned)
-            onThreadUpdated?(snapshot(messageCount: messages.count))
+            onThreadUpdated?(snapshot(messageCount: allMessages.count))
         } catch {
             Self.logger.error(
                 "title generation failed: \(error.localizedDescription, privacy: .public)"
             )
             title = fallback
-            onThreadUpdated?(snapshot(messageCount: messages.count))
+            onThreadUpdated?(snapshot(messageCount: allMessages.count))
         }
     }
 

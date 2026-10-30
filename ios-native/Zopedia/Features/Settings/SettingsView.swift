@@ -17,6 +17,25 @@ struct SettingsView: View {
                     }
                 }
 
+                Section {
+                    Toggle(
+                        "Log chat history on the server",
+                        isOn: Binding(
+                            get: { app.chatOptions.logChatHistory },
+                            set: { app.chatOptions.logChatHistory = $0 }
+                        )
+                    )
+                    .disabled(app.permissions?.canSaveChatHistory == false)
+
+                    Text(app.permissions?.canSaveChatHistory == false
+                         ? "This account does not have permission to save chat history."
+                         : "When off, new messages stay on this device only.")
+                        .font(.caption)
+                        .foregroundStyle(ZTheme.mutedForeground)
+                } header: {
+                    Text("Chat")
+                }
+
                 if app.canManageAdvanced {
                     Section("Advanced") {
                         NavigationLink {

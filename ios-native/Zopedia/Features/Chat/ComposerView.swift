@@ -6,6 +6,7 @@ import ZopediaKit
 struct ComposerView: View {
     @Environment(AppEnvironment.self) private var app
     @Bindable var model: ChatViewModel
+    @FocusState private var isFocused: Bool
 
     @State private var photoItem: PhotosPickerItem?
     @State private var showPhotoPicker = false
@@ -59,13 +60,15 @@ struct ComposerView: View {
                     Image(systemName: "paperclip")
                         .font(.title3)
                         .foregroundStyle(ZTheme.mutedForeground)
-                        .frame(width: 34, height: 34)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
                 .disabled(model.isStreaming || isPreparing)
                 .accessibilityLabel("Add attachment")
 
                 TextField("Message", text: $model.draft, axis: .vertical)
                     .lineLimit(1...6)
+                    .focused($isFocused)
                     .foregroundStyle(ZTheme.foreground)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 9)
@@ -82,13 +85,25 @@ struct ComposerView: View {
                 if model.isStreaming {
                     Button("Stop") { model.stopWaiting() }
                         .buttonStyle(.bordered)
+                        .controlSize(.large)
                         .tint(ZTheme.primary)
                 } else {
                     Button(action: send) {
-                        Image(systemName: "arrow.up.circle.fill")
-                            .font(.title2)
-                            .foregroundStyle(canSend ? ZTheme.primary : ZTheme.mutedForeground)
+                        Image(systemName: "arrow.up")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(canSend ? Color.white : ZTheme.mutedForeground)
+                            .frame(width: 44, height: 44)
+                            .background(
+                                canSend ? ZTheme.primary : ZTheme.muted,
+                                in: Circle()
+                            )
+                            .overlay {
+                                Circle()
+                                    .stroke(ZTheme.border, lineWidth: canSend ? 0 : 1)
+                            }
+                            .contentShape(Circle())
                     }
+                    .buttonStyle(.plain)
                     .disabled(!canSend)
                     .accessibilityLabel("Send")
                 }
@@ -128,6 +143,14 @@ struct ComposerView: View {
             }
         } message: { pdf in
             Text(pdf.name)
+        }
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") {
+                    isFocused = false
+                }
+            }
         }
     }
 

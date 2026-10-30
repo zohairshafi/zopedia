@@ -7,8 +7,16 @@ let package = Package(
     products: [
         .library(name: "ZopediaKit", targets: ["ZopediaKit"]),
     ],
+    dependencies: [
+        .package(url: "https://github.com/swiftlang/swift-markdown", from: "0.4.0"),
+    ],
     targets: [
-        .target(name: "ZopediaKit"),
+        .target(
+            name: "ZopediaKit",
+            dependencies: [
+                .product(name: "Markdown", package: "swift-markdown"),
+            ]
+        ),
         .testTarget(
             name: "ZopediaKitTests",
             dependencies: ["ZopediaKit"],

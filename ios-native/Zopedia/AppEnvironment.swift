@@ -69,6 +69,9 @@ final class AppEnvironment {
                 phase = .connect
                 return
             }
+            // Permissions are persisted at login. Without this, a restored
+            // session has no is_admin flag and the Advanced settings stay hidden.
+            permissions = serverStore.permissions
             try await resolveSubject()
             configureChat()
 
