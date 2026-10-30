@@ -55,7 +55,12 @@ struct ChatSidebarList: View {
                 Button {
                     store.startNewChat()
                 } label: {
-                    Image(systemName: "square.and.pencil")
+                    HStack(spacing: 4) {
+                        Image(systemName: "square.and.pencil")
+                        Text("New chat")
+                    }
+                    .font(.subheadline.weight(.medium))
+                    .contentShape(Rectangle())
                 }
                 .accessibilityLabel("New chat")
             }

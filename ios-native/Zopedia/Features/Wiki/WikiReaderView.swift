@@ -22,7 +22,6 @@ struct WikiReaderView: View {
                         )
                     )
                     .markdownTheme(.zopedia)
-                    .textSelection(.enabled)
                     .padding()
                 }
                 .background(ZTheme.background)

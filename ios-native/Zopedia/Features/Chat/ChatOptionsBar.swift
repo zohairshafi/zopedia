@@ -78,12 +78,13 @@ struct ChatOptionsBar: View {
             }
             .font(.caption.weight(.medium))
             .padding(.horizontal, 10)
-            .padding(.vertical, 7)
+            .padding(.vertical, 9)
             .foregroundStyle(options.thinking.isActive ? ZTheme.primary : ZTheme.mutedForeground)
             .background(
                 options.thinking.isActive ? ZTheme.primary.opacity(0.10) : ZTheme.muted,
                 in: Capsule()
             )
+            .contentShape(Capsule())
         }
         .accessibilityLabel("Thinking mode: \(options.thinking.label)")
     }
@@ -110,9 +111,10 @@ struct ChatOptionsBar: View {
             }
             .font(.caption.weight(.medium))
             .padding(.horizontal, 10)
-            .padding(.vertical, 7)
+            .padding(.vertical, 9)
             .foregroundStyle(isOn ? ZTheme.primary : ZTheme.mutedForeground)
             .background(isOn ? ZTheme.primary.opacity(0.10) : ZTheme.muted, in: Capsule())
+            .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .accessibilityLabel("\(title): \(isOn ? "on" : "off")")

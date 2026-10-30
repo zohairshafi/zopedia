@@ -113,6 +113,14 @@ extension Theme {
         }
         .table { configuration in
             configuration.label
+                .markdownTableBorderStyle(
+                    TableBorderStyle(.insideHorizontalBorders, color: ZTheme.border, width: 1)
+                )
+                .markdownTableBackgroundStyle(
+                    TableBackgroundStyle { row, _ in
+                        row == 0 ? ZTheme.muted.opacity(0.8) : Color.clear
+                    }
+                )
                 .padding(8)
                 .background(ZTheme.sidebar)
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -131,16 +139,8 @@ extension Theme {
                     FontSize(.em(0.88))
                     ForegroundColor(ZTheme.foreground)
                 }
-                .padding(.horizontal, 12)
+                .padding(.horizontal, 14)
                 .padding(.vertical, 8)
-                .background(configuration.row == 0 ? ZTheme.muted : Color.clear)
-                .overlay(alignment: .bottom) {
-                    if configuration.row > 0 {
-                        Rectangle()
-                            .fill(ZTheme.border)
-                            .frame(height: 1)
-                    }
-                }
                 .fixedSize(horizontal: false, vertical: true)
         }
         .thematicBreak {

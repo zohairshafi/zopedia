@@ -185,6 +185,9 @@ struct ToolCardView: View {
                 Text("Details")
                     .font(.caption)
                     .foregroundStyle(ZTheme.mutedForeground)
+                    .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
             }
         }
     }

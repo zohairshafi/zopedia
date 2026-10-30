@@ -165,18 +165,22 @@ struct ResearchHomeView: View {
                     .tint(ZTheme.primary)
             }
 
-            HStack(spacing: 14) {
-                Button("Run now") {
+            HStack(spacing: 2) {
+                TouchActionButton(title: "Run now") {
                     Task { await runNow(config) }
                 }
                 .disabled(runningConfigID != nil)
 
-                Button("Edit") {
+                TouchActionButton(title: "Edit") {
                     editingID = config.id
                     showSetup = true
                 }
 
-                Button("Delete", role: .destructive) {
+                TouchActionButton(
+                    title: "Delete",
+                    tint: ZTheme.destructive,
+                    role: .destructive
+                ) {
                     deleting = config
                 }
 
@@ -185,8 +189,6 @@ struct ResearchHomeView: View {
                         .controlSize(.small)
                 }
             }
-            .font(.caption)
-            .buttonStyle(.borderless)
 
             if config.enabled == false {
                 Text("Paused")
@@ -255,6 +257,7 @@ struct ResearchHomeView: View {
                     Task { await decide(approval, approve: true) }
                 }
                 .buttonStyle(.borderedProminent)
+                .controlSize(.large)
                 .tint(ZTheme.primary)
                 .disabled(decidingID != nil || isExpired(approval))
 
@@ -262,6 +265,7 @@ struct ResearchHomeView: View {
                     Task { await decide(approval, approve: false) }
                 }
                 .buttonStyle(.bordered)
+                .controlSize(.large)
                 .tint(ZTheme.mutedForeground)
                 .disabled(decidingID != nil || isExpired(approval))
 

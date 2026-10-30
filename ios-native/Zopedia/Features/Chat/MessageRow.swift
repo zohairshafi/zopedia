@@ -155,9 +155,10 @@ struct MessageRow: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
         } else {
+            // Do not enable text selection here: SwiftUI ignores the openURL
+            // action for links inside selectable Text, which breaks wiki links.
             Markdown(WikiLinkPreprocessor.preprocess(text))
                 .markdownTheme(.zopedia)
-                .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
     }

@@ -12,6 +12,21 @@ struct ConnectView: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section {
+                    VStack(spacing: 10) {
+                        ZopediaLogo(size: 96)
+                        Text("Zopedia")
+                            .font(.title2.weight(.semibold))
+                        Text("Sign in to your self-hosted knowledge base.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+                }
+                .listRowBackground(Color.clear)
+
                 Section("Server") {
                     TextField("http://192.168.2.23:8080", text: $url)
                         .textContentType(.URL)
@@ -94,7 +109,7 @@ struct ConnectView: View {
                     Text("Plain http:// works for local addresses only. Public servers must use https://.")
                 }
             }
-            .navigationTitle("Zopedia")
+            .navigationTitle("Connect")
             .onAppear {
                 if url.isEmpty {
                     url = app.serverStore.serverURL ?? ""

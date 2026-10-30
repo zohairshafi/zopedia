@@ -156,13 +156,25 @@ struct ChatDetailView: View {
                     ProgressView()
                 } else if model.displayMessages.isEmpty,
                           model.errorMessage == nil {
-                    ContentUnavailableView(
-                        isNew ? "Start the conversation" : "No messages",
-                        systemImage: "bubble.left.and.text.bubble.right",
-                        description: Text(isNew
-                            ? "Send a message below."
-                            : "This thread has no stored messages.")
-                    )
+                    if isNew {
+                        VStack(spacing: 14) {
+                            ZopediaLogo(size: 112)
+                            Text("Zopedia")
+                                .font(.title2.weight(.semibold))
+                                .foregroundStyle(ZTheme.foreground)
+                            Text("Chat with your personal knowledge base.")
+                                .font(.callout)
+                                .foregroundStyle(ZTheme.mutedForeground)
+                        }
+                        .multilineTextAlignment(.center)
+                        .padding()
+                    } else {
+                        ContentUnavailableView(
+                            "No messages",
+                            systemImage: "bubble.left.and.text.bubble.right",
+                            description: Text("This thread has no stored messages.")
+                        )
+                    }
                 }
             }
             .overlay(alignment: .bottomTrailing) {

@@ -170,12 +170,18 @@ struct WikiEnvView: View {
                 Text("Default: \(variable.defaultValue)")
                     .lineLimit(1)
                 if variable.hasOverride || cleared.contains(variable.name) {
-                    Button("Reset to default") {
+                    Button {
                         reset(variable)
+                    } label: {
+                        Text("Reset to default")
+                            .font(.caption)
+                            .foregroundStyle(ZTheme.primary)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 8)
+                            .frame(minHeight: 36)
+                            .contentShape(Rectangle())
                     }
-                    .font(.caption2)
                     .buttonStyle(.plain)
-                    .foregroundStyle(ZTheme.primary)
                 }
             }
             .font(.caption2)

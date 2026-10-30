@@ -55,7 +55,7 @@ struct MaintenanceSchedulesView: View {
             }
 
             Section {
-                Text("Run now executes merge → retry-fallback → enrich → backlinks on the server. It can take several minutes; keep the app open.")
+                Text("Run now executes merge → retry-fallback → enrich → backlinks on the server. It can take several minutes and keeps running if you leave this screen.")
                     .font(.caption)
                     .foregroundStyle(ZTheme.mutedForeground)
             }
@@ -83,11 +83,6 @@ struct MaintenanceSchedulesView: View {
             Button("Cancel", role: .cancel) {}
         } message: { schedule in
             Text(intervalDescription(schedule))
-        }
-        .overlay {
-            if runningID != nil {
-                runningOverlay
-            }
         }
     }
 
@@ -128,46 +123,38 @@ struct MaintenanceSchedulesView: View {
                     .tint(ZTheme.primary)
             }
 
-            HStack(spacing: 14) {
-                Button("Run now") {
+            HStack(spacing: 2) {
+                TouchActionButton(title: "Run now") {
                     Task { await runNow(schedule) }
                 }
                 .disabled(runningID != nil)
 
-                Button("Edit") {
+                TouchActionButton(title: "Edit") {
                     editing = schedule
                     showEditor = true
                 }
 
-                Button("Delete", role: .destructive) {
+                TouchActionButton(
+                    title: "Delete",
+                    tint: ZTheme.destructive,
+                    role: .destructive
+                ) {
                     deleting = schedule
                 }
             }
-            .font(.caption)
-            .buttonStyle(.borderless)
+
+            if runningID == schedule.id {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Running maintenance…")
+                        .font(.caption)
+                        .foregroundStyle(ZTheme.mutedForeground)
+                }
+            }
         }
         .opacity(schedule.enabled ? 1 : 0.6)
         .padding(.vertical, 2)
-    }
-
-    private var runningOverlay: some View {
-        ZStack {
-            Color.black.opacity(0.25)
-                .ignoresSafeArea()
-
-            VStack(spacing: 12) {
-                ProgressView()
-                Text("Running maintenance…")
-                    .font(.headline)
-                    .foregroundStyle(ZTheme.foreground)
-                Text("This can take several minutes.")
-                    .font(.caption)
-                    .foregroundStyle(ZTheme.mutedForeground)
-            }
-            .padding(24)
-            .background(ZTheme.card, in: ZTheme.cardShape)
-            .overlay { ZTheme.cardShape.stroke(ZTheme.border, lineWidth: 1) }
-        }
     }
 
     private func enabledBinding(_ schedule: MaintenanceSchedule) -> Binding<Bool> {

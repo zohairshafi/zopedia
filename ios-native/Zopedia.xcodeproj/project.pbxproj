@@ -16,8 +16,10 @@
 		2870B675F3CB169611CC3291 /* AttachmentProcessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF6C9974E79834EA05657EE5 /* AttachmentProcessor.swift */; };
 		2CDC77D9FF0CB4DD46C8810C /* ChatOptionsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3887CA41B5743E612057CDDF /* ChatOptionsStore.swift */; };
 		2E07784A8FCEFA608DE005FD /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14BBE25FC924C693B4F80607 /* SettingsView.swift */; };
+		34D6FCE058EE6EEA71108936 /* TouchActionButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4355690C4C4294C7CEC948B7 /* TouchActionButton.swift */; };
 		3CAD4B83F89E128BC8875780 /* MessageRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 689547B19AE8D81A6E7AF93F /* MessageRow.swift */; };
 		598A2378399114D854D52633 /* ConnectView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFE2140F67E5B6689A671676 /* ConnectView.swift */; };
+		66CA623C904E819C67C63DA4 /* ZopediaLogo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 913F302A9151837B7865A904 /* ZopediaLogo.swift */; };
 		6C258CF63B242CCDEFB60DA9 /* ChatViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4D291618D6C62BA7B7B31CF /* ChatViewModel.swift */; };
 		73A563C74CD5CD6294D77192 /* ZopediaKit in Frameworks */ = {isa = PBXBuildFile; productRef = 9FB37CB3E4E85B974114BFA4 /* ZopediaKit */; };
 		7EFD4EEC053D828EF1EE0F86 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 05CD0AD17078E74F3A66DBE9 /* PrivacyInfo.xcprivacy */; };
@@ -54,6 +56,7 @@
 		36E94008B3A6BAE0CA077B15 /* WikiReaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WikiReaderView.swift; sourceTree = "<group>"; };
 		36EF00A03EBE45F0E8591BCA /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		3887CA41B5743E612057CDDF /* ChatOptionsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatOptionsStore.swift; sourceTree = "<group>"; };
+		4355690C4C4294C7CEC948B7 /* TouchActionButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TouchActionButton.swift; sourceTree = "<group>"; };
 		4CF05FDB31660401750B150C /* ToolCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolCardView.swift; sourceTree = "<group>"; };
 		5164D48E1EF03AA46F06FC50 /* MarkdownTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownTheme.swift; sourceTree = "<group>"; };
 		530C9E38A4405E87B3C08E36 /* ChatHistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatHistoryView.swift; sourceTree = "<group>"; };
@@ -67,6 +70,7 @@
 		85C6E2D563A6CF6C91FB309B /* ComposerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerView.swift; sourceTree = "<group>"; };
 		8C43FE32802C02EB62B84DEC /* WikiUploadView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WikiUploadView.swift; sourceTree = "<group>"; };
 		8E42C9D84B729E51B62EC521 /* ChatStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatStore.swift; sourceTree = "<group>"; };
+		913F302A9151837B7865A904 /* ZopediaLogo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZopediaLogo.swift; sourceTree = "<group>"; };
 		AE990AF702B9C94B39BD5C7A /* MaintenanceSchedulesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaintenanceSchedulesView.swift; sourceTree = "<group>"; };
 		BEB40652EF37B896EF650DE1 /* WikiEnvView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WikiEnvView.swift; sourceTree = "<group>"; };
 		BF6C9974E79834EA05657EE5 /* AttachmentProcessor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttachmentProcessor.swift; sourceTree = "<group>"; };
@@ -101,6 +105,8 @@
 			children = (
 				5164D48E1EF03AA46F06FC50 /* MarkdownTheme.swift */,
 				FE1BD8C1C3DCCE7D4131AFD4 /* ToolPresentation.swift */,
+				4355690C4C4294C7CEC948B7 /* TouchActionButton.swift */,
+				913F302A9151837B7865A904 /* ZopediaLogo.swift */,
 				615CD624E52DC0B42D2757F2 /* ZTheme.swift */,
 			);
 			path = Theme;
@@ -354,12 +360,14 @@
 				E4BCAF540CB88FF8016F00B3 /* ToolCardView.swift in Sources */,
 				141A15E3689F9D219A4251FF /* ToolPresentation.swift in Sources */,
 				81B362F95BB225B22B796DB1 /* ToolStatusPill.swift in Sources */,
+				34D6FCE058EE6EEA71108936 /* TouchActionButton.swift in Sources */,
 				D88760B420024C86F4A98F52 /* WikiEnvView.swift in Sources */,
 				F74F7DB54FEE0EB14BB3E9A2 /* WikiHomeView.swift in Sources */,
 				B521327ED1E5CEF16E72BB8D /* WikiReaderView.swift in Sources */,
 				F3F0A75592CC076152E830FF /* WikiUploadView.swift in Sources */,
 				1FC72A3EEF12AB43A3F1744C /* ZTheme.swift in Sources */,
 				C8FEDD5A21420290C9CDC3A0 /* ZopediaApp.swift in Sources */,
+				66CA623C904E819C67C63DA4 /* ZopediaLogo.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

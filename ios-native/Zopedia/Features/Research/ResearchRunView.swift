@@ -57,7 +57,7 @@ struct ResearchRunView: View {
                 }
 
                 if !model.isTerminal {
-                    Text("Keep the app open. Leaving this screen or backgrounding the app can cancel the run on the server.")
+                    Text("Keep the app open while a run is active. Switching tabs is fine, but backgrounding the app can cancel the run on the server.")
                         .font(.caption)
                         .foregroundStyle(ZTheme.mutedForeground)
                 }
@@ -158,6 +158,7 @@ struct ResearchRunView: View {
                     Text("Approve \(model.selectedURLs.count)")
                 }
                 .buttonStyle(.borderedProminent)
+                .controlSize(.large)
                 .tint(ZTheme.primary)
                 .disabled(isSubmitting)
 
@@ -169,6 +170,7 @@ struct ResearchRunView: View {
                     }
                 }
                 .buttonStyle(.bordered)
+                .controlSize(.large)
                 .disabled(isSubmitting)
             }
         }
@@ -259,7 +261,6 @@ struct ResearchRunView: View {
             } else {
                 Markdown(WikiLinkPreprocessor.preprocess(model.report))
                     .markdownTheme(.zopedia)
-                    .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
