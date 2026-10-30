@@ -55,6 +55,10 @@ class WikiIngestor:
         self.raw_dir.mkdir(parents = True, exist_ok = True)
         self._recent_ingest_metadata: Dict[str, Dict[str, Any]] = {}
         self._state_lock = threading.Lock()
+        # Serialize whole raw batches. The watcher, chat route, and durable
+        # queue can all trigger at once; without this, two first-time batches
+        # can both claim a file while its source page does not exist yet.
+        self._batch_lock = threading.Lock()
 
     _SKIPPED_LOCAL_FILENAMES = {".ds_store", "thumbs.db"}
     _FALLBACK_SUPPORTED_SUFFIXES = {
@@ -446,6 +450,17 @@ class WikiIngestor:
             return None
 
     def ingest_pending_raw_files(
+        self,
+        max_files: int = 8,
+        contributor: Optional[str] = None,
+    ) -> List[Dict[str, str]]:
+        """Ingest pending raw files, one batch at a time across all callers."""
+        with self._batch_lock:
+            return self._ingest_pending_raw_files_unlocked(
+                max_files=max_files, contributor=contributor
+            )
+
+    def _ingest_pending_raw_files_unlocked(
         self,
         max_files: int = 8,
         contributor: Optional[str] = None,
