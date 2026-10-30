@@ -43,7 +43,9 @@ final class WikiUploadMonitor {
                 do {
                     let response = try await attachments.uploadFiles(files)
                     if !response.uploaded.isEmpty {
-                        messages.append("Added \(response.uploaded.count) file(s) to the wiki.")
+                        messages.append(
+                            "Uploaded \(response.uploaded.count) file(s). Ingestion continues on the server."
+                        )
                     }
                     failures.append(contentsOf: response.failed.map {
                         "\($0.filename): \($0.reason)"
@@ -59,7 +61,7 @@ final class WikiUploadMonitor {
                     if response.status == "already_ingested" {
                         messages.append("That URL was already ingested.")
                     } else {
-                        messages.append("Queued the URL for ingestion.")
+                        messages.append("Queued the URL. Ingestion continues on the server.")
                     }
                 } catch {
                     failures.append(Self.message(for: error))

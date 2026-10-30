@@ -218,7 +218,11 @@ async def lifespan(app: FastAPI):
         except Exception as exc:
             logger.warning("Auth bootstrap failed: %s", exc)
 
-    # Start wiki watcher
+    # Start the wiki watcher and the durable ingest worker. The worker is
+    # started independently of the watcher: ingestion must not depend on
+    # watchdog being available or on the watcher starting successfully.
+    app.state.wiki_watcher = None
+    app.state.ingest_worker = None
     try:
         from core.wiki.manager import WikiManager
         from core.wiki.ingestor import WikiIngestor
@@ -236,6 +240,8 @@ async def lifespan(app: FastAPI):
         vault_root = _WIKI_VAULT
         manager = WikiManager.create(vault_root, wiki_llm_fn)
         ingestor = WikiIngestor(manager, vault_root / "raw")
+        app.state.wiki_manager = manager
+        app.state.wiki_ingestor = ingestor
 
         # Ensure wiki indices are up to date on startup
         try:
@@ -245,31 +251,49 @@ async def lifespan(app: FastAPI):
             logger.warning("Wiki index rebuild on startup failed: %s", exc)
 
         if _WIKI_WATCHER_ENABLED:
-            import threading
+            try:
+                import threading
 
-            watcher = WikiIngestionWatcher(
-                ingestor=ingestor,
-                raw_dir=vault_root / "raw",
-                contributor="Zopedia",
-                auto_analyze=_WIKI_AUTO_QUERY_ON_INGEST,
-                lint_every=_WIKI_AUTO_LINT_EVERY,
-                llm_available_fn=llm_available,
-                analyze_chat_history=_WIKI_AUTO_QUERY_CHAT_HISTORY,
-            )
-            watcher_thread = threading.Thread(target=watcher.start, daemon=True)
-            watcher_thread.start()
-            app.state.wiki_watcher = watcher
-            app.state.wiki_watcher_thread = watcher_thread
-            logger.info("Wiki watcher started on %s/raw", vault_root)
+                watcher = WikiIngestionWatcher(
+                    ingestor=ingestor,
+                    raw_dir=vault_root / "raw",
+                    contributor="Zopedia",
+                    auto_analyze=_WIKI_AUTO_QUERY_ON_INGEST,
+                    lint_every=_WIKI_AUTO_LINT_EVERY,
+                    llm_available_fn=llm_available,
+                    analyze_chat_history=_WIKI_AUTO_QUERY_CHAT_HISTORY,
+                )
+                watcher_thread = threading.Thread(target=watcher.start, daemon=True)
+                watcher_thread.start()
+                app.state.wiki_watcher = watcher
+                app.state.wiki_watcher_thread = watcher_thread
+                logger.info("Wiki watcher started on %s/raw", vault_root)
+            except Exception as exc:
+                logger.warning("Wiki watcher startup failed: %s", exc)
+                app.state.wiki_watcher = None
         else:
-            app.state.wiki_watcher = None
             logger.info("Wiki watcher disabled.")
 
-        app.state.wiki_manager = manager
-        app.state.wiki_ingestor = ingestor
+        # Durable server-side ingestion. This runs even when the watcher is
+        # disabled, so an upload continues after the client disconnects or the
+        # phone is turned off, and resumes after a server restart.
+        try:
+            import ingest_queue
+
+            worker = ingest_queue.IngestWorker(
+                ingest_queue.build_processor(
+                    lambda: getattr(app.state, "wiki_ingestor", None)
+                )
+            )
+            worker.start()
+            app.state.ingest_worker = worker
+        except Exception as exc:
+            logger.warning("Ingest queue worker startup failed: %s", exc)
+            app.state.ingest_worker = None
     except Exception as exc:
-        logger.warning("Wiki watcher startup failed: %s", exc)
+        logger.warning("Wiki initialization failed: %s", exc)
         app.state.wiki_watcher = None
+        app.state.ingest_worker = None
 
     # Wire auth dependency
     app.state.get_current_subject = _get_current_subject
@@ -369,6 +393,13 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     logger.info("Shutting down Zopedia...")
+    ingest_worker = getattr(app.state, "ingest_worker", None)
+    if ingest_worker:
+        try:
+            ingest_worker.stop()
+            logger.info("Ingest queue worker stopped.")
+        except Exception as exc:
+            logger.warning("Error stopping ingest queue worker: %s", exc)
     watcher = getattr(app.state, "wiki_watcher", None)
     if watcher:
         try:
@@ -681,6 +712,21 @@ async def upload_file(request: Request):
                 uploaded.append(str(dest.relative_to(_WIKI_VAULT)))
             except Exception as exc:
                 failed.append({"filename": file.filename or field_name, "reason": str(exc)})
+
+    # Queue server-side ingestion now; the request does not wait for it.
+    if uploaded:
+        try:
+            import ingest_queue
+
+            for relative_path in uploaded:
+                ingest_queue.enqueue("raw", str(_WIKI_VAULT / relative_path))
+        except Exception as exc:
+            logger.exception("Upload: failed to queue ingestion")
+            for relative_path in uploaded:
+                failed.append({
+                    "filename": relative_path,
+                    "reason": f"saved but ingestion could not be queued: {exc}",
+                })
 
     logger.info("Upload: %d uploaded, %d failed", len(uploaded), len(failed))
     return {"status": "ok", "uploaded": uploaded, "failed": failed}

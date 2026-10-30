@@ -710,13 +710,19 @@ async def extract_pdf_text(
 
 @router.post("/wiki/ingest", response_model=WikiIngestResponse)
 async def wiki_ingest(payload: WikiIngestRequest, current_subject: str = Depends(_require_valid_subject_dep)):
-    _, ingestor = get_wiki_components()
+    """Queue ingestion and return immediately.
+
+    The durable worker in ``ingest_queue`` performs the download, parsing and
+    wiki analysis on the server, so it continues after the client disconnects
+    or the phone is turned off.
+    """
+    import ingest_queue
+
     if payload.source_path:
         source_str = payload.source_path.strip()
-        # URLs are passed through directly — the ingestor downloads them via graphify
         if source_str.startswith("http://") or source_str.startswith("https://"):
-            # Check global URL dedup before ingesting
-            from periodic_store import is_url_globally_ingested, mark_url_globally_ingested
+            from periodic_store import is_url_globally_ingested
+
             existing_page = is_url_globally_ingested(source_str)
             if existing_page:
                 return WikiIngestResponse(
@@ -728,33 +734,58 @@ async def wiki_ingest(payload: WikiIngestRequest, current_subject: str = Depends
                         "message": f"This URL was already ingested as [[{existing_page}]]",
                     }],
                 )
-            result = await asyncio.to_thread(
-                ingestor.ingest_file, Path(source_str), contributor="Zopedia"
+            try:
+                job_id = ingest_queue.enqueue("url", source_str)
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Could not queue URL ingestion: {exc}",
+                )
+            return WikiIngestResponse(
+                status="queued",
+                processed_files=0,
+                results=[{
+                    "source_path": source_str,
+                    "job_id": job_id,
+                    "message": "Queued for background ingestion",
+                }],
             )
-            if not result:
-                raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to ingest URL: {source_str}")
-            # Record for future dedup (updates the row first written by
-            # _ingest_remote_source with the actual wiki source_page).
-            metadata = ingestor.pop_recent_ingest_metadata(Path(source_str)) or {}
-            source_page = str(metadata.get("source_page", "") or "")
-            mark_url_globally_ingested(source_str, source_page)
-            return WikiIngestResponse(status="ok", processed_files=1, results=[{"source_path": source_str, "result": result}])
 
         source_path = Path(source_str).expanduser()
         if not source_path.exists() or not source_path.is_file():
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"File not found: {source_path}")
-        result = await asyncio.to_thread(
-            ingestor.ingest_file, source_path, contributor="Zopedia"
+        try:
+            job_id = ingest_queue.enqueue("file", str(source_path))
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Could not queue file ingestion: {exc}",
+            )
+        return WikiIngestResponse(
+            status="queued",
+            processed_files=0,
+            results=[{
+                "source_path": str(source_path),
+                "job_id": job_id,
+                "message": "Queued for background ingestion",
+            }],
         )
-        if not result:
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to ingest file: {source_path}")
-        return WikiIngestResponse(status="ok", processed_files=1, results=[{"source_path": str(source_path), "result": result}])
-    results = await asyncio.to_thread(
-        _ingest_pending_raw_files,
-        max_files=payload.max_pending_raw_files,
-        respect_interval_gate=False,
+
+    try:
+        job_id = ingest_queue.enqueue("raw", str(_WIKI_VAULT / "raw"), dedup=False)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Could not queue pending raw ingestion: {exc}",
+        )
+    return WikiIngestResponse(
+        status="queued",
+        processed_files=0,
+        results=[{
+            "job_id": job_id,
+            "message": "Queued pending raw files for background ingestion",
+        }],
     )
-    return WikiIngestResponse(status="ok", processed_files=len(results), results=results)
 
 
 # ── Wiki Enrich ────────────────────────────────────────────────────
@@ -1139,13 +1170,19 @@ async def wiki_save_chat_history(payload: WikiChatHistorySaveRequest, current_su
     else:
         relative_path = f"raw/{filename}"
     watcher_enabled = _WIKI_WATCHER_ENABLED
-    ingested = False
+    queued = False
 
-    # Trigger immediate ingestion in the background if watcher is enabled.
-    # The watcher will pick it up on its next cycle regardless, so we
-    # return the HTTP response immediately rather than blocking the UI
-    # for 10-60s while the LLM extraction and wiki page creation runs.
-    if watcher_enabled:
+    # Queue durable server-side ingestion. The queue survives client
+    # disconnects and server restarts, unlike a request-scoped task.
+    try:
+        import ingest_queue
+
+        ingest_queue.enqueue("raw", str(file_path))
+        queued = True
+    except Exception as exc:
+        logger.warning("Failed to queue chat history ingestion: %s", exc)
+
+    if not queued and watcher_enabled:
         async def _ingest_in_background():
             try:
                 _, ingestor = get_wiki_components()
@@ -1163,7 +1200,7 @@ async def wiki_save_chat_history(payload: WikiChatHistorySaveRequest, current_su
         relative_path=relative_path,
         message_count=len(payload.messages),
         watcher_enabled=watcher_enabled,
-        ingested_immediately=watcher_enabled,  # optimistically true — runs in background
+        ingested_immediately=queued,
     )
 
 

@@ -339,8 +339,29 @@ class WikiIngestor:
         key = self._ingest_metadata_key(source)
         return self._recent_ingest_metadata.pop(key, None)
 
+    def is_local_source_pending(self, file_path: Path | str) -> bool:
+        """True when a local raw file still needs (or failed) ingestion.
+
+        ``ingest_pending_raw_files`` reverts the hash on failure, so a caller
+        can use this after a batch to decide whether to retry the source.
+        """
+        resolved = Path(file_path).expanduser().resolve()
+        if (
+            not resolved.exists()
+            or self.should_skip_local_file(resolved)
+            or not self._is_supported_local_file(resolved)
+        ):
+            return False
+
+        with self._state_lock:
+            state = self._load_ingest_state()
+        current_hash = self._compute_file_hash(resolved)
+        if current_hash is None:
+            return False
+        return state.get(str(resolved)) != current_hash
+
     def ingest_file(
-        self, file_path: Path, contributor: Optional[str] = None
+        self, file_path: Path | str, contributor: Optional[str] = None
     ) -> Optional[str]:
         """
         Ingest a single file into the wiki.
@@ -412,7 +433,7 @@ class WikiIngestor:
 
             logger.info(
                 "Successfully ingested %s into wiki (mode=%s, content_chars=%s, standard_limit_chars=%s). Result: %s",
-                file_path.name,
+                Path(file_path).name,
                 ingest_mode,
                 content_chars,
                 source_limit_chars,
