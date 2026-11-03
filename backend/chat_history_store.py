@@ -50,6 +50,7 @@ def _get_connection() -> sqlite3.Connection:
             role TEXT NOT NULL,
             content TEXT,
             reasoning_content TEXT,
+            subtype TEXT,
             parent_id TEXT,
             created_at TEXT NOT NULL,
             PRIMARY KEY (id, username),
@@ -57,6 +58,12 @@ def _get_connection() -> sqlite3.Connection:
         )
         """
     )
+    # Older databases predate compaction boundaries; add the column in place.
+    message_columns = {
+        row["name"] for row in conn.execute("PRAGMA table_info(chat_messages)")
+    }
+    if "subtype" not in message_columns:
+        conn.execute("ALTER TABLE chat_messages ADD COLUMN subtype TEXT")
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_chat_threads_username ON chat_threads(username)"
     )
@@ -122,7 +129,7 @@ def get_thread_messages(thread_id: str, username: str) -> list[dict]:
     conn = _get_connection()
     try:
         cur = conn.execute(
-            "SELECT id, thread_id, role, content, reasoning_content, parent_id, created_at FROM chat_messages WHERE thread_id = ? AND username = ? ORDER BY created_at ASC",
+            "SELECT id, thread_id, role, content, reasoning_content, subtype, parent_id, created_at FROM chat_messages WHERE thread_id = ? AND username = ? ORDER BY created_at ASC",
             (thread_id, username),
         )
         return [dict(row) for row in cur.fetchall()]
@@ -164,8 +171,8 @@ def upsert_thread(
         for msg in messages:
             conn.execute(
                 """
-                INSERT INTO chat_messages (id, thread_id, username, role, content, reasoning_content, parent_id, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO chat_messages (id, thread_id, username, role, content, reasoning_content, subtype, parent_id, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     msg.get("id", ""),
@@ -174,6 +181,7 @@ def upsert_thread(
                     msg.get("role", ""),
                     _serialize_content(msg.get("content")),
                     msg.get("reasoning_content"),
+                    msg.get("subtype"),
                     msg.get("parent_id"),
                     msg.get("created_at", ""),
                 ),
@@ -216,8 +224,8 @@ def append_thread_messages(
         for msg in messages:
             cur = conn.execute(
                 """
-                INSERT OR IGNORE INTO chat_messages (id, thread_id, username, role, content, reasoning_content, parent_id, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT OR IGNORE INTO chat_messages (id, thread_id, username, role, content, reasoning_content, subtype, parent_id, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     msg.get("id", ""),
@@ -226,6 +234,7 @@ def append_thread_messages(
                     msg.get("role", ""),
                     _serialize_content(msg.get("content")),
                     msg.get("reasoning_content"),
+                    msg.get("subtype"),
                     msg.get("parent_id"),
                     msg.get("created_at", ""),
                 ),
