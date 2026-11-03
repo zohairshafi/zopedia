@@ -64,11 +64,12 @@ final class ChatStreamAssemblerTests: XCTestCase {
         guard case .parts(let parts) = message.content else {
             return XCTFail("expected parts")
         }
-        XCTAssertEqual(parts.count, 2)
-        XCTAssertEqual(parts[0], .tool(ToolCallPart(
+        XCTAssertEqual(parts.count, 3)
+        XCTAssertEqual(parts[0], .reasoning("why"))
+        XCTAssertEqual(parts[1], .tool(ToolCallPart(
             toolCallID: "c1", toolName: "t", args: .null, result: "r"
         )))
-        XCTAssertEqual(parts[1], .text("answer"))
+        XCTAssertEqual(parts[2], .text("answer"))
         XCTAssertEqual(message.visibleText, "answer")
     }
 
@@ -96,15 +97,55 @@ final class ChatStreamAssemblerTests: XCTestCase {
         XCTAssertEqual(assembler.text, "Before.After.")
     }
 
-    func testReasoningDeltasDoNotBreakTextRuns() {
+    func testReasoningStaysInStreamOrder() {
         var assembler = ChatStreamAssembler()
         assembler.apply(.textDelta("one"))
         assembler.apply(.reasoningDelta("why"))
         assembler.apply(.textDelta("two"))
 
-        XCTAssertEqual(assembler.parts.count, 1)
+        XCTAssertEqual(assembler.parts.count, 3)
+        XCTAssertEqual(assembler.parts[0], .text("one"))
+        XCTAssertEqual(assembler.parts[1], .reasoning("why"))
+        XCTAssertEqual(assembler.parts[2], .text("two"))
         XCTAssertEqual(assembler.text, "onetwo")
         XCTAssertEqual(assembler.reasoning, "why")
+    }
+
+    func testReasoningBetweenToolCallsKeepsOrder() {
+        var assembler = ChatStreamAssembler()
+        assembler.apply(.toolStart(ToolStart(name: "search_wiki", callID: "c1", arguments: .null)))
+        assembler.apply(.reasoningDelta("checking"))
+        assembler.apply(.toolEnd(ToolEnd(name: "search_wiki", callID: "c1", result: "ok")))
+        assembler.apply(.textDelta("answer"))
+
+        let message = assembler.message(id: "m1", parentID: nil, createdAt: Date())
+        guard case .parts(let parts) = message.content else {
+            return XCTFail("expected parts")
+        }
+        XCTAssertEqual(parts.count, 3)
+        if case .tool = parts[0] {} else { XCTFail("tool first") }
+        XCTAssertEqual(parts[1], .reasoning("checking"))
+        XCTAssertEqual(parts[2], .text("answer"))
+    }
+
+    func testServerContentDropsReasoningParts() {
+        var assembler = ChatStreamAssembler()
+        assembler.apply(.reasoningDelta("why"))
+        assembler.apply(.toolStart(ToolStart(name: "t", callID: "c1", arguments: .null)))
+        assembler.apply(.textDelta("answer"))
+
+        let message = assembler.message(id: "m1", parentID: nil, createdAt: Date())
+        let payload = MessagePayload(message: message)
+
+        XCTAssertEqual(message.reasoningContent, "why")
+        XCTAssertEqual(payload.reasoningContent, "why")
+        guard case .parts(let parts) = payload.content else {
+            return XCTFail("expected parts")
+        }
+        XCTAssertFalse(parts.contains { part in
+            if case .reasoning = part { return true }
+            return false
+        })
     }
 
     func testErrorAndDoneFlags() {

@@ -71,6 +71,31 @@ public struct ChatService: Sendable {
         return response.title
     }
 
+    /// Summarize older messages server-side. The caller inserts a `compact`
+    /// boundary message so later requests send only the summary plus recent
+    /// turns as LLM context.
+    public func compactThread(
+        id: String,
+        messages: [ChatMessage],
+        maxContextTokens: Int = 128_000
+    ) async throws -> CompactThreadResponse {
+        try await client.post(
+            "v1/api/chat/threads/\(id)/compact",
+            body: CompactBody(
+                messages: messages.map {
+                    CompactMessage(
+                        role: $0.role.rawValue,
+                        content: $0.visibleText,
+                        subtype: $0.subtype,
+                        reasoningContent: $0.reasoningContent
+                    )
+                },
+                maxContextTokens: maxContextTokens
+            ),
+            timeout: 900
+        )
+    }
+
     public func answerQuestion(
         sessionID: String,
         toolCallID: String,
@@ -95,6 +120,42 @@ public struct ChatService: Sendable {
                 decision: approve ? "approve" : "reject"
             )
         )
+    }
+}
+
+public struct CompactThreadResponse: Decodable, Sendable {
+    public let summary: String
+    public let compactedMessageCount: Int
+    public let keptMessageCount: Int
+
+    enum CodingKeys: String, CodingKey {
+        case summary
+        case compactedMessageCount = "compacted_message_count"
+        case keptMessageCount = "kept_message_count"
+    }
+}
+
+private struct CompactBody: Encodable {
+    let messages: [CompactMessage]
+    let maxContextTokens: Int
+
+    enum CodingKeys: String, CodingKey {
+        case messages
+        case maxContextTokens = "max_context_tokens"
+    }
+}
+
+private struct CompactMessage: Encodable {
+    let role: String
+    let content: String
+    let subtype: String?
+    let reasoningContent: String?
+
+    enum CodingKeys: String, CodingKey {
+        case role
+        case content
+        case subtype
+        case reasoningContent = "reasoning_content"
     }
 }
 

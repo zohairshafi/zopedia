@@ -13,14 +13,42 @@ struct MessageRow: View {
     @State private var showReasoning = false
 
     var body: some View {
-        switch message.role {
-        case .user:
-            userBubble
-        case .assistant:
-            assistantBlock
-        case .system, .tool:
-            systemBlock
+        if message.subtype == "compact" {
+            compactBlock
+        } else {
+            switch message.role {
+            case .user:
+                userBubble
+            case .assistant:
+                assistantBlock
+            case .system, .tool:
+                systemBlock
+            }
         }
+    }
+
+    private var hasReasoningParts: Bool {
+        parts.contains { part in
+            if case .reasoning = part { return true }
+            return false
+        }
+    }
+
+    private var compactBlock: some View {
+        DisclosureGroup {
+            Text(message.visibleText)
+                .font(.callout)
+                .foregroundStyle(ZTheme.mutedForeground)
+                .textSelection(.enabled)
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(ZTheme.muted, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        } label: {
+            Label("Conversation compacted", systemImage: "rectangle.compress.vertical")
+                .font(.caption)
+                .foregroundStyle(ZTheme.mutedForeground)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var parts: [MessagePart] {
@@ -93,26 +121,13 @@ struct MessageRow: View {
 
     private var assistantBlock: some View {
         VStack(alignment: .leading, spacing: 10) {
-            if let reasoning = message.reasoningContent, !reasoning.isEmpty {
-                DisclosureGroup(isExpanded: $showReasoning) {
-                    Text(reasoning)
-                        .font(.callout)
-                        .foregroundStyle(ZTheme.mutedForeground)
-                        .textSelection(.enabled)
-                        .padding(10)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(ZTheme.muted, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                } label: {
-                    Label(
-                        isStreaming ? "Thinking…" : "Thought",
-                        systemImage: "lightbulb"
-                    )
-                    .font(.caption)
-                    .foregroundStyle(ZTheme.mutedForeground)
-                }
-                .onAppear {
-                    if isStreaming { showReasoning = true }
-                }
+            // Older/server-provided messages carry reasoning outside the parts
+            // list. Render that once above the answer; streamed messages carry
+            // reasoning parts so it stays in order with tool calls.
+            if !hasReasoningParts,
+               let reasoning = message.reasoningContent,
+               !reasoning.isEmpty {
+                reasoningBlock(reasoning)
             }
 
             ForEach(Array(parts.enumerated()), id: \.offset) { _, part in
@@ -126,7 +141,9 @@ struct MessageRow: View {
                         onAnswer: onAnswer,
                         onDecision: onDecision
                     )
-                case .reasoning, .unknown:
+                case .reasoning(let text):
+                    reasoningBlock(text)
+                case .unknown:
                     EmptyView()
                 }
             }
@@ -138,6 +155,28 @@ struct MessageRow: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func reasoningBlock(_ reasoning: String) -> some View {
+        DisclosureGroup(isExpanded: $showReasoning) {
+            Text(reasoning)
+                .font(.callout)
+                .foregroundStyle(ZTheme.mutedForeground)
+                .textSelection(.enabled)
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(ZTheme.muted, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        } label: {
+            Label(
+                isStreaming ? "Thinking…" : "Thought",
+                systemImage: "lightbulb"
+            )
+            .font(.caption)
+            .foregroundStyle(ZTheme.mutedForeground)
+        }
+        .onAppear {
+            if isStreaming { showReasoning = true }
+        }
     }
 
     @ViewBuilder

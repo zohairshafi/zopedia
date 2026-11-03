@@ -23,6 +23,22 @@ final class ChatRequestTests: XCTestCase {
         XCTAssertNil(object["model"])
     }
 
+    func testOutgoingMessageCarriesCompactSubtype() throws {
+        let request = ChatRequest(messages: [
+            OutgoingMessage(
+                role: "system",
+                content: "summary",
+                subtype: "compact"
+            ),
+        ])
+        let data = try JSONEncoder().encode(request)
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        let messages = try XCTUnwrap(object["messages"] as? [[String: Any]])
+        XCTAssertEqual(messages.first?["subtype"] as? String, "compact")
+    }
+
     func testImageIsIncludedWhenPresent() throws {
         let request = ChatRequest(
             messages: [OutgoingMessage(role: "user", content: "what is this")],

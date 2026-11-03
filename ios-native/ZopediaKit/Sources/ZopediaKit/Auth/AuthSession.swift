@@ -79,8 +79,13 @@ public actor AuthSession {
 
         do {
             return try await task.value
-        } catch {
+        } catch APIError.unauthorized {
+            // The refresh token itself was rejected — the session is gone.
             signOut()
+            throw APIError.unauthorized
+        } catch {
+            // A transport or server hiccup must not discard a still-valid
+            // refresh token; keep it and retry on the next request.
             throw error
         }
     }

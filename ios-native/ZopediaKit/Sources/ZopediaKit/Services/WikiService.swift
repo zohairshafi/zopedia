@@ -41,6 +41,75 @@ public struct WikiService: Sendable {
             timeout: 1800
         )
     }
+
+    /// Export a transcript to the wiki raw folder. The server writes the file
+    /// and enqueues ingestion durably, so the request only needs to complete.
+    public func saveChatHistory(
+        threadID: String,
+        title: String?,
+        messages: [ChatMessage]
+    ) async throws -> WikiChatHistorySaveResponse {
+        try await client.post(
+            "api/inference/wiki/chat-history/save",
+            body: WikiChatHistoryBody(
+                threadID: threadID,
+                threadTitle: title,
+                messages: messages.map { message in
+                    WikiChatHistoryMessagePayload(
+                        role: message.role.rawValue,
+                        content: message.visibleText,
+                        reasoningContent: message.reasoningContent
+                    )
+                }
+            )
+        )
+    }
+}
+
+public struct WikiChatHistorySaveResponse: Decodable, Sendable {
+    public let status: String
+    public let operation: String
+    public let threadID: String
+    public let filePath: String
+    public let relativePath: String
+    public let messageCount: Int
+    public let watcherEnabled: Bool
+    public let ingestedImmediately: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case status
+        case operation
+        case threadID = "thread_id"
+        case filePath = "file_path"
+        case relativePath = "relative_path"
+        case messageCount = "message_count"
+        case watcherEnabled = "watcher_enabled"
+        case ingestedImmediately = "ingested_immediately"
+    }
+}
+
+private struct WikiChatHistoryBody: Encodable {
+    let threadID: String
+    let threadTitle: String?
+    let messages: [WikiChatHistoryMessagePayload]
+
+    enum CodingKeys: String, CodingKey {
+        case threadID = "thread_id"
+        case threadTitle = "thread_title"
+        case messages
+    }
+}
+
+private struct WikiChatHistoryMessagePayload: Encodable {
+    let role: String
+    let content: String
+    let reasoningContent: String?
+
+    enum CodingKeys: String, CodingKey {
+        case role
+        case content
+        case reasoningContent = "reasoning_content"
+    }
 }
 
 private struct WikiQueryBody: Encodable {

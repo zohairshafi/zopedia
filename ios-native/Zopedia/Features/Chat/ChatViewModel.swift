@@ -24,6 +24,7 @@ final class ChatViewModel {
     private(set) var toolStatus: String?
     private(set) var toolStatusSince: Date?
     private(set) var isStreaming = false
+    private(set) var isCompacting = false
     private(set) var isLoading = true
     private(set) var errorMessage: String?
     private(set) var title: String
@@ -204,7 +205,11 @@ final class ChatViewModel {
         }
 
         let outgoing = messages.map {
-            OutgoingMessage(role: $0.role.rawValue, content: $0.visibleText)
+            OutgoingMessage(
+                role: $0.role.rawValue,
+                content: $0.visibleText,
+                subtype: $0.subtype
+            )
         }
         startStreaming(
             client: client,
@@ -227,7 +232,11 @@ final class ChatViewModel {
         }
 
         let outgoing = messages[...parentIndex].map {
-            OutgoingMessage(role: $0.role.rawValue, content: $0.visibleText)
+            OutgoingMessage(
+                role: $0.role.rawValue,
+                content: $0.visibleText,
+                subtype: $0.subtype
+            )
         }
         currentUserMessageID = parentID
         startStreaming(
@@ -497,12 +506,22 @@ final class ChatViewModel {
         guard !isStreaming else { return }
 
         if logging {
-            guard let chat = app.chat else { return }
+            guard let chat = app.chat, let wiki = app.wiki else {
+                errorMessage = "Not connected to a server."
+                return
+            }
             app.chatOptions.setLogging(true, threadID: thread.id)
             guard !allMessages.isEmpty else { return }
             do {
                 _ = try await chat.saveThread(
                     id: thread.id,
+                    title: title,
+                    messages: allMessages
+                )
+                // The wiki endpoint writes the transcript and enqueues durable
+                // server-side ingestion before returning.
+                _ = try await wiki.saveChatHistory(
+                    threadID: thread.id,
                     title: title,
                     messages: allMessages
                 )
@@ -519,6 +538,80 @@ final class ChatViewModel {
         } else {
             app.chatOptions.setLogging(false, threadID: thread.id)
         }
+    }
+
+    /// Summarize older messages and insert a `compact` boundary. The server
+    /// replaces everything before the boundary with the summary when building
+    /// the next LLM request, while the UI keeps the full transcript.
+    func compact() async {
+        guard !isStreaming,
+              !isCompacting,
+              let chat = app.chat,
+              messages.count > 2 else { return }
+
+        isCompacting = true
+        errorMessage = nil
+        defer { isCompacting = false }
+
+        do {
+            let response = try await chat.compactThread(id: thread.id, messages: messages)
+            let boundary = insertCompactBoundary(
+                summary: response.summary,
+                keptCount: response.keptMessageCount
+            )
+            guard let boundary else { return }
+            await app.cache?.saveThread(snapshot(messageCount: allMessages.count), messages: allMessages)
+            onThreadUpdated?(snapshot(messageCount: allMessages.count))
+
+            if savesHistory, !isNewThread {
+                do {
+                    _ = try await chat.appendMessages(
+                        threadID: thread.id,
+                        title: nil,
+                        messages: [boundary]
+                    )
+                } catch {
+                    errorMessage = "Compacted here, but the server copy was not updated: \(errorText(error))"
+                }
+            }
+        } catch {
+            errorMessage = errorText(error)
+        }
+    }
+
+    @discardableResult
+    private func insertCompactBoundary(summary: String, keptCount: Int) -> ChatMessage? {
+        guard !summary.isEmpty else { return nil }
+
+        let visible = messages
+        let split = min(max(0, visible.count - max(0, keptCount)), visible.count)
+        let firstKept = split < visible.count ? visible[split] : nil
+        let boundary = ChatMessage(
+            id: "compact-\(UUID().uuidString)",
+            role: .system,
+            content: .text(summary),
+            parentID: firstKept?.parentID,
+            createdAt: Date(),
+            subtype: "compact"
+        )
+
+        if let firstKept,
+           let index = allMessages.firstIndex(where: { $0.id == firstKept.id }) {
+            let oldParent = firstKept.parentID
+            allMessages.insert(boundary, at: index)
+            if let updated = allMessages.firstIndex(where: { $0.id == firstKept.id }) {
+                allMessages[updated].parentID = boundary.id
+            }
+            if let oldParent {
+                selectedBranches[oldParent] = boundary.id
+            }
+            selectedBranches[boundary.id] = firstKept.id
+        } else {
+            allMessages.append(boundary)
+        }
+
+        rebuildVisiblePath()
+        return boundary
     }
 
     private func stopCleanly() {
@@ -619,8 +712,27 @@ final class ChatViewModel {
             if message.localImageName == nil {
                 message.localImageName = local.localImageName
             }
+            if message.subtype == nil {
+                message.subtype = local.subtype
+            }
             if message.reasoningContent == nil {
                 message.reasoningContent = local.reasoningContent
+            }
+
+            // Keep locally ordered reasoning/tool parts when the server copy
+            // carries the same visible text but stored reasoning separately.
+            let localHasReasoningParts: Bool = {
+                guard case .parts(let parts) = local.content else { return false }
+                return parts.contains { part in
+                    if case .reasoning = part { return true }
+                    return false
+                }
+            }()
+            if localHasReasoningParts,
+               local.visibleText == message.visibleText,
+               case .parts = local.content,
+               case .parts = message.content {
+                message.content = local.content
             }
 
             if case .parts(let localParts) = local.content, case .text(let remoteText) = message.content {

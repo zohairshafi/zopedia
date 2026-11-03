@@ -38,10 +38,13 @@ public enum ChatStreamEvent: Equatable, Sendable {
 public struct OutgoingMessage: Encodable, Sendable {
     public var role: String
     public var content: String
+    /// Mirrors `ChatMessage.subtype`; `compact` marks a compaction boundary.
+    public var subtype: String?
 
-    public init(role: String, content: String) {
+    public init(role: String, content: String, subtype: String? = nil) {
         self.role = role
         self.content = content
+        self.subtype = subtype
     }
 }
 

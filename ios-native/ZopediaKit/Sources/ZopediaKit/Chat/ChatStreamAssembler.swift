@@ -35,6 +35,7 @@ public struct ChatStreamAssembler: Sendable {
             appendText(delta)
         case .reasoningDelta(let delta):
             reasoning += delta
+            appendReasoning(delta)
         case .toolStart(let start):
             parts.append(.tool(ToolCallPart(
                 toolCallID: start.callID,
@@ -88,6 +89,14 @@ public struct ChatStreamAssembler: Sendable {
             parts[parts.count - 1] = .text(existing + delta)
         } else {
             parts.append(.text(delta))
+        }
+    }
+
+    private mutating func appendReasoning(_ delta: String) {
+        if case .reasoning(let existing) = parts.last {
+            parts[parts.count - 1] = .reasoning(existing + delta)
+        } else {
+            parts.append(.reasoning(delta))
         }
     }
 

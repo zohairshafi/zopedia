@@ -103,6 +103,26 @@ struct ChatDetailView: View {
                 }
                 .accessibilityLabel("Chat actions")
             }
+
+            ToolbarItem(placement: .topBarTrailing) {
+                if let model {
+                    Button {
+                        Task { await model.compact() }
+                    } label: {
+                        if model.isCompacting {
+                            ProgressView()
+                        } else {
+                            Image(systemName: "rectangle.compress.vertical")
+                        }
+                    }
+                    .disabled(
+                        model.isStreaming
+                            || model.isCompacting
+                            || model.messages.count < 3
+                    )
+                    .accessibilityLabel("Compact chat")
+                }
+            }
         }
         .sheet(item: $exportFile) { file in
             ShareSheet(items: [file.url])

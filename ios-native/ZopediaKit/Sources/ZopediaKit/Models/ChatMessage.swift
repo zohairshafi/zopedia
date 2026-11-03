@@ -150,6 +150,8 @@ public struct ChatMessage: Identifiable, Codable, Hashable, Sendable {
     public var createdAt: Date
     /// Local-only cache filename for an attached image. Never sent to the server.
     public var localImageName: String?
+    /// Marks a synthetic message, e.g. `compact` for a compaction boundary.
+    public var subtype: String?
 
     public init(
         id: String,
@@ -158,7 +160,8 @@ public struct ChatMessage: Identifiable, Codable, Hashable, Sendable {
         reasoningContent: String? = nil,
         parentID: String? = nil,
         createdAt: Date = Date(),
-        localImageName: String? = nil
+        localImageName: String? = nil,
+        subtype: String? = nil
     ) {
         self.id = id
         self.role = role
@@ -167,6 +170,7 @@ public struct ChatMessage: Identifiable, Codable, Hashable, Sendable {
         self.parentID = parentID
         self.createdAt = createdAt
         self.localImageName = localImageName
+        self.subtype = subtype
     }
 
     enum CodingKeys: String, CodingKey {
@@ -177,6 +181,7 @@ public struct ChatMessage: Identifiable, Codable, Hashable, Sendable {
         case parentID = "parent_id"
         case createdAt = "created_at"
         case localImageName
+        case subtype
     }
 
     public init(from decoder: Decoder) throws {
@@ -189,6 +194,20 @@ public struct ChatMessage: Identifiable, Codable, Hashable, Sendable {
         createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt)
             ?? Date(timeIntervalSince1970: 0)
         localImageName = try container.decodeIfPresent(String.self, forKey: .localImageName)
+        subtype = try container.decodeIfPresent(String.self, forKey: .subtype)
+    }
+
+    /// Content sent to the server. Ordered reasoning parts are UI-only; the
+    /// server receives reasoning separately in `reasoning_content`.
+    public var serverContent: MessageContent {
+        guard case .parts(let parts) = content else { return content }
+        let visible = parts.filter { part in
+            if case .reasoning = part { return false }
+            return true
+        }
+        if visible.isEmpty { return .text(visibleText) }
+        if visible.count == 1, case .text(let text) = visible[0] { return .text(text) }
+        return .parts(visible)
     }
 
     /// Visible text across the supported content shapes.
@@ -237,14 +256,16 @@ public struct MessagePayload: Encodable, Sendable {
     public let reasoningContent: String?
     public let parentID: String?
     public let createdAt: String?
+    public let subtype: String?
 
     public init(message: ChatMessage) {
         id = message.id
         role = message.role.rawValue
-        content = message.content
+        content = message.serverContent
         reasoningContent = message.reasoningContent
         parentID = message.parentID
         createdAt = ZopediaDate.string(from: message.createdAt)
+        subtype = message.subtype
     }
 
     enum CodingKeys: String, CodingKey {
@@ -254,5 +275,6 @@ public struct MessagePayload: Encodable, Sendable {
         case reasoningContent = "reasoning_content"
         case parentID = "parent_id"
         case createdAt = "created_at"
+        case subtype
     }
 }
