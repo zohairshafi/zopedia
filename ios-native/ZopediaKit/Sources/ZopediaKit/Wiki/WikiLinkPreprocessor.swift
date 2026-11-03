@@ -7,6 +7,10 @@ import Foundation
 /// URL carrying the resolved vault path.
 public enum WikiLinkPreprocessor {
     private static let wikiLinkPattern = #"\[\[([^\]]+)\]\]"#
+    // The assistant routinely cites pages as inline code (`` `concepts/x.md` ``).
+    // A code span whose entire content is a wiki path is a reference, not code.
+    private static let codeSpanPathPattern = #"`([a-z][\w-]*\/[\w\/-]+\.md)`"#
+    private static let codeSpanAnalysisPattern = #"`(analysis\/\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-[\w-]+)`"#
     private static let pagePathPattern = #"(?<![\[\(`\/])([a-z][\w-]*\/[\w\/-]+\.md)(?![\]\)`])"#
     private static let analysisPathPattern = #"(?<![\[\(`\/])(analysis\/\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-[\w-]+)(?![\]\)`])"#
 
@@ -23,6 +27,16 @@ public enum WikiLinkPreprocessor {
                 : target
             guard !target.isEmpty else { return nil }
             return "[\(label.isEmpty ? target : label)](\(link(for: resolvePath(target))))"
+        }
+
+        result = replacing(result, pattern: codeSpanPathPattern, options: [.caseInsensitive]) { groups in
+            let path = groups[1]
+            return "[\(path)](\(link(for: resolvePath(path))))"
+        }
+
+        result = replacing(result, pattern: codeSpanAnalysisPattern, options: [.caseInsensitive]) { groups in
+            let path = groups[1]
+            return "[\(path)](\(link(for: path + ".md")))"
         }
 
         result = replacing(result, pattern: pagePathPattern, options: [.caseInsensitive]) { groups in

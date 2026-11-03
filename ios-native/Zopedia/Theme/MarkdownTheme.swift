@@ -136,11 +136,11 @@ extension Theme {
                     if configuration.row == 0 {
                         FontWeight(.semibold)
                     }
-                    FontSize(.em(0.88))
+                    FontSize(.em(0.78))
                     ForegroundColor(ZTheme.foreground)
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .thematicBreak {

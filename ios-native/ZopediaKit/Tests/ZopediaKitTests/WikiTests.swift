@@ -42,8 +42,25 @@ final class WikiTests: XCTestCase {
         )
     }
 
-    func testCodeSpanIsNotConverted() {
-        let input = "`concepts/inflation.md`"
+    func testCodeSpanWikiPathBecomesLink() {
+        let output = WikiLinkPreprocessor.preprocess("See `concepts/inflation.md`.")
+        XCTAssertEqual(
+            output,
+            "See [concepts/inflation.md](zopedia://wiki?path=concepts/inflation.md)."
+        )
+    }
+
+    func testCodeSpanAnalysisPathBecomesLink() {
+        let output = WikiLinkPreprocessor.preprocess(
+            "`analysis/2026-05-01-10-00-oil-prices`"
+        )
+        XCTAssertTrue(
+            output.contains("path=analysis/2026-05-01-10-00-oil-prices.md")
+        )
+    }
+
+    func testOrdinaryCodeSpanIsNotConverted() {
+        let input = "Use `foo()` and `return x` here"
         XCTAssertEqual(WikiLinkPreprocessor.preprocess(input), input)
     }
 

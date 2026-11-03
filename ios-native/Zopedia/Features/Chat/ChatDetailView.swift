@@ -82,6 +82,20 @@ struct ChatDetailView: View {
                                 || app.permissions?.canSaveChatHistory == false
                         )
 
+                        Button {
+                            Task { await model.compact() }
+                        } label: {
+                            Label(
+                                model.isCompacting ? "Compacting…" : "Compact Chat",
+                                systemImage: "rectangle.compress.vertical"
+                            )
+                        }
+                        .disabled(
+                            model.isStreaming
+                                || model.isCompacting
+                                || model.messages.count < 3
+                        )
+
                         Divider()
                     }
 
@@ -102,26 +116,6 @@ struct ChatDetailView: View {
                     Image(systemName: "ellipsis.circle")
                 }
                 .accessibilityLabel("Chat actions")
-            }
-
-            ToolbarItem(placement: .topBarTrailing) {
-                if let model {
-                    Button {
-                        Task { await model.compact() }
-                    } label: {
-                        if model.isCompacting {
-                            ProgressView()
-                        } else {
-                            Image(systemName: "rectangle.compress.vertical")
-                        }
-                    }
-                    .disabled(
-                        model.isStreaming
-                            || model.isCompacting
-                            || model.messages.count < 3
-                    )
-                    .accessibilityLabel("Compact chat")
-                }
             }
         }
         .sheet(item: $exportFile) { file in
