@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from pathlib import Path
 from typing import Any, Optional
 
@@ -20,6 +21,7 @@ def _ensure_dir(path: Path) -> Path:
 
 
 DB_PATH = _auth_root() / "chat_history.db"
+_MIGRATION_LOCK = threading.Lock()
 
 
 def _get_connection() -> sqlite3.Connection:
@@ -59,11 +61,24 @@ def _get_connection() -> sqlite3.Connection:
         """
     )
     # Older databases predate compaction boundaries; add the column in place.
+    # Connections are created per call and can race, so re-check under a lock
+    # and tolerate another process winning the ALTER.
     message_columns = {
         row["name"] for row in conn.execute("PRAGMA table_info(chat_messages)")
     }
     if "subtype" not in message_columns:
-        conn.execute("ALTER TABLE chat_messages ADD COLUMN subtype TEXT")
+        with _MIGRATION_LOCK:
+            message_columns = {
+                row["name"]
+                for row in conn.execute("PRAGMA table_info(chat_messages)")
+            }
+            if "subtype" not in message_columns:
+                try:
+                    conn.execute("ALTER TABLE chat_messages ADD COLUMN subtype TEXT")
+                    conn.commit()
+                except sqlite3.OperationalError as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        raise
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_chat_threads_username ON chat_threads(username)"
     )

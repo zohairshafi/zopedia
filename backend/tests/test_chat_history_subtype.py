@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 import sys
+import threading
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -41,9 +42,8 @@ def test_upsert_round_trips_subtype(tmp_path, monkeypatch):
     assert messages[0]["subtype"] == "compact"
 
 
-def test_migration_adds_subtype_to_existing_table(tmp_path, monkeypatch):
-    db_path = tmp_path / "old.db"
-    conn = sqlite3.connect(db_path)
+def make_pre_subtype_db(path: Path) -> None:
+    conn = sqlite3.connect(path)
     conn.execute(
         """
         CREATE TABLE chat_messages (
@@ -62,6 +62,11 @@ def test_migration_adds_subtype_to_existing_table(tmp_path, monkeypatch):
     conn.commit()
     conn.close()
 
+
+def test_migration_adds_subtype_to_existing_table(tmp_path, monkeypatch):
+    db_path = tmp_path / "old.db"
+    make_pre_subtype_db(db_path)
+
     monkeypatch.setattr(store, "DB_PATH", db_path)
     connection = store._get_connection()
     try:
@@ -72,3 +77,27 @@ def test_migration_adds_subtype_to_existing_table(tmp_path, monkeypatch):
         connection.close()
 
     assert "subtype" in columns
+
+
+def test_concurrent_migration_is_safe(tmp_path, monkeypatch):
+    db_path = tmp_path / "old.db"
+    make_pre_subtype_db(db_path)
+    monkeypatch.setattr(store, "DB_PATH", db_path)
+
+    errors: list[Exception] = []
+    barrier = threading.Barrier(8)
+
+    def connect() -> None:
+        barrier.wait()
+        try:
+            store._get_connection().close()
+        except Exception as exc:  # noqa: BLE001 - recorded for the assertion
+            errors.append(exc)
+
+    threads = [threading.Thread(target=connect) for _ in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert errors == []
